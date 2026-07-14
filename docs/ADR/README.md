@@ -11,3 +11,4 @@ cambia: se marcan como `Reemplazada por ADR-XXXX` y se añade una nueva.
 | [ADR-0002](ADR-0002-vocabulario-loading-space-load-unit.md) | Vocabulario de dominio: Loading Space y Load Unit | Aceptada |
 | [ADR-0003](ADR-0003-nucleo-como-sdk-independiente.md) | El núcleo (domain + application) es un SDK sin dependencia de UI | Aceptada |
 | [ADR-0004](ADR-0004-enforcement-de-capas-con-import-linter.md) | Verificación automática de la regla de dependencia con import-linter | Aceptada |
+| [ADR-0005](ADR-0005-inmutabilidad-y-enums-estables.md) | Dataclasses inmutables y enums con valores string estables en el dominio | Aceptada |

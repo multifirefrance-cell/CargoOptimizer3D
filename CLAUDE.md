@@ -62,7 +62,7 @@ completo y justificación en `docs/Architecture.md` y
 paquetes.** Se crean como paquetes de nivel superior, hermanos de
 `domain` (dependiendo únicamente de `domain` y de los motores de fases
 anteriores), únicamente cuando comience su fase de diseño
-correspondiente (fases 2, 3 y 4). No crearlos por adelantado: ver
+correspondiente (fases 2.2, 3 y 4). No crearlos por adelantado: ver
 `docs/Roadmap.md`.
 
 El núcleo (`domain` + `application` + los motores cuando existan) es
@@ -113,16 +113,53 @@ userdata/            # Datos generados por el usuario en tiempo de ejecución. N
 
 ## Fases del proyecto
 
-0. Diseño completo — 1. Arquitectura — 2. Motor geométrico — 3. Motor
-   de restricciones — 4. Motor de optimización — 5. Visualización 3D —
-   6. Interfaz — 7. Persistencia — 8. Reportes — 9. Integración ERP —
-   10. Versión comercial.
+0. Diseño completo — 1. Arquitectura — 2.1. Modelo de dominio puro —
+   2.2. Motor geométrico — 3. Motor de restricciones — 4. Motor de
+   optimización — 5. Visualización 3D — 6. Interfaz — 7. Persistencia
+   — 8. Reportes — 9. Integración ERP — 10. Versión comercial.
 
-Estado actual: **arquitectura congelada** (fin de fase 1, sin motor
-geométrico ni de optimización todavía). No implementar packing 3D,
-reglas de restricciones, visualización 3D, SQLite, Excel, PDF ni
-optimización hasta que se indique explícitamente. Ver `docs/Roadmap.md`
-para el detalle fase a fase.
+La fase 2 original ("Motor geométrico") se dividió en 2.1 (modelo de
+dominio puro) y 2.2 (motor geométrico) para poder completar el modelo
+de dominio sin implementar todavía colisiones ni packing. Ver
+`docs/Roadmap.md`, sección "Nota sobre la numeración de la fase 2".
+
+Estado actual: **modelo de dominio puro completado** (fin de fase 2.1).
+No implementar motor geométrico, detección de colisiones, packing 3D,
+reglas de restricciones, motor de optimización, visualización 3D,
+SQLite, Excel, PDF ni API hasta que se indique explícitamente. Ver
+`docs/Roadmap.md` para el detalle fase a fase.
+
+## Invariantes del modelo de dominio (no romper sin ADR)
+
+Ver `docs/DomainModel.md` para el detalle completo. Resumen que
+cualquier sesión futura debe respetar al tocar `src/cargo_optimizer/domain/`:
+
+- Todas las entidades y value objects son
+  `@dataclass(frozen=True, slots=True)` (ver ADR-0005). No añadir
+  setters ni convertir ninguna a mutable sin un ADR que lo justifique.
+- Los enums de dominio heredan de `enum.StrEnum`; sus valores string
+  son un contrato estable de persistencia/API futura — no renombrarlos
+  sin una migración documentada.
+- Sistema de coordenadas fijo: X = largo, Y = ancho, Z = altura; origen
+  en el suelo, esquina trasera izquierda. Todas las dimensiones > 0;
+  todos los pesos >= 0; ninguna coordenada ni dimensión puede ser NaN
+  o infinita.
+- `LoadUnit.quantity` (paquetes solicitados), `units_per_package`
+  (unidades por paquete) y `total_requested_units` (su producto) son
+  conceptos distintos: no colapsarlos en un único campo.
+- `LoadUnit.weight_kg` (peso bruto del paquete) y
+  `extinguisher_nominal_kg` (carga nominal del agente extintor) son
+  conceptos distintos, no intercambiables.
+- Un `LoadUnit` con `is_extinguisher=False` siempre tiene
+  `extinguisher_agent = not_applicable` y `extinguisher_nominal_kg =
+  None`; con `is_extinguisher=True`, lo contrario. Esta regla está
+  validada en `LoadUnit.__post_init__`, no debe relajarse.
+- Ni `Orientation` ni `Placement` implementan detección de colisiones:
+  esa lógica pertenece exclusivamente al futuro motor geométrico (fase
+  2.2), nunca al modelo de dominio.
+- La regla de horizontalidad obligatoria de extintores (no apilar de
+  canto) es del motor de restricciones (fase 3), no del dominio. El
+  dominio solo deja los campos necesarios preparados.
 
 ## Reglas de trabajo con el asistente
 

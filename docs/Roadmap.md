@@ -8,7 +8,8 @@ fase se adelanta a la anterior.
 |---|---|---|---|
 | 0 | Diseño completo | — | Completada |
 | 1 | Arquitectura | `domain`, `application`, `infrastructure`, `presentation` (estructura, vacíos donde aplique) | **Completada** |
-| 2 | Motor geométrico | `geometry` (nuevo, hermano de `domain`) | Pendiente |
+| 2.1 | Modelo de dominio puro | `domain` (entidades y value objects: `Dimensions3D`, `Orientation`, `LoadingSpace`, `LoadUnit`, `Position3D`, `Placement`, `UnpackedUnit`, `PackingResult`, `CargoProject`) | **Completada** |
+| 2.2 | Motor geométrico (colisiones, packing) | `geometry` (nuevo, hermano de `domain`) | Pendiente |
 | 3 | Motor de restricciones | `rules` (nuevo, hermano de `domain`) | Pendiente |
 | 4 | Motor de optimización | `optimization` (nuevo, hermano de `domain`); primer caso de uso real en `application` | Pendiente |
 | 5 | Visualización 3D | `infrastructure` (adaptador VTK) | Pendiente |
@@ -42,10 +43,23 @@ fase de diseño correspondiente (ver `docs/Architecture.md`, sección
   hermano de `presentation/desktop`, p. ej. `presentation/api/`, sin
   modificar el código de escritorio existente.
 
+## Nota sobre la numeración de la fase 2
+
+La fase 2 original ("Motor geométrico") se dividió en dos entregas:
+**2.1 Modelo de dominio puro** (completada en esta sesión) y **2.2
+Motor geométrico** (colisiones, packing — pendiente). Se optó por esta
+subdivisión, en vez de renumerar en cascada las fases 3-10 ya
+documentadas en `CLAUDE.md` y `docs/Architecture.md`, para no romper
+referencias existentes por un ajuste que es de alcance, no de
+arquitectura.
+
 ## Estado actual
 
-Fin de fase 1: infraestructura y arquitectura congeladas. No se ha
-escrito ninguna línea de lógica de negocio, geometría, reglas,
-optimización, persistencia, exportación ni visualización 3D. La
-siguiente sesión de desarrollo debe empezar por el diseño de la fase 2
-(motor geométrico) antes de escribir código.
+Fin de fase 2.1: modelo de dominio puro completado (`Dimensions3D`,
+`Orientation`, `LoadingSpace`, `LoadUnit`, `Position3D`, `Placement`,
+`UnpackedUnit`, `PackingResult`, `CargoProject`), con 73 pruebas
+unitarias en verde. No se ha escrito ninguna línea de motor geométrico,
+detección de colisiones, reglas de restricción, optimización,
+persistencia, exportación ni visualización 3D. La siguiente sesión de
+desarrollo debe empezar por el diseño de la fase 2.2 (motor geométrico)
+antes de escribir código.

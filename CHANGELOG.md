@@ -4,6 +4,27 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Este proyecto aún no ha alcanzado la versión 1.0; el versionado 0.x
 puede incluir cambios estructurales entre versiones menores.
 
+## [0.3.0] - 2026-07-14
+
+### Added
+
+- Modelo de dominio puro (fase 2.1 del roadmap): `Dimensions3D`,
+  `Orientation`, `OrientationCode`, `Position3D`, `LoadingSpace` (con
+  perfiles orientativos de contenedor 20 ft / 40 ft / 40 ft High
+  Cube), `LoadUnit`, `Placement`, `UnpackedUnit`, `PackingResult`,
+  `CargoProject` y la jerarquía de excepciones de dominio.
+- Enums de dominio con valores string estables (`LoadingSpaceCategory`,
+  `DoorPosition`, `PackageType`, `ExtinguisherAgent`,
+  `OrientationCode`), heredando de `enum.StrEnum`.
+- `docs/DomainModel.md`: sistema de coordenadas, invariantes, diagrama
+  Mermaid y distinciones conceptuales (quantity vs. units_per_package
+  vs. total_requested_units; peso nominal del extintor vs. peso bruto
+  del empaque).
+- `docs/ADR/ADR-0005-inmutabilidad-y-enums-estables.md`.
+- 73 pruebas unitarias del modelo de dominio.
+- `from cargo_optimizer import LoadingSpace, LoadUnit` (y el resto del
+  modelo de dominio) disponible como API pública del SDK.
+
 ## [0.2.0] - 2026-07-14
 
 ### Changed
