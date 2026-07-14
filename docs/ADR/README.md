@@ -13,3 +13,4 @@ cambia: se marcan como `Reemplazada por ADR-XXXX` y se añade una nueva.
 | [ADR-0004](ADR-0004-enforcement-de-capas-con-import-linter.md) | Verificación automática de la regla de dependencia con import-linter | Aceptada |
 | [ADR-0005](ADR-0005-inmutabilidad-y-enums-estables.md) | Dataclasses inmutables y enums con valores string estables en el dominio | Aceptada |
 | [ADR-0006](ADR-0006-motor-geometrico-tolerancia-y-contacto.md) | Motor geométrico separado del dominio, tolerancia y semántica de contacto | Aceptada |
+| [ADR-0007](ADR-0007-motor-de-reglas.md) | Motor de reglas separado del dominio y del optimizador, reglas de extintores, política de acumulación de violaciones | Aceptada |

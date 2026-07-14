@@ -38,8 +38,8 @@ Arquitectura en capas (Clean Architecture / Hexagonal), regla de
 dependencia estricta — cada capa solo importa las que están por debajo:
 
 ```
-presentation  →  infrastructure  →  application  →  geometry  →  domain
-  (externa)                                                    (interna)
+presentation  →  infrastructure  →  application  →  rules  →  geometry  →  domain
+  (externa)                                                              (interna)
 ```
 
 - **`domain`**: entidades y reglas de negocio puras (`LoadingSpace`,
@@ -48,8 +48,13 @@ presentation  →  infrastructure  →  application  →  geometry  →  domain
 - **`geometry`**: cálculos espaciales deterministas (cajas ortoédricas,
   colisiones, soporte, límites, layouts). Depende solo de `domain`. Ver
   `docs/GeometryEngine.md` y ADR-0006.
+- **`rules`**: motor de reglas de negocio (orientaciones permitidas,
+  extintores, apilamiento, fragilidad, peso). Responde si una
+  colocación es válida; no decide dónde colocar nada. Depende de
+  `domain` siempre y de `geometry` solo donde una regla necesita
+  información espacial. Ver `docs/RulesEngine.md` y ADR-0007.
 - **`application`**: casos de uso, orquestación, puertos (interfaces)
-  hacia `infrastructure`. Depende de `domain` y `geometry`.
+  hacia `infrastructure`. Depende de `domain`, `geometry` y `rules`.
 - **`infrastructure`**: adaptadores concretos (SQLAlchemy, openpyxl,
   ReportLab, VTK) que implementan los puertos de `application`.
 - **`presentation`**: mecanismos de entrega (`presentation/desktop`
@@ -61,12 +66,11 @@ Esta regla se verifica automáticamente con `import-linter` (contrato
 completo y justificación en `docs/Architecture.md` y
 `docs/ADR/ADR-0001-arquitectura-en-capas.md`.
 
-**`rules` y `optimization` no existen todavía como paquetes**
-(`geometry` ya existe, fase 2.2). Se crean como paquetes de nivel
-superior, hermanos de `domain` (dependiendo únicamente de `domain` y de
-los motores de fases anteriores), únicamente cuando comience su fase de
-diseño correspondiente (fases 3 y 4). No crearlos por adelantado: ver
-`docs/Roadmap.md`.
+**`optimization` no existe todavía como paquete** (`geometry` y
+`rules` ya existen, fases 2.2 y 3). Se crea como paquete de nivel
+superior, hermano de `domain` (dependiendo de `domain`, `geometry` y
+`rules`), únicamente cuando comience su fase de diseño (fase 4). No
+crearlo por adelantado: ver `docs/Roadmap.md`.
 
 El núcleo (`domain` + `application` + los motores cuando existan) es
 un SDK independiente: debe poder usarse con
@@ -94,12 +98,13 @@ instalada (ADR-0003).
 src/cargo_optimizer/
 ├── domain/          # Entidades y reglas de negocio puras. Sin dependencias externas.
 ├── geometry/        # Cálculos espaciales deterministas. Depende solo de domain.
+├── rules/           # Motor de reglas de negocio. Depende de domain y, si hace falta, de geometry.
 ├── application/     # Casos de uso, orquestación, puertos hacia infraestructura.
 ├── infrastructure/  # Adaptadores concretos: SQLite, Excel, PDF, VTK (fases posteriores).
 └── presentation/
     └── desktop/     # Aplicación de escritorio PySide6. Solo presentación.
 tests/               # Pruebas, en espejo de la estructura de src/
-docs/                # Architecture.md, Roadmap.md, GeometryEngine.md, ADR/ — documentación de arquitectura y diseño
+docs/                # Architecture.md, Roadmap.md, GeometryEngine.md, RulesEngine.md, ADR/
 examples/            # Proyectos de ejemplo de uso del SDK (poblado desde fase 4)
 userdata/            # Datos generados por el usuario en tiempo de ejecución. Nunca se versiona su contenido.
 ```
@@ -127,9 +132,8 @@ dominio puro) y 2.2 (motor geométrico) para poder completar el modelo
 de dominio sin implementar todavía colisiones ni packing. Ver
 `docs/Roadmap.md`, sección "Nota sobre la numeración de la fase 2".
 
-Estado actual: **motor geométrico completado** (fin de fase 2.2). No
-implementar algoritmo de packing, heurísticas de optimización, reglas
-de restricciones (incluida la horizontalidad de extintores),
+Estado actual: **motor de reglas completado** (fin de fase 3). No
+implementar algoritmo de packing, heurísticas de optimización,
 visualización 3D, SQLite, Excel, PDF ni API hasta que se indique
 explícitamente. Ver `docs/Roadmap.md` para el detalle fase a fase.
 
@@ -190,6 +194,36 @@ Ver `docs/GeometryEngine.md` para el detalle completo.
 - `geometry` no verifica peso máximo, reglas de extintores,
   fragilidad, orientación permitida ni orden de descarga: eso es del
   motor de restricciones (fase 3).
+
+## Invariantes del motor de reglas (no romper sin ADR)
+
+Ver `docs/RulesEngine.md` para el detalle completo.
+
+- `rules` depende siempre de `domain`; de `geometry` solo donde una
+  regla necesita información espacial. Nunca de `application`,
+  `infrastructure`, `presentation` ni de ninguna biblioteca externa.
+  Verificado por `import-linter`.
+- **Extintores individuales >= 3 kg nominales**: horizontales, con la
+  dimensión original `length_cm` paralela al eje X; máximo efectivo de
+  apilamiento siempre 1. **Extintores de 1, 2 y 3 kg en cajas
+  grupales sí pueden colocarse verticalmente** y apilarse hasta
+  `max_stack_count`. Estas dos reglas son obligatorias y no deben
+  relajarse ni fusionarse. Ver ADR-0007, Decisión 2.
+- La regla de extintores usa siempre `extinguisher_nominal_kg`, nunca
+  `weight_kg` (peso bruto del empaque).
+- Las capacidades recomendadas de extintores grupales (10/8/6 por
+  1/2/3 kg) son advertencias (`RuleSeverity.WARNING`), nunca motivo de
+  rechazo.
+- `RuleEvaluation.is_allowed` es `False` si y solo si hay al menos una
+  violación `severity=error`; se construye con `.allowed()`,
+  `.rejected()` o `.combine()`, nunca directamente.
+- `evaluate_candidate_placement` no se detiene en la primera
+  violación, salvo que haya colisión: en ese caso se omiten soporte,
+  apilamiento, fragilidad y peso soportado (derivados de un volumen en
+  disputa), pero límites, orientación, configuración de extintor y
+  peso del espacio se evalúan siempre. Ver ADR-0007, Decisión 3.
+- Ninguna función de `rules` modifica entidades de dominio ni tiene
+  efectos secundarios: siempre devuelve un `RuleEvaluation` explícito.
 
 ## Reglas de trabajo con el asistente
 

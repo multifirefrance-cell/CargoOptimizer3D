@@ -10,7 +10,7 @@ fase se adelanta a la anterior.
 | 1 | Arquitectura | `domain`, `application`, `infrastructure`, `presentation` (estructura, vacíos donde aplique) | **Completada** |
 | 2.1 | Modelo de dominio puro | `domain` (entidades y value objects: `Dimensions3D`, `Orientation`, `LoadingSpace`, `LoadUnit`, `Position3D`, `Placement`, `UnpackedUnit`, `PackingResult`, `CargoProject`) | **Completada** |
 | 2.2 | Motor geométrico (geometría, colisiones, soporte) | `geometry` (hermano de `domain`) | **Completada** |
-| 3 | Motor de restricciones | `rules` (nuevo, hermano de `domain`) | Pendiente |
+| 3 | Motor de restricciones | `rules` (hermano de `domain`) | **Completada** |
 | 4 | Motor de optimización | `optimization` (nuevo, hermano de `domain`); primer caso de uso real en `application` | Pendiente |
 | 5 | Visualización 3D | `infrastructure` (adaptador VTK) | Pendiente |
 | 6 | Interfaz | `presentation/desktop` (pantallas reales) | Pendiente |
@@ -19,13 +19,14 @@ fase se adelanta a la anterior.
 | 9 | Integración ERP | `presentation` (nuevo adaptador, p. ej. `presentation/api`) | Pendiente |
 | 10 | Versión comercial | — | Pendiente |
 
-## Regla para crear `rules` y `optimization` (`geometry` ya existe)
+## Regla para crear `optimization` (`geometry` y `rules` ya existen)
 
 `geometry` se creó en la fase 2.2 (ver `docs/GeometryEngine.md` y
-ADR-0006). `rules` y `optimization` **no se crean por adelantado**: se
-crean como paquetes de nivel superior, hermanos de `domain`,
-únicamente cuando comienza su fase de diseño correspondiente (ver
-`docs/Architecture.md`, sección "Motores de negocio"). Cada uno debe:
+ADR-0006). `rules` se creó en la fase 3 (ver `docs/RulesEngine.md` y
+ADR-0007). `optimization` **no se crea por adelantado**: se crea como
+paquete de nivel superior, hermano de `domain`, únicamente cuando
+comienza su fase de diseño (ver `docs/Architecture.md`, sección
+"Motores de negocio"). Debe:
 
 1. Diseñarse y documentarse antes de escribir código (una entrada en
    `docs/ADR/` si la decisión es significativa).
@@ -56,12 +57,15 @@ arquitectura.
 
 ## Estado actual
 
-Fin de fase 2.2: motor geométrico completado (`AxisAlignedBox`,
-límites, colisiones, soporte físico con unión de rectángulos, puntos
-candidatos, validación de layouts), con 141 pruebas unitarias en verde
-(73 de dominio + 68 de geometría). `geometry` depende únicamente de
-`domain`, verificado por `import-linter`. No se ha escrito ninguna
-línea de reglas de restricción, optimización, persistencia,
-exportación ni visualización 3D. La siguiente sesión de desarrollo
-debe empezar por el diseño de la fase 3 (motor de restricciones) antes
-de escribir código.
+Fin de fase 3: motor de reglas completado (orientaciones permitidas,
+reglas críticas de extintores individuales y grupales, apilamiento,
+fragilidad, peso soportado, peso del Loading Space, evaluación
+compuesta `evaluate_candidate_placement`, fachada `RulesEngine`), con
+240 pruebas unitarias en verde (73 de dominio + 68 de geometría + 99 de
+reglas). `rules` depende de `domain` siempre y de `geometry` solo
+donde una regla necesita información espacial, verificado por
+`import-linter`. No se ha escrito ninguna línea de algoritmo de
+packing, heurísticas de optimización, persistencia, exportación ni
+visualización 3D. La siguiente sesión de desarrollo debe empezar por
+el diseño de la fase 4 (motor de optimización) antes de escribir
+código.

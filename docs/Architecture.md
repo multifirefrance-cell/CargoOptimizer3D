@@ -22,6 +22,8 @@ entrega o cualquier detalle técnico externo.
 ├─────────────────────────────────────────────────────────┤
 │ application    (casos de uso, orquestación, puertos)     │
 ├─────────────────────────────────────────────────────────┤
+│ rules          (motor de reglas de negocio — fase 3)     │
+├─────────────────────────────────────────────────────────┤
 │ geometry       (cálculos espaciales — fase 2.2)          │
 ├─────────────────────────────────────────────────────────┤
 │ domain         (LoadingSpace, LoadUnit, invariantes)      │
@@ -73,30 +75,34 @@ recurso del SDK sino de un mecanismo de entrega concreto.
 src/cargo_optimizer/
 ├── domain/
 ├── geometry/       # fase 2.2 — implementado, depende solo de domain
-├── rules/          # fase 3 — depende de domain y geometry
+├── rules/          # fase 3 — implementado, depende de domain y geometry
 ├── optimization/   # fase 4 — depende de domain, geometry y rules
 ├── application/    # orquesta domain + geometry + rules + optimization
 ├── infrastructure/
 └── presentation/
 ```
 
-`geometry` ya existe (fase 2.2): cajas ortoédricas, límites,
-colisiones, soporte físico, puntos candidatos y validación de layouts.
-Ver `docs/GeometryEngine.md` y ADR-0006. `rules` y `optimization`
-**no existen todavía como paquetes**; se crearán cuando comience su
-fase de diseño correspondiente.
+`geometry` (fase 2.2) y `rules` (fase 3) ya existen. `geometry`:
+cajas ortoédricas, límites, colisiones, soporte físico, puntos
+candidatos y validación de layouts — ver `docs/GeometryEngine.md` y
+ADR-0006. `rules`: motor de reglas de negocio puro y determinista
+(orientaciones permitidas, extintores, apilamiento, fragilidad, peso)
+que responde si una colocación es válida sin decidir dónde colocar
+nada — ver `docs/RulesEngine.md` y ADR-0007. `optimization`
+**no existe todavía como paquete**; se creará cuando comience su fase
+de diseño.
 
 Se crean como hermanos de `domain` (no como subpaquetes de `domain` ni
 de `application`) porque son subsistemas sustanciales con algoritmos
 propios (bin packing, resolución de restricciones), no simples
 entidades ni casos de uso de orquestación. Mezclar esta decisión con la
-lista de capas (`domain`/`geometry`/`application`/`infrastructure`/`presentation`)
+lista de capas (`domain`/`geometry`/`rules`/`application`/`infrastructure`/`presentation`)
 sería confundir dos ejes de descomposición distintos — ver ADR-0001,
 sección de rechazo explícito de esa alternativa.
 
-**No se crean `rules` ni `optimization` por adelantado.** Hacerlo hoy,
-antes de diseñar cada motor, sería sobrearquitectura especulativa: no
-sabemos todavía cómo se relacionan internamente, y inventar la
+**No se crea `optimization` por adelantado.** Hacerlo hoy, antes de
+diseñar el motor, sería sobrearquitectura especulativa: no sabemos
+todavía cómo se relaciona internamente con `rules`, y inventar la
 estructura antes de tiempo cuesta más rehacerla que no haberla creado.
 
 ## El núcleo como SDK

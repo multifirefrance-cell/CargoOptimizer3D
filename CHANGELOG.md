@@ -4,6 +4,46 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Este proyecto aún no ha alcanzado la versión 1.0; el versionado 0.x
 puede incluir cambios estructurales entre versiones menores.
 
+## [0.5.0] - 2026-07-14
+
+### Added
+
+- Motor de reglas de negocio (fase 3 del roadmap): paquete
+  `cargo_optimizer.rules`, hermano de `domain`/`geometry`, dependiendo
+  de `domain` siempre y de `geometry` solo donde una regla necesita
+  información espacial (verificado con `import-linter`).
+- `RuleSeverity`, `RuleViolation`, `RuleEvaluation` (`allowed`,
+  `rejected`, `combine`) como vocabulario común de resultados.
+- `PlacementRuleContext` con acceso a la caja candidata, cajas
+  existentes y validación de referencias a `LoadUnit` conocidas.
+- Reglas de orientación (`allowed_orientations_for_load_unit`,
+  `evaluate_orientation`) con deduplicación geométrica.
+- Reglas críticas de extintores (`extinguisher_rules.py`): extintores
+  individuales >= 3 kg nominales deben ir horizontales con el eje
+  `length_cm` paralelo a X; cajas grupales de 1/2/3 kg admiten
+  cualquier orientación y capacidades recomendadas (10/8/6) como
+  advertencia, no como límite rígido.
+- Reglas de apilamiento (`stacking_rules.py`): nivel de apilamiento
+  determinista, `effective_max_stack_count`, peso soportado
+  transitivo sin doble conteo.
+- Reglas de fragilidad, peso del Loading Space y espaciales
+  (`fragility_rules.py`, `weight_rules.py`, `spatial_rules.py`),
+  reutilizando `cargo_optimizer.geometry` sin duplicar lógica.
+- `evaluate_candidate_placement`: evaluación compuesta de 9 pasos con
+  política de no-cascada tras colisión (`placement_rules.py`).
+- Fachada `RulesEngine` sin estado mutable (`engine.py`).
+- `docs/RulesEngine.md` y
+  `docs/ADR/ADR-0007-motor-de-reglas.md`.
+- 99 pruebas unitarias del motor de reglas (240 en total con dominio y
+  geometría).
+
+### Fixed
+
+- `evaluate_supported_weight` ahora recorre toda la cadena transitiva
+  de soportes, no solo el soporte directo: si A soporta a B y B
+  soporta al candidato, el límite `max_supported_weight_kg` de A
+  también se comprueba.
+
 ## [0.4.0] - 2026-07-14
 
 ### Added

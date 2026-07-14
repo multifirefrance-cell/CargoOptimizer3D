@@ -9,16 +9,18 @@ import cargo_optimizer.geometry
 import cargo_optimizer.infrastructure
 import cargo_optimizer.presentation
 import cargo_optimizer.presentation.desktop
+import cargo_optimizer.rules
 from cargo_optimizer import LoadingSpace, LoadUnit
 
 
 def test_version_is_defined() -> None:
-    assert cargo_optimizer.__version__ == "0.4.0"
+    assert cargo_optimizer.__version__ == "0.5.0"
 
 
 def test_all_layers_import() -> None:
     assert cargo_optimizer.domain is not None
     assert cargo_optimizer.geometry is not None
+    assert cargo_optimizer.rules is not None
     assert cargo_optimizer.application is not None
     assert cargo_optimizer.infrastructure is not None
     assert cargo_optimizer.presentation is not None
