@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from cargo_optimizer.ui.app import run
+from cargo_optimizer.presentation.desktop.app import run
 
 
 def main() -> int:

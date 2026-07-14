@@ -15,19 +15,29 @@ espacio definido por el usuario.
 
 ## Arquitectura
 
-El proyecto separa un **núcleo (SDK)** sin dependencias de interfaz de
-una **aplicación de escritorio** construida sobre PySide6. El núcleo
-está pensado para ser reutilizado desde una API REST, un ERP o una
-futura aplicación web/móvil.
+Arquitectura en capas (Clean Architecture / Hexagonal): el motor de
+negocio (`domain` + `application`) no depende de ninguna biblioteca de
+UI, persistencia, ofimática ni visualización, y puede reutilizarse
+desde una aplicación de escritorio, una API REST, un ERP o una futura
+aplicación web, sin reescribirse.
 
 ```
 src/cargo_optimizer/
-├── core/     # Lógica de dominio y negocio (SDK). Sin dependencias de UI.
-└── ui/       # Aplicación de escritorio (PySide6). Solo presentación.
+├── domain/          # Entidades y reglas de negocio puras. Sin dependencias externas.
+├── application/     # Casos de uso, orquestación, puertos hacia infraestructura.
+├── infrastructure/  # Adaptadores concretos: SQLite, Excel, PDF, VTK (fases posteriores).
+└── presentation/
+    └── desktop/     # Aplicación de escritorio (PySide6). Solo presentación.
 ```
 
-Ver [CLAUDE.md](CLAUDE.md) para las reglas de arquitectura permanentes
-del proyecto.
+La regla de dependencia (una capa solo importa las que están por
+debajo: `presentation → infrastructure → application → domain`) se
+verifica automáticamente con `import-linter`.
+
+Ver [docs/Architecture.md](docs/Architecture.md) para el detalle
+completo, [docs/Roadmap.md](docs/Roadmap.md) para las fases, y
+[docs/ADR/](docs/ADR/) para el historial de decisiones. Ver
+[CLAUDE.md](CLAUDE.md) para las reglas permanentes del proyecto.
 
 ## Requisitos
 
@@ -51,12 +61,15 @@ python -m venv .venv
 
 ```powershell
 .\.venv\Scripts\python.exe -m ruff check .
+.\.venv\Scripts\python.exe -m black --check .
 .\.venv\Scripts\python.exe -m mypy src
+.\.venv\Scripts\lint-imports.exe
 .\.venv\Scripts\python.exe -m pytest
 ```
 
 ## Estado del proyecto
 
-Fase actual: infraestructura base. El motor de optimización, las
-reglas de restricciones, la visualización 3D, la persistencia y los
-reportes se implementarán en fases posteriores (ver `CLAUDE.md`).
+Fin de fase 1: infraestructura y arquitectura congeladas (ver
+`docs/Roadmap.md`). El motor geométrico, las reglas de restricciones,
+el motor de optimización, la visualización 3D, la persistencia y los
+reportes se implementarán en fases posteriores.

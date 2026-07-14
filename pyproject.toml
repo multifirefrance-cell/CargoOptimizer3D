@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cargo-optimizer3d"
-version = "0.1.0"
+version = "0.2.0"
 description = "Software profesional de optimización de carga 3D para espacios de carga universales (Loading Spaces)."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -21,7 +21,7 @@ dependencies = ["PySide6>=6.7,<7"]
 cargo-optimizer3d = "cargo_optimizer.__main__:main"
 
 [project.optional-dependencies]
-dev = ["ruff>=0.6", "black>=24.8", "mypy>=1.11", "pytest>=8.3"]
+dev = ["ruff>=0.6", "black>=24.8", "mypy>=1.11", "pytest>=8.3", "import-linter>=2.1"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cargo_optimizer"]
@@ -57,3 +57,16 @@ warn_unreachable = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+
+[tool.importlinter]
+root_package = "cargo_optimizer"
+
+[[tool.importlinter.contracts]]
+name = "Arquitectura en capas (Clean Architecture)"
+type = "layers"
+layers = [
+    "cargo_optimizer.presentation",
+    "cargo_optimizer.infrastructure",
+    "cargo_optimizer.application",
+    "cargo_optimizer.domain",
+]

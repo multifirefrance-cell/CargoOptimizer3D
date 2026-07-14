@@ -5,7 +5,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import QApplication
 
 from cargo_optimizer import __version__
-from cargo_optimizer.ui.main_window import MainWindow
+from cargo_optimizer.presentation.desktop.main_window import MainWindow
 
 
 def run(argv: list[str]) -> int:
