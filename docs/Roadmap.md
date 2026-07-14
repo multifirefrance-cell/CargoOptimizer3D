@@ -11,7 +11,8 @@ fase se adelanta a la anterior.
 | 2.1 | Modelo de dominio puro | `domain` (entidades y value objects: `Dimensions3D`, `Orientation`, `LoadingSpace`, `LoadUnit`, `Position3D`, `Placement`, `UnpackedUnit`, `PackingResult`, `CargoProject`) | **Completada** |
 | 2.2 | Motor geométrico (geometría, colisiones, soporte) | `geometry` (hermano de `domain`) | **Completada** |
 | 3 | Motor de restricciones | `rules` (hermano de `domain`) | **Completada** |
-| 4 | Motor de optimización | `optimization` (nuevo, hermano de `domain`); primer caso de uso real en `application` | Pendiente |
+| 4.0 | Diseño del motor de optimización | Ninguno (solo documentación: `docs/OptimizationEngineDesign.md`, `docs/GreedyLayerStrategyDesign.md`, ADR-0008, ADR-0009) | **Completada** |
+| 4.1 | Primer optimizador funcional | `optimization` (nuevo, hermano de `domain`); primer caso de uso real en `application` | Pendiente |
 | 5 | Visualización 3D | `infrastructure` (adaptador VTK) | Pendiente |
 | 6 | Interfaz | `presentation/desktop` (pantallas reales) | Pendiente |
 | 7 | Persistencia | `infrastructure` (adaptador SQLAlchemy/SQLite) | Pendiente |
@@ -19,22 +20,22 @@ fase se adelanta a la anterior.
 | 9 | Integración ERP | `presentation` (nuevo adaptador, p. ej. `presentation/api`) | Pendiente |
 | 10 | Versión comercial | — | Pendiente |
 
-## Regla para crear `optimization` (`geometry` y `rules` ya existen)
+## Regla para crear `optimization` (`geometry` y `rules` ya existen; `optimization` ya está diseñado)
 
 `geometry` se creó en la fase 2.2 (ver `docs/GeometryEngine.md` y
 ADR-0006). `rules` se creó en la fase 3 (ver `docs/RulesEngine.md` y
-ADR-0007). `optimization` **no se crea por adelantado**: se crea como
-paquete de nivel superior, hermano de `domain`, únicamente cuando
-comienza su fase de diseño (ver `docs/Architecture.md`, sección
-"Motores de negocio"). Debe:
+ADR-0007). `optimization` se **diseñó** en la fase 4.0 (ver
+`docs/OptimizationEngineDesign.md`, `docs/GreedyLayerStrategyDesign.md`,
+ADR-0008, ADR-0009) pero **no se crea como paquete de código hasta la
+fase 4.1**. Al crearse, debe:
 
-1. Diseñarse y documentarse antes de escribir código (una entrada en
-   `docs/ADR/` si la decisión es significativa).
-2. Depender únicamente de `domain` y de los motores de fases
-   anteriores ya existentes (p. ej. `rules` puede depender de
-   `geometry`, pero `geometry` nunca de `rules`).
-3. Quedar reflejado en el contrato de `import-linter` en
-   `pyproject.toml` en cuanto exista.
+1. Depender únicamente de `domain`, `geometry` y `rules` (nunca de
+   `application`, `infrastructure` ni `presentation`).
+2. Quedar reflejado en el contrato de `import-linter` en
+   `pyproject.toml`, insertando `optimization` entre `application` y
+   `rules`.
+3. Implementar únicamente lo listado como "Fase 4.1" en la revisión
+   crítica de `docs/OptimizationEngineDesign.md` — no más, no menos.
 
 ## Regla para crear adaptadores de `infrastructure` y `presentation`
 
@@ -57,15 +58,17 @@ arquitectura.
 
 ## Estado actual
 
-Fin de fase 3: motor de reglas completado (orientaciones permitidas,
-reglas críticas de extintores individuales y grupales, apilamiento,
-fragilidad, peso soportado, peso del Loading Space, evaluación
-compuesta `evaluate_candidate_placement`, fachada `RulesEngine`), con
-240 pruebas unitarias en verde (73 de dominio + 68 de geometría + 99 de
-reglas). `rules` depende de `domain` siempre y de `geometry` solo
-donde una regla necesita información espacial, verificado por
-`import-linter`. No se ha escrito ninguna línea de algoritmo de
-packing, heurísticas de optimización, persistencia, exportación ni
-visualización 3D. La siguiente sesión de desarrollo debe empezar por
-el diseño de la fase 4 (motor de optimización) antes de escribir
-código.
+Fin de fase 4.0: diseño completo del motor de optimización
+(`PackingEngine`, `PackingStrategy` como `Protocol`,
+`PackingRequest`/`PackingState`, expansión de instancias físicas,
+evaluación y puntuación de candidatos, manejo de errores,
+cancelación/progreso, rendimiento y explicabilidad), con la primera
+estrategia recomendada (extreme-point greedy,
+`greedy_extreme_point_v1`) documentada en detalle. Sigue habiendo 240
+pruebas unitarias en verde (73 de dominio + 68 de geometría + 99 de
+reglas): esta fase no añadió código funcional, solo documentación y
+dos ADR. No se ha escrito ninguna línea de algoritmo de packing. La
+siguiente sesión de desarrollo debe implementar la fase 4.1 (primer
+optimizador funcional) siguiendo exactamente lo diseñado en
+`docs/OptimizationEngineDesign.md` y
+`docs/GreedyLayerStrategyDesign.md`.

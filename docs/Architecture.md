@@ -22,6 +22,8 @@ entrega o cualquier detalle técnico externo.
 ├─────────────────────────────────────────────────────────┤
 │ application    (casos de uso, orquestación, puertos)     │
 ├─────────────────────────────────────────────────────────┤
+│ optimization   (motor de optimización — fase 4, diseñado en 4.0, no implementado) │
+├─────────────────────────────────────────────────────────┤
 │ rules          (motor de reglas de negocio — fase 3)     │
 ├─────────────────────────────────────────────────────────┤
 │ geometry       (cálculos espaciales — fase 2.2)          │
@@ -89,8 +91,11 @@ ADR-0006. `rules`: motor de reglas de negocio puro y determinista
 (orientaciones permitidas, extintores, apilamiento, fragilidad, peso)
 que responde si una colocación es válida sin decidir dónde colocar
 nada — ver `docs/RulesEngine.md` y ADR-0007. `optimization`
-**no existe todavía como paquete**; se creará cuando comience su fase
-de diseño.
+**está diseñado (fase 4.0) pero no existe todavía como paquete**: ver
+`docs/OptimizationEngineDesign.md`, `docs/GreedyLayerStrategyDesign.md`,
+ADR-0008 y ADR-0009 para el diseño completo (componentes, contratos,
+determinismo, primera estrategia recomendada). Se creará como código
+real en la fase 4.1.
 
 Se crean como hermanos de `domain` (no como subpaquetes de `domain` ni
 de `application`) porque son subsistemas sustanciales con algoritmos
@@ -100,10 +105,13 @@ lista de capas (`domain`/`geometry`/`rules`/`application`/`infrastructure`/`pres
 sería confundir dos ejes de descomposición distintos — ver ADR-0001,
 sección de rechazo explícito de esa alternativa.
 
-**No se crea `optimization` por adelantado.** Hacerlo hoy, antes de
-diseñar el motor, sería sobrearquitectura especulativa: no sabemos
-todavía cómo se relaciona internamente con `rules`, y inventar la
-estructura antes de tiempo cuesta más rehacerla que no haberla creado.
+**No se crea `optimization` como paquete de código todavía.** La fase
+4.0 diseñó por completo sus responsabilidades y contratos (ver los
+documentos de diseño arriba) precisamente para no repetir el error de
+crear estructura antes de saber qué contendrá. El paquete se crea en
+la fase 4.1, con la primera estrategia (`GreedyExtremePointStrategy`,
+identificador técnico `greedy_extreme_point_v1`) ya funcional, no
+antes.
 
 ## El núcleo como SDK
 

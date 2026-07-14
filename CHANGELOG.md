@@ -4,6 +4,40 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Este proyecto aún no ha alcanzado la versión 1.0; el versionado 0.x
 puede incluir cambios estructurales entre versiones menores.
 
+## [0.5.1] - 2026-07-14
+
+Sesión exclusivamente documental (fase 4.0). Ningún código funcional
+cambió; por eso el bump es de versión de parche, no menor, a
+diferencia de las fases anteriores que sí modificaron `src/`.
+
+### Added
+
+- `docs/OptimizationEngineDesign.md`: diseño completo del futuro
+  `cargo_optimizer.optimization` — responsabilidades, arquitectura,
+  15 componentes (`PackingEngine`, `PackingStrategy` como `Protocol`,
+  `PackingRequest`, `PackingState`, `PhysicalLoadInstance`,
+  `LoadUnitExpander`, evaluador y puntuador de candidatos,
+  `PackingResultBuilder`, `UnpackedReason`, entre otros), flujo
+  completo, reglas de determinismo, manejo de errores, cancelación y
+  progreso sin dependencia de Qt, rendimiento (con evolución v0.6 a
+  v0.9), explicabilidad (modo normal/diagnóstico) y revisión crítica.
+- `docs/GreedyLayerStrategyDesign.md`: diseño de la primera estrategia
+  recomendada (extreme-point greedy, identificador técnico
+  `greedy_extreme_point_v1`), orden de instancias, score léxico,
+  pseudoflujo y criterios de aceptación de la fase 4.1.
+- `docs/ADR/ADR-0008-arquitectura-del-motor-de-optimizacion.md`:
+  paquete `optimization` separado, `PackingStrategy` como `Protocol`
+  (no `ABC`), determinismo como requisito de diseño.
+- `docs/ADR/ADR-0009-estrategia-greedy-y-separacion-objetivos.md`:
+  extreme-point greedy frente a *layering* estricto, separación
+  estructural entre restricciones duras (de `rules`) y objetivos.
+
+### Changed
+
+- `docs/Architecture.md`, `docs/Roadmap.md`, `CLAUDE.md`: fase 4
+  dividida en 4.0 (diseño, completada) y 4.1 (implementación,
+  pendiente), siguiendo el mismo patrón ya usado para la fase 2.
+
 ## [0.5.0] - 2026-07-14
 
 ### Added
