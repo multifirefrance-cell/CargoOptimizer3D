@@ -1,0 +1,43 @@
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Bytecode / cache de Python
+__pycache__/
+*.py[cod]
+*.pyd
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Empaquetado / distribución
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Bases de datos locales
+*.db
+*.sqlite3
+
+# Cobertura de tests
+.coverage
+htmlcov/
+
+# Editores / IDE
+.vscode/
+.idea/
+*.swp
+
+# Configuración local de Claude Code (específica de la máquina)
+.claude/settings.local.json
+
+# Sistema operativo
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Variables de entorno locales
+.env
+.env.*
