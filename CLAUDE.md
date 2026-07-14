@@ -38,15 +38,18 @@ Arquitectura en capas (Clean Architecture / Hexagonal), regla de
 dependencia estricta — cada capa solo importa las que están por debajo:
 
 ```
-presentation  →  infrastructure  →  application  →  domain
-  (externa)                                        (interna)
+presentation  →  infrastructure  →  application  →  geometry  →  domain
+  (externa)                                                    (interna)
 ```
 
 - **`domain`**: entidades y reglas de negocio puras (`LoadingSpace`,
   `LoadUnit`, invariantes). No depende de nada, ni del propio proyecto
   ni de bibliotecas externas de UI/persistencia/ofimática/visualización.
+- **`geometry`**: cálculos espaciales deterministas (cajas ortoédricas,
+  colisiones, soporte, límites, layouts). Depende solo de `domain`. Ver
+  `docs/GeometryEngine.md` y ADR-0006.
 - **`application`**: casos de uso, orquestación, puertos (interfaces)
-  hacia `infrastructure`. Depende solo de `domain`.
+  hacia `infrastructure`. Depende de `domain` y `geometry`.
 - **`infrastructure`**: adaptadores concretos (SQLAlchemy, openpyxl,
   ReportLab, VTK) que implementan los puertos de `application`.
 - **`presentation`**: mecanismos de entrega (`presentation/desktop`
@@ -58,11 +61,11 @@ Esta regla se verifica automáticamente con `import-linter` (contrato
 completo y justificación en `docs/Architecture.md` y
 `docs/ADR/ADR-0001-arquitectura-en-capas.md`.
 
-**`geometry`, `rules` y `optimization` no existen todavía como
-paquetes.** Se crean como paquetes de nivel superior, hermanos de
-`domain` (dependiendo únicamente de `domain` y de los motores de fases
-anteriores), únicamente cuando comience su fase de diseño
-correspondiente (fases 2.2, 3 y 4). No crearlos por adelantado: ver
+**`rules` y `optimization` no existen todavía como paquetes**
+(`geometry` ya existe, fase 2.2). Se crean como paquetes de nivel
+superior, hermanos de `domain` (dependiendo únicamente de `domain` y de
+los motores de fases anteriores), únicamente cuando comience su fase de
+diseño correspondiente (fases 3 y 4). No crearlos por adelantado: ver
 `docs/Roadmap.md`.
 
 El núcleo (`domain` + `application` + los motores cuando existan) es
@@ -90,12 +93,13 @@ instalada (ADR-0003).
 ```
 src/cargo_optimizer/
 ├── domain/          # Entidades y reglas de negocio puras. Sin dependencias externas.
+├── geometry/        # Cálculos espaciales deterministas. Depende solo de domain.
 ├── application/     # Casos de uso, orquestación, puertos hacia infraestructura.
 ├── infrastructure/  # Adaptadores concretos: SQLite, Excel, PDF, VTK (fases posteriores).
 └── presentation/
     └── desktop/     # Aplicación de escritorio PySide6. Solo presentación.
 tests/               # Pruebas, en espejo de la estructura de src/
-docs/                # Architecture.md, Roadmap.md, ADR/ — documentación de arquitectura y diseño
+docs/                # Architecture.md, Roadmap.md, GeometryEngine.md, ADR/ — documentación de arquitectura y diseño
 examples/            # Proyectos de ejemplo de uso del SDK (poblado desde fase 4)
 userdata/            # Datos generados por el usuario en tiempo de ejecución. Nunca se versiona su contenido.
 ```
@@ -123,11 +127,11 @@ dominio puro) y 2.2 (motor geométrico) para poder completar el modelo
 de dominio sin implementar todavía colisiones ni packing. Ver
 `docs/Roadmap.md`, sección "Nota sobre la numeración de la fase 2".
 
-Estado actual: **modelo de dominio puro completado** (fin de fase 2.1).
-No implementar motor geométrico, detección de colisiones, packing 3D,
-reglas de restricciones, motor de optimización, visualización 3D,
-SQLite, Excel, PDF ni API hasta que se indique explícitamente. Ver
-`docs/Roadmap.md` para el detalle fase a fase.
+Estado actual: **motor geométrico completado** (fin de fase 2.2). No
+implementar algoritmo de packing, heurísticas de optimización, reglas
+de restricciones (incluida la horizontalidad de extintores),
+visualización 3D, SQLite, Excel, PDF ni API hasta que se indique
+explícitamente. Ver `docs/Roadmap.md` para el detalle fase a fase.
 
 ## Invariantes del modelo de dominio (no romper sin ADR)
 
@@ -155,11 +159,37 @@ cualquier sesión futura debe respetar al tocar `src/cargo_optimizer/domain/`:
   None`; con `is_extinguisher=True`, lo contrario. Esta regla está
   validada en `LoadUnit.__post_init__`, no debe relajarse.
 - Ni `Orientation` ni `Placement` implementan detección de colisiones:
-  esa lógica pertenece exclusivamente al futuro motor geométrico (fase
-  2.2), nunca al modelo de dominio.
+  esa lógica vive en `cargo_optimizer.geometry`, nunca en el modelo de
+  dominio.
 - La regla de horizontalidad obligatoria de extintores (no apilar de
-  canto) es del motor de restricciones (fase 3), no del dominio. El
-  dominio solo deja los campos necesarios preparados.
+  canto) es del motor de restricciones (fase 3), no del dominio ni de
+  `geometry`. El dominio solo deja los campos necesarios preparados.
+
+## Invariantes del motor geométrico (no romper sin ADR)
+
+Ver `docs/GeometryEngine.md` para el detalle completo.
+
+- `geometry` depende únicamente de `domain`; nunca de `application`,
+  `infrastructure`, `presentation` ni de ninguna biblioteca externa.
+  Verificado por `import-linter`.
+- Toda comparación de punto flotante usa `GEOMETRY_EPSILON_CM`
+  (`geometry/constants.py`, 1e-9 cm). No introducir tolerancias
+  ad-hoc en otros módulos.
+- `overlaps` (volumen positivo), `touches` (contacto sin volumen) e
+  `intersects` (cualquiera de los dos) son relaciones distintas — ver
+  ADR-0006. `boxes_overlap`/la detección de colisiones se basa en
+  `overlaps`: tocarse nunca es una colisión.
+- El área de soporte se calcula como unión de rectángulos
+  (`geometry/rectangles.py`), nunca como suma ingenua: sumar áreas
+  solapadas de cajas inferiores produciría un `support_ratio` > 1.0
+  incorrecto.
+- `find_overlapping_placements` y el resto de funciones de
+  `geometry` son deterministas: misma entrada, misma salida, sin
+  aleatoriedad ni dependencia de orden de iteración de `set`/`dict`
+  no controlado.
+- `geometry` no verifica peso máximo, reglas de extintores,
+  fragilidad, orientación permitida ni orden de descarga: eso es del
+  motor de restricciones (fase 3).
 
 ## Reglas de trabajo con el asistente
 

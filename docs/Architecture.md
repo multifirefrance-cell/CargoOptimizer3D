@@ -22,6 +22,8 @@ entrega o cualquier detalle técnico externo.
 ├─────────────────────────────────────────────────────────┤
 │ application    (casos de uso, orquestación, puertos)     │
 ├─────────────────────────────────────────────────────────┤
+│ geometry       (cálculos espaciales — fase 2.2)          │
+├─────────────────────────────────────────────────────────┤
 │ domain         (LoadingSpace, LoadUnit, invariantes)      │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -67,15 +69,10 @@ recurso del SDK sino de un mecanismo de entrega concreto.
 
 ## Motores de negocio: geometry, rules, optimization
 
-Estos tres motores (fases 2, 3 y 4) **no existen todavía como
-paquetes**. Cuando se diseñe cada fase, se crearán como paquetes de
-nivel superior, hermanos de `domain`, dependiendo únicamente de
-`domain`:
-
 ```
 src/cargo_optimizer/
 ├── domain/
-├── geometry/       # fase 2 — depende solo de domain
+├── geometry/       # fase 2.2 — implementado, depende solo de domain
 ├── rules/          # fase 3 — depende de domain y geometry
 ├── optimization/   # fase 4 — depende de domain, geometry y rules
 ├── application/    # orquesta domain + geometry + rules + optimization
@@ -83,19 +80,24 @@ src/cargo_optimizer/
 └── presentation/
 ```
 
+`geometry` ya existe (fase 2.2): cajas ortoédricas, límites,
+colisiones, soporte físico, puntos candidatos y validación de layouts.
+Ver `docs/GeometryEngine.md` y ADR-0006. `rules` y `optimization`
+**no existen todavía como paquetes**; se crearán cuando comience su
+fase de diseño correspondiente.
+
 Se crean como hermanos de `domain` (no como subpaquetes de `domain` ni
 de `application`) porque son subsistemas sustanciales con algoritmos
 propios (bin packing, resolución de restricciones), no simples
 entidades ni casos de uso de orquestación. Mezclar esta decisión con la
-lista de capas (`domain`/`application`/`infrastructure`/`presentation`)
+lista de capas (`domain`/`geometry`/`application`/`infrastructure`/`presentation`)
 sería confundir dos ejes de descomposición distintos — ver ADR-0001,
 sección de rechazo explícito de esa alternativa.
 
-**No se crean estos paquetes por adelantado.** Hacerlo hoy, antes de
-diseñar cada motor, sería sobrearquitectura especulativa: no sabemos
-todavía cómo se relacionan internamente `geometry` y `rules`, y
-inventar la estructura antes de tiempo cuesta más rehacerla que no
-haberla creado.
+**No se crean `rules` ni `optimization` por adelantado.** Hacerlo hoy,
+antes de diseñar cada motor, sería sobrearquitectura especulativa: no
+sabemos todavía cómo se relacionan internamente, y inventar la
+estructura antes de tiempo cuesta más rehacerla que no haberla creado.
 
 ## El núcleo como SDK
 

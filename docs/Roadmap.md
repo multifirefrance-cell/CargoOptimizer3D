@@ -9,7 +9,7 @@ fase se adelanta a la anterior.
 | 0 | Diseño completo | — | Completada |
 | 1 | Arquitectura | `domain`, `application`, `infrastructure`, `presentation` (estructura, vacíos donde aplique) | **Completada** |
 | 2.1 | Modelo de dominio puro | `domain` (entidades y value objects: `Dimensions3D`, `Orientation`, `LoadingSpace`, `LoadUnit`, `Position3D`, `Placement`, `UnpackedUnit`, `PackingResult`, `CargoProject`) | **Completada** |
-| 2.2 | Motor geométrico (colisiones, packing) | `geometry` (nuevo, hermano de `domain`) | Pendiente |
+| 2.2 | Motor geométrico (geometría, colisiones, soporte) | `geometry` (hermano de `domain`) | **Completada** |
 | 3 | Motor de restricciones | `rules` (nuevo, hermano de `domain`) | Pendiente |
 | 4 | Motor de optimización | `optimization` (nuevo, hermano de `domain`); primer caso de uso real en `application` | Pendiente |
 | 5 | Visualización 3D | `infrastructure` (adaptador VTK) | Pendiente |
@@ -19,12 +19,13 @@ fase se adelanta a la anterior.
 | 9 | Integración ERP | `presentation` (nuevo adaptador, p. ej. `presentation/api`) | Pendiente |
 | 10 | Versión comercial | — | Pendiente |
 
-## Regla para crear `geometry`, `rules` y `optimization`
+## Regla para crear `rules` y `optimization` (`geometry` ya existe)
 
-Estos paquetes **no se crean por adelantado**. Se crean como paquetes
-de nivel superior, hermanos de `domain`, únicamente cuando comienza su
-fase de diseño correspondiente (ver `docs/Architecture.md`, sección
-"Motores de negocio"). Cada uno debe:
+`geometry` se creó en la fase 2.2 (ver `docs/GeometryEngine.md` y
+ADR-0006). `rules` y `optimization` **no se crean por adelantado**: se
+crean como paquetes de nivel superior, hermanos de `domain`,
+únicamente cuando comienza su fase de diseño correspondiente (ver
+`docs/Architecture.md`, sección "Motores de negocio"). Cada uno debe:
 
 1. Diseñarse y documentarse antes de escribir código (una entrada en
    `docs/ADR/` si la decisión es significativa).
@@ -55,11 +56,12 @@ arquitectura.
 
 ## Estado actual
 
-Fin de fase 2.1: modelo de dominio puro completado (`Dimensions3D`,
-`Orientation`, `LoadingSpace`, `LoadUnit`, `Position3D`, `Placement`,
-`UnpackedUnit`, `PackingResult`, `CargoProject`), con 73 pruebas
-unitarias en verde. No se ha escrito ninguna línea de motor geométrico,
-detección de colisiones, reglas de restricción, optimización,
-persistencia, exportación ni visualización 3D. La siguiente sesión de
-desarrollo debe empezar por el diseño de la fase 2.2 (motor geométrico)
-antes de escribir código.
+Fin de fase 2.2: motor geométrico completado (`AxisAlignedBox`,
+límites, colisiones, soporte físico con unión de rectángulos, puntos
+candidatos, validación de layouts), con 141 pruebas unitarias en verde
+(73 de dominio + 68 de geometría). `geometry` depende únicamente de
+`domain`, verificado por `import-linter`. No se ha escrito ninguna
+línea de reglas de restricción, optimización, persistencia,
+exportación ni visualización 3D. La siguiente sesión de desarrollo
+debe empezar por el diseño de la fase 3 (motor de restricciones) antes
+de escribir código.

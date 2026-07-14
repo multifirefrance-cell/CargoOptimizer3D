@@ -5,6 +5,7 @@ from __future__ import annotations
 import cargo_optimizer
 import cargo_optimizer.application
 import cargo_optimizer.domain
+import cargo_optimizer.geometry
 import cargo_optimizer.infrastructure
 import cargo_optimizer.presentation
 import cargo_optimizer.presentation.desktop
@@ -12,11 +13,12 @@ from cargo_optimizer import LoadingSpace, LoadUnit
 
 
 def test_version_is_defined() -> None:
-    assert cargo_optimizer.__version__ == "0.3.0"
+    assert cargo_optimizer.__version__ == "0.4.0"
 
 
 def test_all_layers_import() -> None:
     assert cargo_optimizer.domain is not None
+    assert cargo_optimizer.geometry is not None
     assert cargo_optimizer.application is not None
     assert cargo_optimizer.infrastructure is not None
     assert cargo_optimizer.presentation is not None

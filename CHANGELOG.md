@@ -4,6 +4,36 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Este proyecto aún no ha alcanzado la versión 1.0; el versionado 0.x
 puede incluir cambios estructurales entre versiones menores.
 
+## [0.4.0] - 2026-07-14
+
+### Added
+
+- Motor geométrico determinista (fase 2.2 del roadmap): paquete
+  `cargo_optimizer.geometry`, hermano de `domain`, dependiendo
+  únicamente de él (verificado con `import-linter`).
+- `AxisAlignedBox` con `contains_point`, `contains_box`, `intersects`,
+  `overlaps`, `touches` e `intersection_volume_cm3`; `box_from_placement`.
+- `fits_inside_loading_space` / `validate_box_inside_loading_space`
+  (`geometry/bounds.py`).
+- Detección de colisiones O(n²): `boxes_overlap`,
+  `placement_overlaps_any`, `find_overlapping_placements`
+  (`geometry/collision.py`); tocarse no cuenta como colisión.
+- `Rectangle2D` y `union_area_cm2` (unión de rectángulos 2D por
+  compresión de coordenadas, sin dependencias externas).
+- Soporte físico básico: `support_area_cm2`, `support_ratio`,
+  `is_supported`, sin doble conteo de áreas de soporte solapadas.
+- `generate_candidate_positions`: puntos candidatos deterministas
+  (origen + extremos X/Y/Z de cada Placement), sin heurísticas de
+  optimización todavía.
+- `validate_layout`: detecta cajas fuera de límites, superposiciones,
+  falta de soporte, e `instance_number`/`sequence_number` duplicados.
+- `GEOMETRY_EPSILON_CM` (1e-9 cm), tolerancia única centralizada para
+  todas las comparaciones geométricas.
+- `docs/GeometryEngine.md` y
+  `docs/ADR/ADR-0006-motor-geometrico-tolerancia-y-contacto.md`.
+- 68 pruebas unitarias del motor geométrico (141 en total con las de
+  dominio).
+
 ## [0.3.0] - 2026-07-14
 
 ### Added
