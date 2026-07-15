@@ -73,8 +73,10 @@ presentation  →  infrastructure  →  application  →  optimization  →  rul
   de `.xlsx` con openpyxl — ver `docs/Excel.md`), ampliado en la fase
   8.1 con mapeo de columnas, vista previa, importación parcial,
   duplicados, informes y exportación avanzada, sin ningún formato
-  nuevo — ver `docs/ExcelAutomation.md`. ReportLab (PDF) llega en una
-  fase posterior.
+  nuevo — ver `docs/ExcelAutomation.md`. `infrastructure/pdf/`
+  (informes PDF, ReportLab) se diseñó por completo en la fase 9.0 sin
+  crear código todavía — ver `docs/PdfReportDesign.md` y ADR-0012; su
+  implementación llega en la fase 9.1.
 - **`presentation`**: mecanismos de entrega (`presentation/desktop`
   hoy con PySide6 y, dentro de él, `presentation/desktop/viewer/` con
   PyVista/PyVistaQt para el visor 3D — ver `docs/ThreeDViewer.md`;
@@ -111,8 +113,10 @@ ninguna dependencia de UI instalada (ADR-0003).
   de columnas, perfiles, vista previa, duplicados, drag&drop,
   importación masiva, informes, exportación avanzada— en la fase 8.1,
   implementada — ver `docs/ExcelAutomation.md`); nunca `pandas`,
-  `xlrd` ni CSV como sustituto. ReportLab para PDF llega en una fase
-  posterior.
+  `xlrd` ni CSV como sustituto. ReportLab para informes PDF: diseño
+  completo en la fase 9.0 (`docs/PdfReportDesign.md`, ADR-0012),
+  **todavía sin instalar ni implementar** — la dependencia se añade
+  recién en la fase 9.1.
 - Ruff para lint (incluye orden de imports). Black para formateo. No
   usar el formateador de Ruff para evitar conflictos con Black.
 - Mypy en modo estricto (`strict = true`).
@@ -130,7 +134,8 @@ src/cargo_optimizer/
 ├── application/     # Casos de uso, orquestación, puertos hacia infraestructura.
 ├── infrastructure/  # Adaptadores concretos: persistence/ (proyectos .cargo3d, JSON, fase 7.0),
 │                    #   database/ (catálogo SQLite/SQLAlchemy, fase 7.1 + perfiles de mapeo, fase 8.1),
-│                    #   excel/ (import/export .xlsx, fase 8.0 + automatización, fase 8.1), PDF (fase posterior).
+│                    #   excel/ (import/export .xlsx, fase 8.0 + automatización, fase 8.1),
+│                    #   pdf/ (diseñado en fase 9.0, docs/PdfReportDesign.md; sin implementar).
 └── presentation/
     └── desktop/     # Aplicación de escritorio PySide6. Incluye viewer/ (visor 3D, PyVista/PyVistaQt).
 tests/               # Pruebas, en espejo de la estructura de src/, + tests/integration/
@@ -166,8 +171,9 @@ userdata/            # Datos generados por el usuario en tiempo de ejecución. N
    (SQLite/SQLAlchemy) — 8.0. Importación y exportación profesional de
    Excel — 8.1. Automatización del flujo Excel (mapeo de columnas,
    perfiles, vista previa, importación parcial, duplicados, drag&drop,
-   importación masiva, informes, exportación avanzada) — 8.2. Reportes
-   PDF — 9. Integración ERP — 10. Versión comercial.
+   importación masiva, informes, exportación avanzada) — 9.0. Diseño
+   del sistema profesional de informes PDF — 9.1. Informes PDF:
+   implementación — 10. Integración ERP — 11. Versión comercial.
 
 La fase 2 original ("Motor geométrico") se dividió en 2.1 (modelo de
 dominio puro) y 2.2 (motor geométrico) para poder completar el modelo
@@ -184,38 +190,36 @@ no pertenece a `infrastructure` (como decía la fila original) sino a
 `docs/Roadmap.md`, secciones "Nota sobre la numeración de las fases 5 y
 6" y "Nota sobre la numeración y el paquete de la fase 6". La fase 8
 se subdivide igual: 8.0 (Excel básico) y lo que originalmente era 8.1
-(reportes PDF) pasa a **8.2**; un segundo encargo real sobre el módulo
-Excel ya en uso ocupa el hueco 8.1 con la automatización del flujo
-(mapeo de columnas, perfiles, vista previa, importación parcial,
+(reportes PDF) pasó primero a 8.2; un segundo encargo real sobre el
+módulo Excel ya en uso ocupó el hueco 8.1 con la automatización del
+flujo (mapeo de columnas, perfiles, vista previa, importación parcial,
 duplicados, drag&drop, importación masiva, informes, exportación
-avanzada) — ver `docs/Roadmap.md`, sección "Nota sobre la numeración de
-la fase 8".
+avanzada). Un tercer encargo, ya con 8.1 completada, renombró y
+subdividió lo que era 8.2 como **fase 9**: **9.0** (diseño puro de los
+informes PDF, esta entrega) y **9.1** (implementación, pendiente);
+"Integración ERP" pasó de 9 a **10**, y "Versión comercial" de 10 a
+**11** — ver `docs/Roadmap.md`, secciones "Nota sobre la numeración de
+la fase 8" y "Nota sobre la numeración de la fase 9".
 
-Estado actual: **automatización del flujo Excel implementada y en uso**
-(fin de fase 8.1). Sobre el catálogo de productos y perfiles
-reutilizables de la fase 7.1 (`infrastructure/database/`, ver
-`docs/Database.md`) y la importación/exportación profesional de Excel
-de la fase 8.0 (`infrastructure/excel/`, ver `docs/Excel.md`), esta
-fase añade: un mapeador de columnas con detección automática por alias
-y asignación manual (`mapping.py`); perfiles de mapeo reutilizables en
-el catálogo SQLite (`ImportMappingProfileRepository`, con cuatro
-perfiles oficiales integrados — Kupfer, Joan, Exanco, Formato estándar
-CargoOptimizer); vista previa antes de importar
-(`import_preview.py`); importación parcial y resolución de duplicados
-como función pura (`import_plan.py`); escritura transaccional
-todo-o-nada (`ProductCatalogRepository.apply_bulk`); arrastrar y soltar
-un `.xlsx` sobre `MainWindow`/`ProductCatalogDialog`
-(`presentation/desktop/drag_drop.py`); importación masiva de varios
-archivos con resumen final; un informe de importación exportable
-(`import_report.py`); y exportación avanzada de un `PackingResult`
-eligiendo hojas/orden/nombre (`advanced_export.py`). Detalle completo
-en `docs/ExcelAutomation.md`. La base de datos sigue viviendo fuera
-del repositorio (`%LOCALAPPDATA%/CargoOptimizer3D/cargo_optimizer.db`),
-nunca versionada ni guardada en OneDrive. `MainWindow` sigue abriendo
-en **modo limitado** si SQLite falla al iniciar (`catalog_service is
-None`): las tres acciones nuevas de importación de catálogo se
-deshabilitan igual que el resto de acciones dependientes del catálogo.
-`domain`/`geometry`/`rules`/`optimization` siguen intactos.
+Estado actual: **diseño completo del sistema de informes PDF** (fin de
+fase 9.0). `docs/PdfReportDesign.md` fija la arquitectura de
+`infrastructure/pdf/` (ocho módulos: `exceptions.py`, `styles.py`,
+`layout.py`, `report_config.py`, `report_content.py`, `sections.py`,
+`templates.py`, `report_builder.py`, ninguno implementado todavía),
+los cinco tipos de informe oficiales (resumen ejecutivo, informe
+técnico completo, packing list optimizado, informe interno de
+diagnóstico, informe para cliente) con su contenido exacto, la
+configuración (empresa, cliente, idioma, colores, cabecera/pie,
+numeración, marca de agua), el sistema de plantillas
+(`ReportTemplate` como datos, nunca una jerarquía de clases por
+informe — ADR-0012) y la integración diseñada — no implementada — con
+el visor 3D (`ReportContent.viewer_screenshot_png: bytes | None`,
+inyectado desde `presentation/desktop`, nunca calculado dentro de
+`infrastructure/pdf`). **Esta fase no creó ningún código funcional de
+PDF ni añadió `reportlab` como dependencia** — es exclusivamente de
+documentación, tal como exigía el encargo.
+`domain`/`geometry`/`rules`/`optimization`/`presentation`/
+`infrastructure/database`/`infrastructure/excel` siguen intactos.
 
 El visor 3D (fase 6.1) sigue disponible y sin cambios en esta fase —
 ver `docs/ThreeDViewer.md` para su implementación completa
@@ -227,8 +231,10 @@ productos, la ejecuta en `OptimizationWorker` (`QThread` dedicado),
 vuelca el `PackingResult` en cuatro pestañas del panel inferior y en el
 visor 3D, sin bloquear nunca el hilo de la interfaz. No implementar
 todavía filtros/etiquetas/modos de color/vistas predefinidas/captura de
-imagen del visor (fase 6.2), animación/capas/cortes/escala del visor
-(fase 6.3), reportes PDF (fase 8.2), integración ERP (fase 9),
+imagen del visor (fase 6.2 — un prerrequisito útil, no bloqueante, para
+que los informes PDF de 9.1 incluyan la captura del visor),
+animación/capas/cortes/escala del visor (fase 6.3), ningún código real
+de `infrastructure/pdf` (fase 9.1), integración ERP (fase 10),
 Undo/Redo, ni volver a tocar `domain`/`geometry`/`rules`/`optimization`
 salvo bug objetivo y demostrable, hasta que se indique explícitamente.
 Ver `docs/Roadmap.md` para el detalle fase a fase.

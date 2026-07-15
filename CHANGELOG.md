@@ -4,6 +4,41 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Este proyecto aún no ha alcanzado la versión 1.0; el versionado 0.x
 puede incluir cambios estructurales entre versiones menores.
 
+## [0.13.1] - 2026-07-15
+
+Diseño del sistema profesional de informes PDF (fase 9.0). Fase
+exclusivamente de documentación: no se implementa ningún generador
+PDF, no se añade `reportlab` como dependencia y no se crea el paquete
+`infrastructure/pdf/` todavía.
+
+### Added
+
+- `docs/PdfReportDesign.md`: arquitectura de `infrastructure/pdf/`
+  (ocho módulos propuestos: `exceptions.py`, `styles.py`, `layout.py`,
+  `report_config.py`, `report_content.py`, `sections.py`,
+  `templates.py`, `report_builder.py`, con justificación de cada uno);
+  los cinco tipos de informe (resumen ejecutivo, informe técnico
+  completo, packing list optimizado, informe interno de diagnóstico,
+  informe para cliente) con una matriz de contenido sección por
+  sección; configuración de empresa/cliente/idioma/colores/cabecera/
+  pie/numeración/marca de agua; integración diseñada (no implementada)
+  con el visor 3D vía `ReportContent.viewer_screenshot_png: bytes |
+  None`; sistema de plantillas (`ReportTemplate` como datos); diseño de
+  personalización futura (activar/desactivar/reordenar secciones,
+  plantillas propias del usuario); decisiones descartadas; revisión
+  crítica del propio diseño.
+- `docs/ADR/ADR-0012-arquitectura-del-sistema-de-informes-pdf.md`:
+  `ReportTemplate` como datos en vez de una jerarquía de clases por
+  informe; aislamiento de `reportlab` respecto a `domain`
+  (`report_content.py`/`report_config.py` sin ningún import de la
+  biblioteca de renderizado); captura del visor 3D inyectada como
+  `bytes | None`, nunca generada dentro de `infrastructure/pdf`.
+- Renumeración de fases pendientes en `docs/Roadmap.md`/`CLAUDE.md`:
+  "Reportes PDF" pasa a fase **9** (9.0 diseño, esta entrega; 9.1
+  implementación, pendiente); "Integración ERP" pasa de 9 a **10**;
+  "Versión comercial" pasa de 10 a **11**. Ninguna fase completada
+  cambia de número.
+
 ## [0.13.0] - 2026-07-15
 
 Automatización profesional del flujo Excel (fase 8.1): sobre el módulo

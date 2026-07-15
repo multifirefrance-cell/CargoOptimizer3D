@@ -18,7 +18,7 @@ entrega o cualquier detalle técnico externo.
 ┌─────────────────────────────────────────────────────────┐
 │ presentation   (desktop hoy; api / web en el futuro)     │
 ├─────────────────────────────────────────────────────────┤
-│ infrastructure (JSON — 7.0; SQLite — 7.1; Excel — 8.0/8.1; PDF — fase posterior) │
+│ infrastructure (JSON — 7.0; SQLite — 7.1; Excel — 8.0/8.1; PDF — diseñado en 9.0, pendiente 9.1) │
 ├─────────────────────────────────────────────────────────┤
 │ application    (casos de uso, orquestación, puertos)     │
 ├─────────────────────────────────────────────────────────┤
@@ -66,8 +66,12 @@ mapeo de columnas de Excel, en la misma base de datos). Desde la fase
 profesional de `.xlsx` con `openpyxl` — ver `docs/Excel.md`; la fase
 8.1 añade mapeo de columnas, vista previa, importación parcial,
 duplicados, informes y exportación avanzada sobre ese mismo módulo,
-sin nuevos formatos — ver `docs/ExcelAutomation.md`). ReportLab (PDF)
-llega en una fase posterior. Depende de `domain` (y de `application`
+sin nuevos formatos — ver `docs/ExcelAutomation.md`). El sistema de
+informes PDF (`infrastructure/pdf/`, ReportLab) se diseñó por completo
+en la fase 9.0 sin implementarse todavía — ver `docs/PdfReportDesign.md`
+y ADR-0012; su implementación real llega en la fase 9.1.
+
+Depende de `domain` (y de `application`
 cuando existan casos de uso reales que orquestar; los tres subpaquetes
 de momento solo necesitan `domain` para reconstruir las entidades).
 
@@ -105,6 +109,10 @@ infrastructure/
     ├── import_plan.py                 # Fase 8.1: importación parcial + resolución de duplicados (función pura)
     ├── import_report.py               # Fase 8.1: informe individual/masivo + exportación a .xlsx
     └── advanced_export.py             # Fase 8.1: selección/orden/nombre de hojas, ocultar vacías
+
+# infrastructure/pdf/ — diseñado en la fase 9.0 (docs/PdfReportDesign.md, ADR-0012),
+#   NO existe todavía como código: exceptions.py, styles.py, layout.py, report_config.py,
+#   report_content.py, sections.py, templates.py, report_builder.py. Implementación en la fase 9.1.
 ```
 
 ### `presentation`
