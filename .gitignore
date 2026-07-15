@@ -17,8 +17,11 @@ dist/
 *.egg-info/
 *.egg
 
-# Bases de datos locales
+# Bases de datos locales (catálogo/perfiles/historial, fase 7.1 — ver docs/Database.md)
 *.db
+*.db-wal
+*.db-shm
+*.db-journal
 *.sqlite3
 
 # Cobertura de tests

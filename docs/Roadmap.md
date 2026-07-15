@@ -21,7 +21,7 @@ fase se adelanta a la anterior.
 | 6.2 | Visor 3D — filtros, etiquetas, vistas, captura de imagen | `presentation/desktop/viewer` (mismos módulos) | Pendiente |
 | 6.3 | Visor 3D — animación y escala | `presentation/desktop/viewer` (mismos módulos) | Pendiente |
 | 7.0 | Persistencia de proyectos (`.cargo3d`, JSON versionado) | `infrastructure/persistence` (nuevo) | **Completada** |
-| 7.x | Persistencia de catálogos (SQLite/SQLAlchemy) | `infrastructure` (adaptador SQLAlchemy/SQLite) | Pendiente |
+| 7.1 | Catálogo de productos y perfiles reutilizables (SQLite/SQLAlchemy) | `infrastructure/database` (nuevo) | **Completada** |
 | 8 | Reportes | `infrastructure` (adaptadores openpyxl/ReportLab) | Pendiente |
 | 9 | Integración ERP | `presentation` (nuevo adaptador, p. ej. `presentation/api`) | Pendiente |
 | 10 | Versión comercial | — | Pendiente |
@@ -106,35 +106,48 @@ guardar y reabrir un **proyecto completo** (espacio, productos,
 resultado, estado de la interfaz) en un archivo propio versionado, y
 —en una fase futura, todavía no numerada en detalle— un catálogo
 reutilizable de Load Units/perfiles respaldado por SQLite. Se subdivide
-la fase 7 en **7.0** (persistencia de proyectos, JSON) y **7.x**
-(persistencia de catálogos, SQLite/SQLAlchemy), mismo criterio que las
-fases 2, 4, 5 y 6: no mezclar en una sola entrega dos mecanismos de
-persistencia con formatos, ciclo de vida y prioridad de uso distintos.
+la fase 7 en **7.0** (persistencia de proyectos, JSON) y **7.1**
+(catálogo de productos y perfiles reutilizables, SQLite/SQLAlchemy),
+mismo criterio que las fases 2, 4, 5 y 6: no mezclar en una sola
+entrega dos mecanismos de persistencia con formatos, ciclo de vida y
+prioridad de uso distintos.
 
 ## Estado actual
 
-Fin de fase 7.0: persistencia completa de proyectos en archivos
-`.cargo3d` (JSON UTF-8 versionado, legible por humanos) — ver
-`docs/ProjectFiles.md` para el formato real, `ProjectFileRepository`
-(`infrastructure/persistence/`), ciclo de vida completo en
-`MainWindow` (nuevo/abrir/guardar/guardar como/cerrar/recientes,
-cambios sin guardar con confirmación, invalidación automática del
-resultado al modificar productos o espacio, restauración completa de
-resultado/visor/paneles al reabrir un proyecto). Escritura atómica
-(archivo temporal + `os.replace`), backup automático de un nivel
-(`.cargo3d.bak`), infraestructura de migración de `schema_version`
-preparada (solo existe "1.0" hoy). 48 pruebas nuevas (491 en total).
-`domain`/`geometry`/`rules`/`optimization` sin ningún cambio
-(verificado con `git diff` vacío en los cuatro paquetes antes del
-commit) — el único hallazgo real de esta fase
-(`LoadingSpaceFormPanel.build_loading_space` perdía el tipo de los
-enums `LoadingSpaceCategory`/`DoorPosition` al leerlos de un
-`QComboBox`) se corrigió en `presentation`, no en dominio. La siguiente
-sesión de desarrollo puede abordar la **fase 6.2** (filtros, etiquetas,
-modos de color, vistas predefinidas, captura de imagen del visor 3D,
-pendiente desde la fase 6.1) o la **fase 7.x** (catálogos SQLite),
-según prioridad — ambas son válidas como siguiente paso, a decidir
-explícitamente antes de empezar. Si el rendimiento del motor a gran
-escala (250+ instancias) sigue siendo prioritario en paralelo, ver
-`docs/OptimizerPerformance.md` para la alternativa pendiente (índice
-espacial dentro de `rules`/`geometry`, con ADR explícito).
+Fin de fase 7.1: catálogo reutilizable de productos y perfiles de
+Loading Space respaldado por SQLite/SQLAlchemy — ver `docs/Database.md`
+para el detalle completo (esquema, versionado, repositorios,
+`CatalogService`, modo limitado, seguridad). Base de datos nueva en
+`infrastructure/database/` (`paths.py`, `exceptions.py`,
+`orm_models.py`, `migrations.py`, `engine.py` con `DatabaseManager`,
+`repositories.py` con `ProductCatalogRepository`,
+`LoadingSpaceProfileRepository`, `ProjectHistoryRepository`,
+`PackingRunHistoryRepository`, `catalog_service.py` con
+`CatalogService`), ubicada fuera del repositorio
+(`%LOCALAPPDATA%/CargoOptimizer3D/cargo_optimizer.db`, nunca en
+OneDrive ni versionada). Nuevos diálogos en
+`presentation/desktop/dialogs/` (`ProductCatalogDialog`,
+`CatalogProductEditorDialog`, `LoadingSpaceProfilesDialog`,
+`LoadingSpaceProfileEditorDialog` — este último reutiliza
+`LoadingSpaceFormPanel` en vez de duplicar el formulario) y dos modelos
+de tabla de solo lectura (`ProductCatalogTableModel`,
+`LoadingSpaceProfileTableModel`). `MainWindow` gana acciones reales
+para abrir el catálogo, guardar un producto del proyecto en el
+catálogo, añadir productos del catálogo al proyecto (copia
+independiente vía `CatalogService.copy_to_project`, sin vínculo vivo
+con el catálogo), guardar el Loading Space actual como perfil, aplicar
+un perfil guardado, y registro automático de historial (apertura y
+guardado de `.cargo3d`, ejecuciones de optimización correctas) que
+nunca bloquea la operación principal si la base de datos falla. La
+aplicación arranca en **modo limitado** si SQLite no está disponible:
+se muestra un aviso, pero la ventana abre igual y `.cargo3d` sigue
+funcionando sin catálogo ni historial. `domain`/`geometry`/`rules`/
+`optimization` sin ningún cambio. 116 pruebas nuevas (607 en total). La
+siguiente sesión de desarrollo puede abordar la **fase 6.2** (filtros,
+etiquetas, modos de color, vistas predefinidas, captura de imagen del
+visor 3D, pendiente desde la fase 6.1) o la **fase 8** (reportes
+Excel/PDF), según prioridad — a decidir explícitamente antes de
+empezar. Si el rendimiento del motor a gran escala (250+ instancias)
+sigue siendo prioritario en paralelo, ver `docs/OptimizerPerformance.md`
+para la alternativa pendiente (índice espacial dentro de
+`rules`/`geometry`, con ADR explícito).

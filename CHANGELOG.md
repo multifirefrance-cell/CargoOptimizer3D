@@ -4,6 +4,73 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Este proyecto aún no ha alcanzado la versión 1.0; el versionado 0.x
 puede incluir cambios estructurales entre versiones menores.
 
+## [0.11.0] - 2026-07-15
+
+Catálogo reutilizable de productos y perfiles de Loading Space
+respaldado por SQLite/SQLAlchemy (fase 7.1): un usuario puede guardar
+productos y perfiles de espacio para reutilizarlos en proyectos
+futuros, y la aplicación lleva un historial básico de proyectos
+abiertos/guardados y ejecuciones de optimización. Ver
+`docs/Database.md` para el detalle completo.
+
+### Added
+
+- `infrastructure/database/`: `paths.py` (`get_user_database_path()`,
+  por defecto `%LOCALAPPDATA%/CargoOptimizer3D/cargo_optimizer.db`,
+  fuera del repositorio y nunca versionada), `exceptions.py`
+  (`DatabaseError`/`DatabaseInitializationError`/
+  `DatabaseMigrationError`/`RepositoryError`/
+  `DuplicateCatalogSkuError`/`DuplicateLoadingSpaceProfileError`/
+  `RecordNotFoundError`), `orm_models.py` (`ProductCatalogORM`,
+  `LoadingSpaceProfileORM`, `ProjectHistoryORM`,
+  `PackingRunHistoryORM`, `SchemaMetadataORM`, sin relaciones de clave
+  foránea entre tablas), `migrations.py`
+  (`initialize_database`/`migrate_database`, `schema_version = "1"`,
+  versión desconocida = error claro, nunca adivinar), `engine.py`
+  (`DatabaseManager`: sesiones cortas vía `session_scope()`,
+  PRAGMAs `foreign_keys=ON`/`journal_mode=WAL`/`busy_timeout`, `backup()`
+  vía la API nativa `sqlite3.Connection.backup`, `health_check()` que
+  nunca lanza), `repositories.py` (`ProductCatalogRepository`,
+  `LoadingSpaceProfileRepository`, `ProjectHistoryRepository`,
+  `PackingRunHistoryRepository`, con conversión explícita ORM↔domain,
+  borrado siempre lógico vía `is_active`, unicidad de SKU/nombre
+  calculada solo entre registros activos), `catalog_service.py`
+  (`CatalogService`: fachada única con los cuatro repositorios y
+  `copy_to_project`/`copy_profile_to_project`, que siempre generan un
+  `UUID` nuevo — una copia independiente, nunca ligada al catálogo).
+- Perfiles de Loading Space integrados (`is_builtin=True`, protegidos
+  contra modificación/archivado directo): contenedor 20', 40' y 40'
+  High Cube, creados automáticamente si no existen
+  (`ensure_builtin_profiles()`).
+- UI: `presentation/desktop/dialogs/` (`ProductCatalogDialog`,
+  `CatalogProductEditorDialog`, `LoadingSpaceProfilesDialog`,
+  `LoadingSpaceProfileEditorDialog` — este último reutiliza
+  `LoadingSpaceFormPanel` en vez de duplicar el formulario) y dos
+  modelos de tabla de solo lectura
+  (`ProductCatalogTableModel`/`LoadingSpaceProfileTableModel`).
+  `MainWindow` gana acciones reales para abrir el catálogo, guardar un
+  producto del proyecto en el catálogo, añadir productos del catálogo
+  al proyecto, guardar el Loading Space actual como perfil y aplicar un
+  perfil guardado.
+- Registro automático de historial al abrir/guardar un `.cargo3d` y al
+  finalizar una optimización correctamente; cualquier fallo de la base
+  de datos durante el registro se degrada a un aviso en el panel de
+  registro, sin interrumpir nunca la operación principal.
+- **Modo limitado**: si SQLite no está disponible al iniciar, la
+  aplicación abre igual con un aviso, las acciones de catálogo/perfiles
+  quedan deshabilitadas y `.cargo3d` sigue funcionando sin ningún
+  cambio.
+- `pyproject.toml`: nueva dependencia `SQLAlchemy>=2.0,<3`.
+- 116 pruebas nuevas (607 en total):
+  `tests/infrastructure/database/` (base de datos, esquema, sesiones,
+  PRAGMAs, backup, base de datos corrupta, repositorios de catálogo,
+  perfiles e historial) y `tests/presentation/desktop/` (modelos de
+  tabla, diálogos bajo `offscreen` sin abrir ventanas reales,
+  integración completa en `MainWindow`, incluido modo limitado).
+- `docs/Database.md` (esquema con diagrama Mermaid, versionado,
+  repositorios, `CatalogService`, modo limitado, seguridad,
+  diferencias con `.cargo3d`).
+
 ## [0.10.0] - 2026-07-15
 
 Persistencia completa de proyectos en archivos `.cargo3d` (fase 7.0):

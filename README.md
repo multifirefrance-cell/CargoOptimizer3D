@@ -26,7 +26,7 @@ src/cargo_optimizer/
 ├── domain/          # Entidades y reglas de negocio puras. Sin dependencias externas.
 ├── application/     # Casos de uso, orquestación, puertos hacia infraestructura.
 ├── infrastructure/  # Adaptadores concretos: persistence/ (proyectos .cargo3d, JSON),
-│                    #   SQLite/catálogos, Excel, PDF (fases posteriores).
+│                    #   database/ (catálogo SQLite/SQLAlchemy), Excel, PDF (fases posteriores).
 └── presentation/
     └── desktop/     # Aplicación de escritorio (PySide6). Incluye viewer/ (visor 3D).
 ```
@@ -70,9 +70,11 @@ python -m venv .venv
 
 ## Estado del proyecto
 
-Fin de fase 7.0: motor de optimización, interfaz de escritorio, visor
-3D y persistencia de proyectos (`.cargo3d`, JSON versionado) ya
-implementados — ver `docs/Roadmap.md` para el detalle fase a fase y
-`docs/ProjectFiles.md` para el formato de archivo de proyecto.
-Catálogos SQLite, reportes (Excel/PDF) e integración ERP se
-implementarán en fases posteriores.
+Fin de fase 7.1: motor de optimización, interfaz de escritorio, visor
+3D, persistencia de proyectos (`.cargo3d`, JSON versionado) y catálogo
+reutilizable de productos/perfiles respaldado por SQLite ya
+implementados — ver `docs/Roadmap.md` para el detalle fase a fase,
+`docs/ProjectFiles.md` para el formato de archivo de proyecto y
+`docs/Database.md` para el catálogo SQLite (productos, perfiles de
+Loading Space e historial básico). Reportes (Excel/PDF) e integración
+ERP se implementarán en fases posteriores.

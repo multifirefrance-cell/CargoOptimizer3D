@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QDockWidget,
     QFileDialog,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMenu,
@@ -48,9 +50,16 @@ from cargo_optimizer.domain.exceptions import DomainValidationError, DuplicateSk
 from cargo_optimizer.domain.load_unit import LoadUnit
 from cargo_optimizer.domain.packing_result import PackingResult
 from cargo_optimizer.domain.project import CargoProject
+from cargo_optimizer.infrastructure.database import CatalogService, DatabaseError, RepositoryError
 from cargo_optimizer.infrastructure.persistence import ProjectFileError, ProjectFileRepository
 from cargo_optimizer.optimization import GreedyExtremePointStrategy, PackingProgress, PackingRequest
 from cargo_optimizer.optimization.exceptions import PackingRequestValidationError
+from cargo_optimizer.presentation.desktop.dialogs.loading_space_profiles_dialog import (
+    LoadingSpaceProfilesDialog,
+)
+from cargo_optimizer.presentation.desktop.dialogs.product_catalog_dialog import (
+    ProductCatalogDialog,
+)
 from cargo_optimizer.presentation.desktop.icons import icon
 from cargo_optimizer.presentation.desktop.panels.loading_space_form_panel import (
     LoadingSpaceFormPanel,
@@ -96,10 +105,17 @@ STATE_ERROR = "error"
 class MainWindow(QMainWindow):
     """Ventana principal: menús, toolbar, paneles acoplables y barra de estado."""
 
-    def __init__(self, settings: AppSettings | None = None) -> None:
+    def __init__(
+        self,
+        settings: AppSettings | None = None,
+        *,
+        catalog_service: CatalogService | None = None,
+        catalog_error: str | None = None,
+    ) -> None:
         super().__init__()
         self._settings = settings or AppSettings()
         self._project_repository = ProjectFileRepository()
+        self._catalog_service = catalog_service
         self._optimization_worker: OptimizationWorker | None = None
         self._last_load_units_by_id: dict[UUID, LoadUnit] = {}
         self._cancel_requested = False
@@ -132,6 +148,17 @@ class MainWindow(QMainWindow):
             self._suspend_change_tracking = False
         self.viewer_widget.set_dark_theme(self._settings.theme() == THEME_DARK)
         self._update_window_title()
+
+        self._apply_catalog_availability()
+        if catalog_error is not None:
+            self._show_warning(
+                "Catálogo no disponible",
+                "No se pudo inicializar la base de datos del catálogo de productos, "
+                f"perfiles e historial:\n\n{catalog_error}\n\n"
+                "La aplicación continúa en modo limitado: los proyectos .cargo3d "
+                "siguen funcionando con normalidad, pero el catálogo, los perfiles "
+                "guardados y el historial no estarán disponibles en esta sesión.",
+            )
 
     # ------------------------------------------------------------------
     # Construcción de la interfaz
@@ -233,7 +260,10 @@ class MainWindow(QMainWindow):
             "new", "&Nuevo espacio de carga", None, self._stub("Nuevo espacio de carga")
         )
         self.action_predefined_profiles = self._make_action(
-            "open", "&Perfiles predefinidos…", None, self._stub("Perfiles predefinidos")
+            "open", "&Perfiles guardados…", None, self._on_open_profiles
+        )
+        self.action_save_as_profile = self._make_action(
+            "save", "&Guardar espacio como perfil…", None, self._on_save_as_profile
         )
         self.action_delete_loading_space = self._make_action(
             "cancel", "&Eliminar espacio de carga", None, self._stub("Eliminar espacio de carga")
@@ -250,6 +280,18 @@ class MainWindow(QMainWindow):
         )
         self.action_import_products = self._make_action(
             "import", "Importar &productos…", None, self._on_import
+        )
+        self.action_open_catalog = self._make_action(
+            "open", "&Catálogo de productos…", None, self._on_open_catalog
+        )
+        self.action_save_product_to_catalog = self._make_action(
+            "save",
+            "&Guardar seleccionado en catálogo",
+            None,
+            self._on_save_product_to_catalog,
+        )
+        self.action_add_from_catalog = self._make_action(
+            "import", "Añadir &desde catálogo…", None, self._on_open_catalog
         )
 
         self.action_run_optimization = self._make_action(
@@ -376,6 +418,7 @@ class MainWindow(QMainWindow):
         loading_space_menu = menu_bar.addMenu("&Espacio de carga")
         loading_space_menu.addAction(self.action_new_loading_space)
         loading_space_menu.addAction(self.action_predefined_profiles)
+        loading_space_menu.addAction(self.action_save_as_profile)
         loading_space_menu.addSeparator()
         loading_space_menu.addAction(self.action_delete_loading_space)
 
@@ -383,6 +426,10 @@ class MainWindow(QMainWindow):
         products_menu.addAction(self.action_new_product)
         products_menu.addAction(self.action_import_products)
         products_menu.addAction(self.action_export)
+        products_menu.addSeparator()
+        products_menu.addAction(self.action_open_catalog)
+        products_menu.addAction(self.action_add_from_catalog)
+        products_menu.addAction(self.action_save_product_to_catalog)
         products_menu.addSeparator()
         products_menu.addAction(self.action_delete_products)
 
@@ -552,6 +599,7 @@ class MainWindow(QMainWindow):
         self._mark_clean()
         self._remember_directory_of(str(path))
         self._settings.add_recent_project_file(str(path))
+        self._record_project_open_history(path)
         self.log_panel.append_entry(f"Proyecto abierto: {path}")
         self.statusBar().showMessage(f"Proyecto abierto: {path.name}", _STATUS_MESSAGE_MS)
 
@@ -614,6 +662,7 @@ class MainWindow(QMainWindow):
         self._mark_clean()
         self._remember_directory_of(str(path))
         self._settings.add_recent_project_file(str(path))
+        self._record_project_save_history(path)
         self.log_panel.append_entry(f"Proyecto guardado: {path}")
         self.statusBar().showMessage(f"Proyecto guardado: {path.name}", _STATUS_MESSAGE_MS)
         return True
@@ -634,6 +683,242 @@ class MainWindow(QMainWindow):
 
     def _remember_directory_of(self, file_path: str) -> None:
         self._settings.set_last_directory(str(Path(file_path).parent))
+
+    # ------------------------------------------------------------------
+    # Catálogo de productos y perfiles de espacio (fase 7.1)
+    # ------------------------------------------------------------------
+
+    def _apply_catalog_availability(self) -> None:
+        """Deshabilita las acciones de catálogo/perfiles cuando la base no está disponible."""
+        available = self._catalog_service is not None
+        for action in (
+            self.action_open_catalog,
+            self.action_add_from_catalog,
+            self.action_save_product_to_catalog,
+            self.action_predefined_profiles,
+            self.action_save_as_profile,
+        ):
+            action.setEnabled(available)
+
+    def _on_open_catalog(self) -> None:
+        if self._catalog_service is None:
+            return
+        dialog = ProductCatalogDialog(self, repository=self._catalog_service.products)
+        if dialog.exec() != ProductCatalogDialog.DialogCode.Accepted:
+            return
+        chosen = dialog.selected_units_to_add()
+        if not chosen:
+            return
+
+        existing_skus = {unit.sku.lower() for unit in self.product_table_panel.model.load_units()}
+        to_add = []
+        skipped: list[str] = []
+        for catalog_unit in chosen:
+            if catalog_unit.sku.lower() in existing_skus:
+                skipped.append(catalog_unit.sku)
+                continue
+            to_add.append(CatalogService.copy_to_project(catalog_unit))
+            existing_skus.add(catalog_unit.sku.lower())
+
+        if to_add:
+            self.product_table_panel.model.add_units(to_add)
+            self.statusBar().showMessage(
+                f"{len(to_add)} producto(s) añadido(s) desde el catálogo.", _STATUS_MESSAGE_MS
+            )
+        if skipped:
+            self._show_warning(
+                "SKU ya presente en el proyecto",
+                "No se añadieron los siguientes productos porque su SKU ya existe en "
+                "el proyecto actual: " + ", ".join(skipped),
+            )
+
+    def _on_save_product_to_catalog(self) -> None:
+        if self._catalog_service is None:
+            return
+        indexes = self.product_table_panel.table_view.selectionModel().selectedRows()
+        if not indexes:
+            self._show_warning(
+                "Sin selección", "Selecciona un producto de la tabla para guardarlo en el catálogo."
+            )
+            return
+        unit = self.product_table_panel.model.load_units()[indexes[0].row()]
+
+        existing = self._catalog_service.products.get_by_sku(unit.sku)
+        if existing is None:
+            try:
+                self._catalog_service.products.add(unit)
+            except RepositoryError as exc:
+                self._show_warning("No se pudo guardar en el catálogo", str(exc))
+                return
+            self.statusBar().showMessage(
+                f"Producto '{unit.sku}' guardado en el catálogo.", _STATUS_MESSAGE_MS
+            )
+            return
+
+        response = QMessageBox.question(
+            self,
+            "El SKU ya existe en el catálogo",
+            f"Ya existe un producto de catálogo con SKU '{unit.sku}'. ¿Qué deseas hacer?",
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.SaveAll
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
+        )
+        if response == QMessageBox.StandardButton.Cancel:
+            return
+        if response == QMessageBox.StandardButton.Save:
+            try:
+                self._catalog_service.products.update(replace(unit, id=existing.id))
+            except RepositoryError as exc:
+                self._show_warning("No se pudo actualizar el catálogo", str(exc))
+                return
+            self.statusBar().showMessage(
+                f"Producto '{unit.sku}' actualizado en el catálogo.", _STATUS_MESSAGE_MS
+            )
+            return
+
+        # SaveAll se reutiliza aquí como "Guardar con otro SKU".
+        new_sku, accepted = QInputDialog.getText(
+            self, "Guardar con otro SKU", "Nuevo SKU para el catálogo:", text=f"{unit.sku}-2"
+        )
+        if not accepted or not new_sku.strip():
+            return
+        try:
+            self._catalog_service.products.add(replace(unit, id=uuid4(), sku=new_sku.strip()))
+        except RepositoryError as exc:
+            self._show_warning("No se pudo guardar en el catálogo", str(exc))
+            return
+        self.statusBar().showMessage(
+            f"Producto guardado en el catálogo con SKU '{new_sku.strip()}'.", _STATUS_MESSAGE_MS
+        )
+
+    def _on_open_profiles(self) -> None:
+        if self._catalog_service is None:
+            return
+        dialog = LoadingSpaceProfilesDialog(self, repository=self._catalog_service.profiles)
+        if dialog.exec() != LoadingSpaceProfilesDialog.DialogCode.Accepted:
+            return
+        chosen = dialog.result_space()
+        if chosen is None:
+            return
+        self.loading_space_form_panel.set_loading_space(
+            CatalogService.copy_profile_to_project(chosen)
+        )
+        self.statusBar().showMessage(f"Perfil '{chosen.name}' aplicado.", _STATUS_MESSAGE_MS)
+
+    def _on_save_as_profile(self) -> None:
+        if self._catalog_service is None:
+            return
+        space = self.loading_space_form_panel.build_loading_space()
+        if space is None:
+            self._show_warning(
+                "Espacio de carga incompleto",
+                "Define un espacio de carga válido antes de guardarlo como perfil.",
+            )
+            return
+
+        existing = self._catalog_service.profiles.get_by_name(space.name)
+        if existing is None:
+            try:
+                self._catalog_service.profiles.add(space)
+            except RepositoryError as exc:
+                self._show_warning("No se pudo guardar el perfil", str(exc))
+                return
+            self.statusBar().showMessage(f"Perfil '{space.name}' guardado.", _STATUS_MESSAGE_MS)
+            return
+
+        response = QMessageBox.question(
+            self,
+            "El perfil ya existe",
+            f"Ya existe un perfil llamado '{space.name}'. ¿Qué deseas hacer?",
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.SaveAll
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
+        )
+        if response == QMessageBox.StandardButton.Cancel:
+            return
+        if response == QMessageBox.StandardButton.Save:
+            try:
+                self._catalog_service.profiles.update(replace(space, id=existing.id))
+            except RepositoryError as exc:
+                self._show_warning("No se pudo actualizar el perfil", str(exc))
+                return
+            self.statusBar().showMessage(f"Perfil '{space.name}' actualizado.", _STATUS_MESSAGE_MS)
+            return
+
+        # SaveAll se reutiliza aquí como "Duplicar con otro nombre".
+        new_name, accepted = QInputDialog.getText(
+            self, "Guardar con otro nombre", "Nuevo nombre del perfil:", text=f"{space.name} (2)"
+        )
+        if not accepted or not new_name.strip():
+            return
+        try:
+            self._catalog_service.profiles.add(replace(space, id=uuid4(), name=new_name.strip()))
+        except RepositoryError as exc:
+            self._show_warning("No se pudo guardar el perfil", str(exc))
+            return
+        self.statusBar().showMessage(
+            f"Perfil guardado con el nombre '{new_name.strip()}'.", _STATUS_MESSAGE_MS
+        )
+
+    def _record_project_open_history(self, path: Path) -> None:
+        if self._catalog_service is None:
+            return
+        try:
+            self._catalog_service.project_history.record_open(
+                project_id=self._current_project_id,
+                project_name=path.stem,
+                file_path=str(path),
+                application_version=__version__,
+            )
+        except DatabaseError as exc:
+            self.log_panel.append_entry(
+                f"Aviso: no se pudo registrar el historial de apertura: {exc}"
+            )
+
+    def _record_project_save_history(self, path: Path) -> None:
+        if self._catalog_service is None:
+            return
+        result = self._last_result
+        try:
+            self._catalog_service.project_history.record_save(
+                project_id=self._current_project_id,
+                project_name=path.stem,
+                file_path=str(path),
+                application_version=__version__,
+                packed_count=result.packed_count if result is not None else None,
+                requested_count=result.requested_count if result is not None else None,
+                volume_utilization_percent=(
+                    result.volume_utilization_percent if result is not None else None
+                ),
+                used_weight_kg=result.used_weight_kg if result is not None else None,
+                algorithm_name=result.algorithm_name if result is not None else None,
+            )
+        except DatabaseError as exc:
+            self.log_panel.append_entry(
+                f"Aviso: no se pudo registrar el historial de guardado: {exc}"
+            )
+
+    def _record_run_history(self, result: PackingResult) -> None:
+        if self._catalog_service is None:
+            return
+        try:
+            self._catalog_service.run_history.record_run(
+                project_id=self._current_project_id,
+                project_name=self._project_display_name(),
+                result=result,
+                application_version=__version__,
+                project_file_path=(
+                    str(self._current_project_path)
+                    if self._current_project_path is not None
+                    else None
+                ),
+            )
+        except DatabaseError as exc:
+            self.log_panel.append_entry(
+                f"Aviso: no se pudo registrar el historial de ejecución: {exc}"
+            )
 
     def _rebuild_recent_projects_menu(self) -> None:
         self.menu_recent_projects.clear()
@@ -840,6 +1125,8 @@ class MainWindow(QMainWindow):
         self.viewer_widget.display_result(result, self._last_load_units_by_id)
         self._mark_dirty()
         self._set_state(STATE_FINISHED)
+        if not self._cancel_requested:
+            self._record_run_history(result)
         message = (
             "Optimización cancelada." if self._cancel_requested else "Optimización finalizada."
         )
@@ -1056,4 +1343,6 @@ class MainWindow(QMainWindow):
             worker.wait(5000)
         self._save_ui_state()
         self.viewer_widget.shutdown()
+        if self._catalog_service is not None:
+            self._catalog_service.close()
         super().closeEvent(event)

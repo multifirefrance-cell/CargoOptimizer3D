@@ -65,7 +65,9 @@ presentation  →  infrastructure  →  application  →  optimization  →  rul
 - **`infrastructure`**: adaptadores concretos que implementan los
   puertos de `application`. Desde la fase 7.0 incluye
   `infrastructure/persistence/` (proyectos `.cargo3d`, JSON propio —
-  ver `docs/ProjectFiles.md`); SQLAlchemy/SQLite (catálogos), openpyxl,
+  ver `docs/ProjectFiles.md`); desde la fase 7.1 incluye
+  `infrastructure/database/` (catálogo de productos y perfiles de
+  Loading Space, SQLAlchemy/SQLite — ver `docs/Database.md`). openpyxl,
   ReportLab llegan en fases posteriores.
 - **`presentation`**: mecanismos de entrega (`presentation/desktop`
   hoy con PySide6 y, dentro de él, `presentation/desktop/viewer/` con
@@ -93,8 +95,11 @@ ninguna dependencia de UI instalada (ADR-0003).
   `docs/ThreeDViewer.md`).
 - JSON propio (`json` de la biblioteca estándar) para persistencia de
   proyectos (`.cargo3d`, fase 7.0, implementada — ver
-  `docs/ProjectFiles.md`). SQLite + SQLAlchemy para catálogos (fase
-  7.x, aún no implementada).
+  `docs/ProjectFiles.md`). SQLite + SQLAlchemy 2.x para el catálogo de
+  productos, perfiles de Loading Space e historial (fase 7.1,
+  implementada — ver `docs/Database.md`); base de datos ubicada en
+  `%LOCALAPPDATA%/CargoOptimizer3D/`, nunca dentro del repositorio ni
+  versionada.
 - openpyxl para Excel y ReportLab para PDF (fase 8, aún no
   implementadas).
 - Ruff para lint (incluye orden de imports). Black para formateo. No
@@ -113,7 +118,7 @@ src/cargo_optimizer/
 ├── optimization/    # Motor de empaquetado real. Depende de domain, geometry y rules.
 ├── application/     # Casos de uso, orquestación, puertos hacia infraestructura.
 ├── infrastructure/  # Adaptadores concretos: persistence/ (proyectos .cargo3d, JSON, fase 7.0),
-│                    #   SQLite/catálogos, Excel, PDF (fases posteriores).
+│                    #   database/ (catálogo SQLite/SQLAlchemy, fase 7.1), Excel, PDF (fases posteriores).
 └── presentation/
     └── desktop/     # Aplicación de escritorio PySide6. Incluye viewer/ (visor 3D, PyVista/PyVistaQt).
 tests/               # Pruebas, en espejo de la estructura de src/, + tests/integration/
@@ -145,8 +150,9 @@ userdata/            # Datos generados por el usuario en tiempo de ejecución. N
    6.0. Diseño del visor 3D — 6.1. Visor 3D: implementación mínima —
    6.2. Visor 3D: filtros/etiquetas/vistas/captura — 6.3. Visor 3D:
    animación y escala — 7.0. Persistencia de proyectos (.cargo3d,
-   JSON) — 7.x. Persistencia de catálogos (SQLite) — 8. Reportes — 9.
-   Integración ERP — 10. Versión comercial.
+   JSON) — 7.1. Catálogo de productos y perfiles reutilizables
+   (SQLite/SQLAlchemy) — 8. Reportes — 9. Integración ERP — 10. Versión
+   comercial.
 
 La fase 2 original ("Motor geométrico") se dividió en 2.1 (modelo de
 dominio puro) y 2.2 (motor geométrico) para poder completar el modelo
@@ -163,46 +169,46 @@ no pertenece a `infrastructure` (como decía la fila original) sino a
 `docs/Roadmap.md`, secciones "Nota sobre la numeración de las fases 5 y
 6" y "Nota sobre la numeración y el paquete de la fase 6".
 
-Estado actual: **persistencia de proyectos implementada y en uso**
-(fin de fase 7.0). Un usuario puede crear un proyecto, cargarlo con
-espacio y productos, optimizar, guardar en un archivo `.cargo3d`
-(JSON UTF-8 versionado, `infrastructure/persistence/`), cerrar la
-aplicación y reabrir el mismo archivo días después para continuar
-exactamente donde lo dejó (espacio, productos, último resultado,
-visor 3D, tema, disposición de paneles). Ver `docs/ProjectFiles.md`
-para el formato completo, `ProjectFileRepository` (`save`/`load`/
-`validate`/`backup`, escritura atómica, backup de un nivel,
-infraestructura de migración de `schema_version` preparada con solo
-"1.0" implementada). `MainWindow` implementa el ciclo de vida completo
-(nuevo/abrir/guardar/guardar como/cerrar proyecto/recientes, título con
-`*` cuando hay cambios sin guardar, confirmación
-Guardar/Descartar/Cancelar al cerrar o cambiar de proyecto con cambios
-pendientes) y la invalidación automática del resultado al modificar
-productos o espacio ("El resultado anterior fue invalidado porque el
-proyecto cambió." — nunca se re-ejecuta el algoritmo automáticamente).
-`domain`/`geometry`/`rules`/`optimization` siguen intactos; el único
-hallazgo real de esta fase
-(`LoadingSpaceFormPanel.build_loading_space` perdía el tipo de los
-enums `LoadingSpaceCategory`/`DoorPosition` al leerlos de un
-`QComboBox` vía `QVariant`) se corrigió en `presentation`, documentado
-en `docs/ProjectFiles.md`, sección 9.
+Estado actual: **catálogo de productos y perfiles reutilizables
+implementado y en uso** (fin de fase 7.1). Además de la persistencia de
+proyectos (`.cargo3d`, fase 7.0), la aplicación tiene ahora un catálogo
+respaldado por SQLite/SQLAlchemy (`infrastructure/database/`, ver
+`docs/Database.md`) para reutilizar productos y perfiles de Loading
+Space entre proyectos, y para llevar un historial básico de proyectos
+abiertos/guardados y ejecuciones de optimización. La base de datos vive
+fuera del repositorio (`%LOCALAPPDATA%/CargoOptimizer3D/
+cargo_optimizer.db`), nunca se versiona ni se guarda en OneDrive.
+`ProductCatalogRepository` y `LoadingSpaceProfileRepository` permiten
+añadir/editar/buscar/duplicar/archivar (nunca borrado físico) productos
+y perfiles; `ProjectHistoryRepository` y `PackingRunHistoryRepository`
+registran apertura/guardado de proyectos y ejecuciones correctas del
+optimizador, sin duplicar nunca el `.cargo3d` completo ni el layout
+íntegro del resultado. `CatalogService` es la fachada única que expone
+los cuatro repositorios y las conversiones catálogo→proyecto
+(`copy_to_project`/`copy_profile_to_project`, siempre con un `UUID`
+nuevo — un producto o perfil copiado a un proyecto es una copia
+independiente, nunca queda ligado al catálogo). `MainWindow` recibe un
+`CatalogService | None` opcional: si SQLite falla al iniciar, la
+aplicación abre igual en **modo limitado** (aviso al usuario, acciones
+de catálogo/perfiles deshabilitadas, `.cargo3d` sigue funcionando sin
+ninguna dependencia del catálogo). `domain`/`geometry`/`rules`/
+`optimization` siguen intactos.
 
-El visor 3D (fase 6.1) sigue disponible y ahora también se restaura al
-abrir un proyecto guardado — ver `docs/ThreeDViewer.md` para su
-implementación completa (arquitectura, selección, cámara, temas,
-fallback, el hallazgo del segmentation fault de VTK bajo `offscreen`,
-etc., sin cambios en esta fase). La interfaz ejecuta el motor real de
-principio a fin desde la fase 5.1: construye una `PackingRequest`
-desde el formulario de Loading Space y la tabla de productos, la
-ejecuta en `OptimizationWorker` (`QThread` dedicado), vuelca el
-`PackingResult` en cuatro pestañas del panel inferior y en el visor
-3D, sin bloquear nunca el hilo de la interfaz. No implementar todavía
-filtros/etiquetas/modos de color/vistas predefinidas/captura de imagen
-del visor (fase 6.2), animación/capas/cortes/escala del visor (fase
-6.3), catálogos SQLite (fase 7.x), Excel, PDF, importación/exportación
-real, Undo/Redo, ni volver a tocar `domain`/`geometry`/`rules`/
-`optimization` salvo bug objetivo y demostrable, hasta que se indique
-explícitamente. Ver `docs/Roadmap.md` para el detalle fase a fase.
+El visor 3D (fase 6.1) sigue disponible y sin cambios en esta fase —
+ver `docs/ThreeDViewer.md` para su implementación completa
+(arquitectura, selección, cámara, temas, fallback, el hallazgo del
+segmentation fault de VTK bajo `offscreen`, etc.). La interfaz ejecuta
+el motor real de principio a fin desde la fase 5.1: construye una
+`PackingRequest` desde el formulario de Loading Space y la tabla de
+productos, la ejecuta en `OptimizationWorker` (`QThread` dedicado),
+vuelca el `PackingResult` en cuatro pestañas del panel inferior y en el
+visor 3D, sin bloquear nunca el hilo de la interfaz. No implementar
+todavía filtros/etiquetas/modos de color/vistas predefinidas/captura de
+imagen del visor (fase 6.2), animación/capas/cortes/escala del visor
+(fase 6.3), Excel, PDF, importación/exportación real, Undo/Redo, ni
+volver a tocar `domain`/`geometry`/`rules`/`optimization` salvo bug
+objetivo y demostrable, hasta que se indique explícitamente. Ver
+`docs/Roadmap.md` para el detalle fase a fase.
 
 ## Invariantes del modelo de dominio (no romper sin ADR)
 
@@ -561,6 +567,99 @@ Formato completo documentado en `docs/ProjectFiles.md`.
   necesita otra respuesta (Guardar/Cancelar), debe sobrescribirla
   localmente con su propio `monkeypatch`, nunca depender de que el
   diálogo real responda.
+
+## Invariantes del catálogo SQLite (`infrastructure/database/`, implementado en la fase 7.1, no romper sin ADR)
+
+Detalle completo en `docs/Database.md` (esquema, versionado,
+repositorios, `CatalogService`, modo limitado, seguridad).
+
+- `infrastructure/database` depende de `domain` y de SQLAlchemy; nunca
+  de `presentation`, ni de PySide6/Qt. Los modelos ORM
+  (`orm_models.py`) son un mapeo puro a tablas, sin métodos de UI ni
+  lógica de negocio; nunca se exponen fuera de `infrastructure` — todo
+  cruce hacia/desde `domain` pasa por una conversión explícita
+  (`_orm_to_load_unit`, `_orm_to_loading_space`, etc.), nunca por
+  `__dict__` ni mapeo automático.
+- El catálogo SQLite y los archivos `.cargo3d` son dos mecanismos de
+  persistencia con propósitos distintos y **sin dependencia entre
+  sí**: SQLite guarda datos reutilizables entre proyectos (productos,
+  perfiles, historial); `.cargo3d` es la fotografía completa y portable
+  de un proyecto. Ningún `.cargo3d` puede depender de que una fila del
+  catálogo siga existiendo. Copiar un producto o perfil del catálogo a
+  un proyecto (`CatalogService.copy_to_project`/
+  `copy_profile_to_project`) siempre genera un `LoadUnit`/
+  `LoadingSpace` con un `UUID` nuevo — una copia completa e
+  independiente, nunca una referencia — ver `docs/ProjectFiles.md`,
+  sección 12.
+- La base de datos vive siempre fuera del repositorio
+  (`get_user_database_path()`, por defecto
+  `%LOCALAPPDATA%/CargoOptimizer3D/cargo_optimizer.db`), nunca
+  hardcodeada, nunca versionada, nunca dentro de OneDrive por defecto.
+  No calcular esta ruta en ningún otro punto del código — siempre a
+  través de esta función.
+- Borrado siempre lógico (`is_active=False`), nunca físico, tanto para
+  `product_catalog` como para `loading_space_profiles`: un producto o
+  perfil archivado libera su SKU/nombre para que puedan reutilizarse,
+  pero la fila sigue existiendo. Los perfiles `is_builtin=True` no
+  pueden archivarse ni modificarse directamente
+  (`LoadingSpaceProfileRepository.update()` lanza `RepositoryError`);
+  solo pueden duplicarse como perfil personalizado.
+  Unicidad de SKU/nombre se calcula siempre **solo entre registros
+  activos**, nunca como restricción `UNIQUE` a nivel de columna SQLite
+  (esa restricción no podría expresar "único entre los activos").
+- Ninguna tabla del catálogo tiene claves foráneas hacia otra: cada una
+  tiene un ciclo de vida independiente (ver el diagrama en
+  `docs/Database.md`). No introducir relaciones `ForeignKey` entre
+  `product_catalog`/`loading_space_profiles`/`project_history`/
+  `packing_run_history` sin una razón nueva y un ADR.
+- `project_history` y `packing_run_history` nunca duplican el
+  `.cargo3d` completo ni el layout íntegro de un `PackingResult`: solo
+  guardan metadatos agregados (contadores, porcentajes de utilización,
+  rutas de archivo, marcas de tiempo). No ampliar estas tablas para
+  guardar placements individuales ni estado del visor 3D.
+- Cada operación de repositorio abre y cierra su propia sesión corta
+  (`DatabaseManager.session_scope()`, un `@contextmanager` que hace
+  commit al éxito y rollback+relanza en excepción); nunca se comparte
+  una `Session` entre operaciones ni entre hilos. `OptimizationWorker`
+  (el `QThread` del motor de packing) nunca abre ni usa una sesión de
+  SQLAlchemy — el historial de una ejecución se registra siempre desde
+  el hilo de la GUI, después de recibir el `PackingResult`.
+- Arranque en **modo limitado** si la base de datos falla al
+  inicializarse: `app.py::_initialize_catalog_service()` captura
+  `DatabaseError` y construye `MainWindow` con
+  `catalog_service=None`. La aplicación **nunca** deja de abrir por un
+  fallo de SQLite — `.cargo3d` sigue funcionando sin ningún cambio.
+  `MainWindow._apply_catalog_availability()` deshabilita las acciones
+  de catálogo/perfiles cuando `self._catalog_service is None`; el aviso
+  `QMessageBox.warning` de modo limitado se muestra únicamente cuando
+  `catalog_error is not None` (nunca solo porque `catalog_service` sea
+  `None`) — mismo criterio que ya se aplicó a los errores de proyecto
+  en la fase 7.0, para no romper las pruebas que no pasan
+  `catalog_service`.
+  El registro de historial (`_record_project_open_history`/
+  `_record_project_save_history`/`_record_run_history`) nunca puede
+  impedir abrir, guardar o completar una optimización: cualquier
+  `DatabaseError` durante el registro se captura, se añade como aviso
+  al panel de registro, y la operación principal continúa.
+- `DatabaseManager.backup()` usa la API nativa
+  `sqlite3.Connection.backup(...)`, nunca una copia de archivo en
+  crudo — es segura con la base de datos en uso, especialmente bajo
+  `journal_mode=WAL`. No sustituir esto por `shutil.copy` sin una razón
+  documentada.
+- Búsquedas y comprobaciones de unicidad son explícitamente
+  insensibles a mayúsculas/minúsculas (`func.lower(...)`), nunca
+  `COLLATE NOCASE` a nivel de columna, precisamente porque la
+  unicidad debe evaluarse solo entre registros activos.
+- El esquema (`schema_metadata`, clave `schema_version`) solo
+  reconoce la versión `"1"` hoy. Una versión desconocida
+  (`_ensure_supported_schema_version`) es siempre un error claro
+  (`DatabaseMigrationError`) que detiene la operación — nunca se
+  adivina ni se modifica la base de datos para "adaptarla". No
+  introducir un framework de migraciones complejo (Alembic u otro)
+  sin necesidad real demostrada.
+- Nunca construir SQL a partir de texto de usuario: todas las
+  consultas usan la construcción de expresiones de SQLAlchemy
+  (parámetros), nunca interpolación de cadenas.
 
 ## Reglas de trabajo con el asistente
 

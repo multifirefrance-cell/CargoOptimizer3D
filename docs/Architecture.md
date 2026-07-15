@@ -57,18 +57,28 @@ exportadores, proveedores de render. Depende solo de `domain`.
 
 Adaptadores concretos de los puertos definidos en `application`.
 Desde la fase 7.0 contiene `infrastructure/persistence/` (repositorio
-de proyectos `.cargo3d`, JSON propio — ver `docs/ProjectFiles.md`);
-SQLite/catálogos, openpyxl/ReportLab llegan en fases posteriores.
+de proyectos `.cargo3d`, JSON propio — ver `docs/ProjectFiles.md`).
+Desde la fase 7.1 contiene además `infrastructure/database/` (catálogo
+de productos, perfiles de espacio e historial en SQLite — ver
+`docs/Database.md`). openpyxl/ReportLab llegan en fases posteriores.
 Depende de `domain` (y de `application` cuando existan casos de uso
-reales que orquestar; `persistence` de momento solo necesita `domain`
-para reconstruir las entidades).
+reales que orquestar; ambos subpaquetes de momento solo necesitan
+`domain` para reconstruir las entidades).
 
 ```
 infrastructure/
-└── persistence/
-    ├── exceptions.py               # ProjectFileError y subclases tipadas
-    ├── serialization.py            # domain <-> dict, función a función, sin __dict__/pickle
-    └── project_file_repository.py  # ProjectFileRepository: save/load/validate/backup, atómico
+├── persistence/
+│   ├── exceptions.py               # ProjectFileError y subclases tipadas
+│   ├── serialization.py            # domain <-> dict, función a función, sin __dict__/pickle
+│   └── project_file_repository.py  # ProjectFileRepository: save/load/validate/backup, atómico
+└── database/
+    ├── paths.py                    # get_user_database_path(): %LOCALAPPDATA%, sin depender de Qt
+    ├── exceptions.py                # DatabaseError y subclases tipadas
+    ├── orm_models.py                 # SQLAlchemy 2.x declarativo: catálogo, perfiles, historial
+    ├── migrations.py                 # initialize_database/migrate_database, schema_version
+    ├── engine.py                     # DatabaseManager: sesiones cortas, PRAGMA, backup, salud
+    ├── repositories.py               # 4 repositorios: catálogo, perfiles, 2 historiales
+    └── catalog_service.py            # CatalogService: fachada única hacia presentation
 ```
 
 ### `presentation`
@@ -97,8 +107,10 @@ presentation/desktop/
 ├── workers/
 │   └── optimization_worker.py  # OptimizationWorker(QThread): único punto que llama a PackingEngine
 ├── models/
-│   ├── product_table_model.py    # QAbstractTableModel sobre list[LoadUnit]
-│   └── unpacked_table_model.py   # QAbstractTableModel sobre PackingResult.unpacked_units
+│   ├── product_table_model.py            # QAbstractTableModel sobre list[LoadUnit]
+│   ├── unpacked_table_model.py           # QAbstractTableModel sobre PackingResult.unpacked_units
+│   ├── product_catalog_table_model.py    # QAbstractTableModel de solo lectura sobre el catálogo (7.1)
+│   └── loading_space_profile_table_model.py  # ídem sobre perfiles de espacio (fase 7.1)
 ├── panels/
 │   ├── project_tree_panel.py
 │   ├── loading_space_form_panel.py
@@ -108,6 +120,11 @@ presentation/desktop/
 │   ├── warnings_panel.py         # PackingResult.warnings
 │   ├── log_panel.py              # registro de inicio/fin/duración/cancelación/errores
 │   └── selection_details_panel.py  # detalle de la caja seleccionada en el visor 3D
+├── dialogs/                          # diálogos modales (fase 7.1)
+│   ├── product_catalog_dialog.py             # listar/buscar/CRUD/añadir al proyecto
+│   ├── catalog_product_editor_dialog.py      # editor modal de un LoadUnit de catálogo
+│   ├── loading_space_profiles_dialog.py      # listar/buscar/CRUD/aplicar perfiles
+│   └── loading_space_profile_editor_dialog.py  # reutiliza LoadingSpaceFormPanel tal cual
 ├── viewer/                          # visor 3D — hermano de panels/models/workers, NO de infrastructure
 │   ├── __init__.py
 │   ├── widget.py                    # Packing3DViewer(QWidget): contrato público + fallback
@@ -152,6 +169,15 @@ nunca se ejecuta en el hilo de la interfaz (ver
 `docs/OptimizationEngine.md` para el rendimiento real, que es
 precisamente por qué bloquear la GUI durante una ejecución no era
 aceptable).
+
+Desde la fase 7.1, `main_window.py` recibe un `CatalogService | None`
+opcional (`infrastructure/database/`, ver `docs/Database.md`) y lo usa
+directamente (sin una capa `application` intermedia, mismo criterio ya
+establecido para `ProjectFileRepository` en la fase 7.0) para abrir los
+diálogos de catálogo/perfiles y registrar historial. `None` significa
+modo limitado: la aplicación sigue abriendo y los proyectos `.cargo3d`
+siguen funcionando, solo se deshabilitan las acciones de
+catálogo/perfiles/historial.
 
 ## Motores de negocio: geometry, rules, optimization
 

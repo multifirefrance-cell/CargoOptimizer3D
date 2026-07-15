@@ -275,6 +275,16 @@ class ProductTableModel(QAbstractTableModel):
         self._load_units.append(new_unit)
         self.endInsertRows()
 
+    def add_units(self, units: Sequence[LoadUnit]) -> None:
+        """Añade varios `LoadUnit` de una vez (p. ej. desde el catálogo, fase 7.1)."""
+        if not units:
+            return
+        first_row = len(self._load_units)
+        last_row = first_row + len(units) - 1
+        self.beginInsertRows(QModelIndex(), first_row, last_row)
+        self._load_units.extend(units)
+        self.endInsertRows()
+
     def remove_rows_at(self, rows: list[int]) -> None:
         """Elimina las filas indicadas (índices de fila), en cualquier orden."""
         for row in sorted(set(rows), reverse=True):

@@ -317,3 +317,32 @@ commit/CHANGELOG. Resumen:
 - No hay control de versiones ni resolución de conflictos si dos
   personas editan el mismo archivo (fuera de alcance: esta fase asume
   un único usuario por proyecto, como pide el encargo).
+
+## 12. Relación con el catálogo SQLite (fase 7.1)
+
+Desde la fase 7.1 (ver `docs/Database.md`) existe una segunda forma de
+persistencia, con un propósito deliberadamente distinto y sin relación
+de dependencia con `.cargo3d`:
+
+- **`.cargo3d`** es la fotografía completa y portable de **un proyecto**
+  (espacio, productos, resultado, estado visual, metadatos). Un archivo
+  `.cargo3d` es autosuficiente: se puede copiar a otra máquina sin base
+  de datos y se abre igual.
+- **SQLite** (`infrastructure/database/`) es un **catálogo reutilizable
+  entre proyectos**: productos guardados para no volver a teclearlos,
+  perfiles de Loading Space reutilizables, e historial básico de
+  proyectos y ejecuciones. Vive fuera del repositorio y fuera de
+  cualquier `.cargo3d` concreto
+  (`%LOCALAPPDATA%/CargoOptimizer3D/cargo_optimizer.db`).
+
+Regla que no debe romperse: **ningún `.cargo3d` depende de que una fila
+del catálogo siga existiendo**. Copiar un producto o un perfil del
+catálogo hacia un proyecto crea una copia independiente
+(`CatalogService.copy_to_project`/`copy_profile_to_project`, con un
+`UUID` nuevo); el archivo `.cargo3d` resultante serializa esa copia
+completa como cualquier otro `LoadUnit`/`LoadingSpace` del proyecto, sin
+guardar una referencia al catálogo. Si el producto se borra o se archiva
+más tarde en el catálogo, o si se abre el proyecto en una máquina sin
+esa base de datos, el proyecto sigue abriendo y funcionando exactamente
+igual. Ver `docs/Database.md`, sección de modo limitado, para el
+comportamiento cuando SQLite no está disponible en absoluto.
