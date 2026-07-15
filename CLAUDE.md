@@ -38,8 +38,8 @@ Arquitectura en capas (Clean Architecture / Hexagonal), regla de
 dependencia estricta — cada capa solo importa las que están por debajo:
 
 ```
-presentation  →  infrastructure  →  application  →  rules  →  geometry  →  domain
-  (externa)                                                              (interna)
+presentation  →  infrastructure  →  application  →  optimization  →  rules  →  geometry  →  domain
+  (externa)                                                                              (interna)
 ```
 
 - **`domain`**: entidades y reglas de negocio puras (`LoadingSpace`,
@@ -53,8 +53,15 @@ presentation  →  infrastructure  →  application  →  rules  →  geometry  
   colocación es válida; no decide dónde colocar nada. Depende de
   `domain` siempre y de `geometry` solo donde una regla necesita
   información espacial. Ver `docs/RulesEngine.md` y ADR-0007.
+- **`optimization`**: motor de empaquetado real (expansión de
+  instancias, orden, generación y puntuación de candidatos,
+  estrategia `greedy_extreme_point_v1`). Decide dónde colocar cada
+  instancia; nunca reimplementa reglas ni geometría. Depende de
+  `domain`, `geometry` y `rules`. Ver `docs/OptimizationEngine.md`,
+  ADR-0008 y ADR-0009.
 - **`application`**: casos de uso, orquestación, puertos (interfaces)
-  hacia `infrastructure`. Depende de `domain`, `geometry` y `rules`.
+  hacia `infrastructure`. Depende de `domain`, `geometry`, `rules` y
+  `optimization`.
 - **`infrastructure`**: adaptadores concretos (SQLAlchemy, openpyxl,
   ReportLab, VTK) que implementan los puertos de `application`.
 - **`presentation`**: mecanismos de entrega (`presentation/desktop`
@@ -66,19 +73,10 @@ Esta regla se verifica automáticamente con `import-linter` (contrato
 completo y justificación en `docs/Architecture.md` y
 `docs/ADR/ADR-0001-arquitectura-en-capas.md`.
 
-**`optimization` está diseñado (fase 4.0) pero no existe todavía como
-paquete de código** (`geometry` y `rules` ya existen, fases 2.2 y 3).
-Se crea como paquete de nivel superior, hermano de `domain`
-(dependiendo de `domain`, `geometry` y `rules`), en la fase 4.1,
-implementando exactamente lo diseñado en
-`docs/OptimizationEngineDesign.md` y
-`docs/GreedyLayerStrategyDesign.md` (ver también ADR-0008, ADR-0009).
-No crear código antes de esa fase: ver `docs/Roadmap.md`.
-
-El núcleo (`domain` + `application` + los motores cuando existan) es
-un SDK independiente: debe poder usarse con
-`from cargo_optimizer import Optimizer` sin ninguna dependencia de UI
-instalada (ADR-0003).
+El núcleo (`domain` + `optimization`, y `application` cuando exista)
+es un SDK independiente: ya puede usarse con
+`from cargo_optimizer import PackingEngine, PackingRequest` sin
+ninguna dependencia de UI instalada (ADR-0003).
 
 ## Stack tecnológico
 
@@ -102,14 +100,16 @@ src/cargo_optimizer/
 ├── domain/          # Entidades y reglas de negocio puras. Sin dependencias externas.
 ├── geometry/        # Cálculos espaciales deterministas. Depende solo de domain.
 ├── rules/           # Motor de reglas de negocio. Depende de domain y, si hace falta, de geometry.
+├── optimization/    # Motor de empaquetado real. Depende de domain, geometry y rules.
 ├── application/     # Casos de uso, orquestación, puertos hacia infraestructura.
 ├── infrastructure/  # Adaptadores concretos: SQLite, Excel, PDF, VTK (fases posteriores).
 └── presentation/
     └── desktop/     # Aplicación de escritorio PySide6. Solo presentación.
-tests/               # Pruebas, en espejo de la estructura de src/
+tests/               # Pruebas, en espejo de la estructura de src/, + tests/integration/
 docs/                # Architecture.md, Roadmap.md, GeometryEngine.md, RulesEngine.md,
-                     # OptimizationEngineDesign.md, GreedyLayerStrategyDesign.md, ADR/
-examples/            # Proyectos de ejemplo de uso del SDK (poblado desde fase 4)
+                     # OptimizationEngine.md (implementación real),
+                     # OptimizationEngineDesign.md, GreedyLayerStrategyDesign.md (diseño), ADR/
+examples/            # Proyectos de ejemplo de uso del SDK
 userdata/            # Datos generados por el usuario en tiempo de ejecución. Nunca se versiona su contenido.
 ```
 
@@ -140,15 +140,16 @@ fase 4 se dividió igual, en 4.0 (diseño puro) y 4.1 (implementación),
 por el mismo motivo: no crear `optimization/` antes de haber diseñado
 qué contendrá.
 
-Estado actual: **motor de optimización diseñado, no implementado**
-(fin de fase 4.0). No implementar todavía el algoritmo de packing, la
-estrategia `greedy_extreme_point_v1`, ni ningún otro código de
-`optimization/`, visualización 3D, SQLite, Excel, PDF ni API, hasta que
-se indique explícitamente iniciar la fase 4.1. Cuando se inicie, debe
-seguir exactamente lo diseñado en
-`docs/OptimizationEngineDesign.md` y
-`docs/GreedyLayerStrategyDesign.md`, no una interpretación libre. Ver
-`docs/Roadmap.md` para el detalle fase a fase.
+Estado actual: **primer optimizador funcional implementado** (fin de
+fase 4.1). `optimization` existe, con la estrategia
+`greedy_extreme_point_v1` y la fachada `PackingEngine` ya exportada
+desde `cargo_optimizer`. No implementar todavía múltiples estrategias,
+algoritmo genético, beam search, índice espacial, visualización 3D,
+SQLite, Excel, PDF ni API, hasta que se indique explícitamente. Ver
+`docs/Roadmap.md` para el detalle fase a fase y
+`docs/OptimizationEngine.md` para el rendimiento real medido (peor de
+lo estimado en el diseño de fase 4.0 — motivo documentado, no un bug
+de `rules`/`geometry`).
 
 ## Invariantes del modelo de dominio (no romper sin ADR)
 
@@ -238,38 +239,50 @@ Ver `docs/RulesEngine.md` para el detalle completo.
 - Ninguna función de `rules` modifica entidades de dominio ni tiene
   efectos secundarios: siempre devuelve un `RuleEvaluation` explícito.
 
-## Decisiones de diseño del motor de optimización (fase 4.0, no romper sin ADR)
+## Invariantes del motor de optimización (no romper sin ADR)
 
-Ver `docs/OptimizationEngineDesign.md` y
-`docs/GreedyLayerStrategyDesign.md` para el detalle completo. Estas
-decisiones ya están tomadas; la fase 4.1 debe implementarlas, no
-reabrirlas:
+Ver `docs/OptimizationEngine.md` para el detalle completo de la
+implementación real (`docs/OptimizationEngineDesign.md` y
+`docs/GreedyLayerStrategyDesign.md` son el diseño original de fase 4.0,
+conservado como historial).
 
-- `optimization` dependerá de `domain`, `geometry` y `rules`; nunca de
+- `optimization` depende de `domain`, `geometry` y `rules`; nunca de
   `application`, `infrastructure`, `presentation` ni de bibliotecas
-  externas.
+  externas. Verificado por `import-linter`.
 - `PackingStrategy` es un `Protocol`, no una `ABC`. No introducir una
   jerarquía de herencia de estrategias sin una razón nueva y
   justificada.
 - La primera estrategia es **extreme-point greedy**
-  (`greedy_extreme_point_v1`), no *layering* estricto. No introducir
-  un `LayerManager` como componente global.
+  (`greedy_extreme_point_v1`, clase `GreedyExtremePointStrategy`), no
+  *layering* estricto. No existe ningún `LayerManager` como componente
+  global; no introducir uno sin justificación nueva.
 - El *score* de candidatos es una tupla comparada lexicográficamente
-  (`(z, x, y, -support_ratio, generation_index)`), nunca una suma
-  ponderada, en v1.
+  (`z, x, y, -support_ratio, incremento de bounding volume, espacio
+  residual aproximado, orden de orientación, generation_index`), nunca
+  una suma ponderada.
 - Restricciones duras (de `rules`) y objetivos de optimización nunca
   se mezclan en un único sistema de puntuación: un candidato inválido
-  ni siquiera se puntúa.
-- El motor debe ser determinista: mismo `PackingRequest` → mismo
-  `PackingResult`. Nunca iterar sobre un `set` cuyo orden importe;
-  siempre listas/tuplas explícitamente ordenadas.
+  (`RuleEvaluation.is_allowed = False`) ni siquiera compite por score.
+- El motor es determinista: mismo `PackingRequest` → mismo
+  `PackingResult` (salvo `execution_time_seconds`, un reloj de pared).
+  Nunca iterar sobre un `set` cuyo orden importe; siempre listas/tuplas
+  explícitamente ordenadas.
 - Cajas que no caben nunca se expresan como excepción: se registran
   como `UnpackedUnit` con un `UnpackedReason` estable. Solo un fallo
-  interno del propio motor (p. ej. la validación final del layout
-  detecta una inconsistencia) es una excepción real.
-- La cancelación usa `threading.Event` (biblioteca estándar); el
+  interno del propio motor (la validación final del layout detecta una
+  inconsistencia) es una excepción real (`OptimizationInternalError`).
+- La cancelación usa `threading.Event` (`CancellationToken`); el
   paquete `optimization` no importa nunca PySide6, ni siquiera para
   cancelación o progreso.
+- Una excepción del `progress_callback` del usuario se convierte en
+  advertencia (`PackingResult.warnings`) y la ejecución continúa;
+  nunca se propaga ni corrompe el empaquetado.
+- **Rendimiento real es O(n³)-ish y notablemente peor de lo estimado
+  en el diseño de fase 4.0** (~35 s para 100 instancias, medido). No es
+  un bug de `rules` ni `geometry`: es el coste ya anticipado y pospuesto
+  a v0.7 (poda de candidatos) / v0.8 (índice espacial). No prometer
+  rendimiento distinto al documentado en `docs/OptimizationEngine.md`
+  sin haber implementado esas mejoras.
 
 ## Reglas de trabajo con el asistente
 

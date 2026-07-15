@@ -4,6 +4,58 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Este proyecto aún no ha alcanzado la versión 1.0; el versionado 0.x
 puede incluir cambios estructurales entre versiones menores.
 
+## [0.6.0] - 2026-07-14
+
+### Added
+
+- Primer motor de optimización funcional (fase 4.1):
+  `src/cargo_optimizer/optimization/`, hermano de `domain`/`geometry`/
+  `rules`, dependiendo únicamente de ellos (verificado con
+  `import-linter`, contrato extendido con `optimization` entre
+  `application` y `rules`).
+- `GreedyExtremePointStrategy` (identificador `greedy_extreme_point_v1`):
+  primer algoritmo real de *bin packing* 3D, extreme-point greedy con
+  *score* lexicográfico determinista (`z, x, y, -support_ratio,
+  incremento de bounding volume, espacio residual aproximado, orden de
+  orientación, generation_index`).
+- `PackingEngine` (fachada), `PackingRequest`, `PackingProgress`,
+  `CancellationToken` — exportados también desde `cargo_optimizer`
+  (`from cargo_optimizer import PackingEngine, PackingRequest`).
+- `PhysicalLoadInstance`, `expand_load_units`, `order_instances` (9
+  criterios: extintor individual grande, orientación única, no
+  apilable, volumen, dimensión máxima, peso, SKU, `instance_number`,
+  `source_order`).
+- `UnpackedReason` (`StrEnum`), jerarquía `OptimizationError` /
+  `PackingRequestValidationError` / `OptimizationInternalError`.
+- Validación final del layout en `PackingEngine.optimize` antes de
+  devolver cualquier resultado; nunca se devuelve un layout
+  inconsistente en silencio.
+- `docs/OptimizationEngine.md`: documentación de la implementación
+  real, incluyendo rendimiento medido (no solo estimado).
+- 78 pruebas nuevas: unitarias de `optimization` (69), escenarios de
+  extintores realistas, integración de la pila completa
+  (`tests/integration/test_packing_engine.py`) y *benchmark* no frágil.
+  Total del proyecto: 319 pruebas.
+
+### Fixed
+
+- Las advertencias de `RuleEvaluation` (p. ej. capacidad de extintor
+  grupal no estándar) se calculaban pero no llegaban a
+  `PackingResult.warnings` en candidatos aceptados; ahora se propagan
+  explícitamente.
+
+### Changed
+
+- `docs/OptimizationEngineDesign.md` y
+  `docs/GreedyLayerStrategyDesign.md` (diseño de fase 4.0) se
+  conservan como historial, con una nota apuntando a
+  `docs/OptimizationEngine.md` (implementación real).
+- Corrección de expectativas de rendimiento: la estimación de fase 4.0
+  ("100 cajas: milisegundos a un par de segundos") resultó muy
+  optimista; medido: ~35 s para 100 instancias, crecimiento cúbico. No
+  se modificó `rules` ni `geometry` para corregirlo — es el coste ya
+  anticipado y pospuesto a v0.7 (poda) / v0.8 (índice espacial).
+
 ## [0.5.1] - 2026-07-14
 
 Sesión exclusivamente documental (fase 4.0). Ningún código funcional

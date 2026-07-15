@@ -1,9 +1,12 @@
-# Diseño de la primera estrategia de empaquetado (Fase 4.1, aún no implementada)
+# Diseño de la primera estrategia de empaquetado (Fase 4.0, ya implementada en 4.1)
 
-Este documento diseña la estrategia concreta que se implementará
-primero. No es código: es la especificación que la Fase 4.1 deberá
-cumplir. Ver `docs/OptimizationEngineDesign.md` para el resto del
-motor (contratos genéricos, determinismo, errores, rendimiento).
+Este documento es el diseño original de la fase 4.0. **La
+implementación real ya existe**: `GreedyExtremePointStrategy`
+(`src/cargo_optimizer/optimization/greedy_extreme_point.py`),
+identificador `greedy_extreme_point_v1`, exactamente como se recomendó
+aquí (extreme-point greedy, no *layering* estricto). Ver
+`docs/OptimizationEngine.md` para el flujo real implementado, y esta
+sección para el diseño original (conservado como referencia).
 
 ## Nota sobre el nombre
 

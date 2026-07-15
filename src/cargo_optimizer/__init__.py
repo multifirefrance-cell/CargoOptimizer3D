@@ -11,14 +11,17 @@ from cargo_optimizer.domain import (
     Placement,
     Position3D,
 )
+from cargo_optimizer.optimization import PackingEngine, PackingRequest
 
-__version__ = "0.5.1"
+__version__ = "0.6.0"
 
 __all__ = [
     "CargoProject",
     "Dimensions3D",
     "LoadUnit",
     "LoadingSpace",
+    "PackingEngine",
+    "PackingRequest",
     "PackingResult",
     "Placement",
     "Position3D",

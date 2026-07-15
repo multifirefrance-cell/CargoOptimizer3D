@@ -22,7 +22,7 @@ entrega o cualquier detalle técnico externo.
 ├─────────────────────────────────────────────────────────┤
 │ application    (casos de uso, orquestación, puertos)     │
 ├─────────────────────────────────────────────────────────┤
-│ optimization   (motor de optimización — fase 4, diseñado en 4.0, no implementado) │
+│ optimization   (motor de optimización — fase 4.1, implementado)   │
 ├─────────────────────────────────────────────────────────┤
 │ rules          (motor de reglas de negocio — fase 3)     │
 ├─────────────────────────────────────────────────────────┤
@@ -78,49 +78,42 @@ src/cargo_optimizer/
 ├── domain/
 ├── geometry/       # fase 2.2 — implementado, depende solo de domain
 ├── rules/          # fase 3 — implementado, depende de domain y geometry
-├── optimization/   # fase 4 — depende de domain, geometry y rules
-├── application/    # orquesta domain + geometry + rules + optimization
+├── optimization/   # fase 4.1 — implementado, depende de domain, geometry y rules
+├── application/    # orquesta domain + geometry + rules + optimization (fase 6+)
 ├── infrastructure/
 └── presentation/
 ```
 
-`geometry` (fase 2.2) y `rules` (fase 3) ya existen. `geometry`:
-cajas ortoédricas, límites, colisiones, soporte físico, puntos
-candidatos y validación de layouts — ver `docs/GeometryEngine.md` y
-ADR-0006. `rules`: motor de reglas de negocio puro y determinista
-(orientaciones permitidas, extintores, apilamiento, fragilidad, peso)
-que responde si una colocación es válida sin decidir dónde colocar
-nada — ver `docs/RulesEngine.md` y ADR-0007. `optimization`
-**está diseñado (fase 4.0) pero no existe todavía como paquete**: ver
-`docs/OptimizationEngineDesign.md`, `docs/GreedyLayerStrategyDesign.md`,
-ADR-0008 y ADR-0009 para el diseño completo (componentes, contratos,
-determinismo, primera estrategia recomendada). Se creará como código
-real en la fase 4.1.
+`geometry` (fase 2.2), `rules` (fase 3) y `optimization` (fase 4.1) ya
+existen. `geometry`: cajas ortoédricas, límites, colisiones, soporte
+físico, puntos candidatos y validación de layouts — ver
+`docs/GeometryEngine.md` y ADR-0006. `rules`: motor de reglas de
+negocio puro y determinista (orientaciones permitidas, extintores,
+apilamiento, fragilidad, peso) que responde si una colocación es
+válida sin decidir dónde colocar nada — ver `docs/RulesEngine.md` y
+ADR-0007. `optimization`: motor de empaquetado real, con la estrategia
+`greedy_extreme_point_v1` (`GreedyExtremePointStrategy`) — ver
+`docs/OptimizationEngine.md` (implementación real),
+`docs/OptimizationEngineDesign.md` y
+`docs/GreedyLayerStrategyDesign.md` (diseño original de fase 4.0,
+conservados como historial), ADR-0008 y ADR-0009.
 
 Se crean como hermanos de `domain` (no como subpaquetes de `domain` ni
 de `application`) porque son subsistemas sustanciales con algoritmos
 propios (bin packing, resolución de restricciones), no simples
 entidades ni casos de uso de orquestación. Mezclar esta decisión con la
-lista de capas (`domain`/`geometry`/`rules`/`application`/`infrastructure`/`presentation`)
+lista de capas (`domain`/`geometry`/`rules`/`optimization`/`application`/`infrastructure`/`presentation`)
 sería confundir dos ejes de descomposición distintos — ver ADR-0001,
 sección de rechazo explícito de esa alternativa.
 
-**No se crea `optimization` como paquete de código todavía.** La fase
-4.0 diseñó por completo sus responsabilidades y contratos (ver los
-documentos de diseño arriba) precisamente para no repetir el error de
-crear estructura antes de saber qué contendrá. El paquete se crea en
-la fase 4.1, con la primera estrategia (`GreedyExtremePointStrategy`,
-identificador técnico `greedy_extreme_point_v1`) ya funcional, no
-antes.
-
 ## El núcleo como SDK
 
-`domain` + `application` (+ los motores cuando existan) forman el SDK
-público del proyecto. Debe poder usarse así, sin ninguna dependencia de
-UI instalada:
+`domain` + `optimization` (+ `application` cuando exista) forman el
+SDK público del proyecto. Ya funciona, sin ninguna dependencia de UI
+instalada:
 
 ```python
-from cargo_optimizer import Optimizer  # disponible desde la fase 4
+from cargo_optimizer import PackingEngine, PackingRequest
 ```
 
 Ver ADR-0003 para el detalle de esta garantía y cómo se protege.

@@ -1,9 +1,13 @@
 # Diseño del motor de optimización (Fase 4.0)
 
-Este documento es exclusivamente de diseño. No describe código
-existente: describe lo que se implementará en la Fase 4.1 y
-posteriores. Ningún nombre, firma o campo aquí es definitivo hasta que
-se implemente y se pruebe.
+Este documento es el diseño original de la fase 4.0, conservado tal
+cual para el historial. **La implementación real (fase 4.1) ya existe:
+ver `docs/OptimizationEngine.md`**, que documenta qué se construyó de
+verdad, dónde coincide con este diseño y dónde se apartó (p. ej. el
+rendimiento medido resultó bastante peor de lo estimado aquí — ver la
+sección "Rendimiento" de ese documento). Este archivo ya no se
+actualiza; los cambios de comportamiento real se documentan en
+`docs/OptimizationEngine.md`.
 
 ## Propósito
 

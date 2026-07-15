@@ -12,7 +12,7 @@ fase se adelanta a la anterior.
 | 2.2 | Motor geométrico (geometría, colisiones, soporte) | `geometry` (hermano de `domain`) | **Completada** |
 | 3 | Motor de restricciones | `rules` (hermano de `domain`) | **Completada** |
 | 4.0 | Diseño del motor de optimización | Ninguno (solo documentación: `docs/OptimizationEngineDesign.md`, `docs/GreedyLayerStrategyDesign.md`, ADR-0008, ADR-0009) | **Completada** |
-| 4.1 | Primer optimizador funcional | `optimization` (nuevo, hermano de `domain`); primer caso de uso real en `application` | Pendiente |
+| 4.1 | Primer optimizador funcional | `optimization` (hermano de `domain`) | **Completada** |
 | 5 | Visualización 3D | `infrastructure` (adaptador VTK) | Pendiente |
 | 6 | Interfaz | `presentation/desktop` (pantallas reales) | Pendiente |
 | 7 | Persistencia | `infrastructure` (adaptador SQLAlchemy/SQLite) | Pendiente |
@@ -20,22 +20,19 @@ fase se adelanta a la anterior.
 | 9 | Integración ERP | `presentation` (nuevo adaptador, p. ej. `presentation/api`) | Pendiente |
 | 10 | Versión comercial | — | Pendiente |
 
-## Regla para crear `optimization` (`geometry` y `rules` ya existen; `optimization` ya está diseñado)
+## `optimization` (`geometry`, `rules` y `optimization` ya existen)
 
 `geometry` se creó en la fase 2.2 (ver `docs/GeometryEngine.md` y
 ADR-0006). `rules` se creó en la fase 3 (ver `docs/RulesEngine.md` y
-ADR-0007). `optimization` se **diseñó** en la fase 4.0 (ver
-`docs/OptimizationEngineDesign.md`, `docs/GreedyLayerStrategyDesign.md`,
-ADR-0008, ADR-0009) pero **no se crea como paquete de código hasta la
-fase 4.1**. Al crearse, debe:
-
-1. Depender únicamente de `domain`, `geometry` y `rules` (nunca de
-   `application`, `infrastructure` ni `presentation`).
-2. Quedar reflejado en el contrato de `import-linter` en
-   `pyproject.toml`, insertando `optimization` entre `application` y
-   `rules`.
-3. Implementar únicamente lo listado como "Fase 4.1" en la revisión
-   crítica de `docs/OptimizationEngineDesign.md` — no más, no menos.
+ADR-0007). `optimization` se diseñó en la fase 4.0
+(`docs/OptimizationEngineDesign.md`, `docs/GreedyLayerStrategyDesign.md`,
+ADR-0008, ADR-0009) y se implementó en la fase 4.1
+(`docs/OptimizationEngine.md`): depende únicamente de `domain`,
+`geometry` y `rules`, reflejado en el contrato de `import-linter`
+(`optimization` entre `application` y `rules`). Contiene la estrategia
+`greedy_extreme_point_v1` (`GreedyExtremePointStrategy`) y la fachada
+`PackingEngine`, ya exportada desde `cargo_optimizer` (`from
+cargo_optimizer import PackingEngine, PackingRequest`).
 
 ## Regla para crear adaptadores de `infrastructure` y `presentation`
 
@@ -58,17 +55,21 @@ arquitectura.
 
 ## Estado actual
 
-Fin de fase 4.0: diseño completo del motor de optimización
-(`PackingEngine`, `PackingStrategy` como `Protocol`,
-`PackingRequest`/`PackingState`, expansión de instancias físicas,
-evaluación y puntuación de candidatos, manejo de errores,
-cancelación/progreso, rendimiento y explicabilidad), con la primera
-estrategia recomendada (extreme-point greedy,
-`greedy_extreme_point_v1`) documentada en detalle. Sigue habiendo 240
-pruebas unitarias en verde (73 de dominio + 68 de geometría + 99 de
-reglas): esta fase no añadió código funcional, solo documentación y
-dos ADR. No se ha escrito ninguna línea de algoritmo de packing. La
-siguiente sesión de desarrollo debe implementar la fase 4.1 (primer
-optimizador funcional) siguiendo exactamente lo diseñado en
-`docs/OptimizationEngineDesign.md` y
-`docs/GreedyLayerStrategyDesign.md`.
+Fin de fase 4.1: primer optimizador 3D funcional
+(`GreedyExtremePointStrategy`, identificador `greedy_extreme_point_v1`,
+tras `PackingEngine().optimize(request)`), con 319 pruebas unitarias e
+integración en verde (240 previas + expansión, orden, *scoring*,
+cancelación, progreso, escenarios de packing y de extintores, y
+pruebas de integración de la pila completa). `optimization` depende
+únicamente de `domain`, `geometry` y `rules`, verificado por
+`import-linter`. La API pública `from cargo_optimizer import
+PackingEngine, PackingRequest` funciona. Rendimiento real medido (no
+solo estimado): ~35 s para 100 instancias, crecimiento cúbico —
+sustancialmente más lento que la estimación optimista de la fase 4.0;
+documentado en `docs/OptimizationEngine.md`, con la poda (v0.7) y el
+índice espacial (v0.8) como próximos pasos naturales, no abordados en
+esta fase. No se ha escrito código de visualización 3D, persistencia,
+exportación ni API. La siguiente sesión de desarrollo debe empezar por
+el diseño de la fase 5 (visualización 3D) o, si el rendimiento del
+optimizador se vuelve prioritario antes, por la poda de candidatos
+(v0.7) descrita en `docs/OptimizationEngine.md`.
