@@ -4,6 +4,69 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Este proyecto aún no ha alcanzado la versión 1.0; el versionado 0.x
 puede incluir cambios estructurales entre versiones menores.
 
+## [0.12.0] - 2026-07-15
+
+Importación y exportación profesional de Excel (`.xlsx`, fase 8.0): un
+usuario puede importar catálogos, packing lists y perfiles de Loading
+Space desde Excel, y exportar el catálogo y el resultado de una
+optimización con formato profesional. Ver `docs/Excel.md` para el
+detalle completo.
+
+### Added
+
+- `infrastructure/excel/`: `exceptions.py`
+  (`ExcelError`/`ExcelFileError`/`ExcelTemplateError`), `row_parsing.py`
+  (ayudas genéricas de parseo: blanco, booleano, número, etiqueta de
+  enum, compartidas entre esquemas), `results.py` (`RowError`,
+  `CatalogImportResult`, `LoadingSpaceImportResult`,
+  `PackingListImportResult` — ninguna fila inválida se importa nunca en
+  silencio), `styles.py` (formato profesional compartido: cabeceras en
+  negrita con relleno suave, bordes, tablas nativas de Excel,
+  autoajuste aproximado de columnas), `workbook_utils.py` (apertura
+  segura con traducción de errores, validación de cabeceras, iteración
+  de filas, escritura atómica vía archivo temporal + `os.replace`).
+- Esquemas de columnas: `product_rows.py` (`LoadUnit`: SKU, nombre,
+  dimensiones, peso, cantidad, color, fragilidad, tipo de empaque,
+  extintor, agente, peso nominal, apilamiento, orientaciones, notas) y
+  `loading_space_rows.py` (`LoadingSpace`: nombre, categoría,
+  dimensiones, peso máximo, posición de puerta, notas) — ambos aceptan
+  tanto la etiqueta en español como el valor interno estable del enum.
+- `catalog_importer.py`/`catalog_exporter.py` (`import_catalog`/
+  `export_catalog`), `packing_list_importer.py` (`import_packing_list`,
+  resuelve SKU vía un `Callable` inyectado — nunca depende de
+  `infrastructure/database` directamente; suma cantidades para un SKU
+  repetido en vez de tratarlo como error), `loading_space_importer.py`
+  (`import_loading_spaces`), `result_exporter.py`
+  (`export_packing_result`: cinco hojas — Resumen, Productos cargados,
+  Productos no cargados, Warnings, Datos del espacio).
+- `detection.py` (`detect_template_kind`): identifica si un `.xlsx` es
+  un catálogo, un packing list o un espacio de carga por sus cabeceras,
+  usado por la acción genérica "Importar Excel".
+- `templates.py`: genera las cuatro plantillas oficiales
+  (`CatalogTemplate.xlsx`, `PackingListTemplate.xlsx`,
+  `LoadingSpaceTemplate.xlsx`, `OptimizationResultTemplate.xlsx`) con
+  el propio código del paquete, guardadas en `examples/templates/`.
+- `MainWindow`: acciones reales de importación/exportación de Excel en
+  los menús Archivo ("Importar Excel…"/"Exportar Excel…", con
+  detección automática del tipo de plantilla), Productos ("Importar
+  catálogo (Excel)…"/"Exportar catálogo (Excel)…", destino: catálogo
+  SQLite), Espacio de carga ("Importar desde Excel…") y Proyecto
+  ("Importar Packing List…"/"Exportar resultado…"). El flujo de
+  Packing List con SKU ausentes del catálogo ofrece
+  Continuar/Cancelar. Las acciones que dependen del catálogo SQLite se
+  deshabilitan en modo limitado.
+- `pyproject.toml`: nuevas dependencias `openpyxl>=3.1,<4` (runtime) y
+  `types-openpyxl>=3.1` (desarrollo, para Mypy estricto).
+- 51 pruebas nuevas en `tests/infrastructure/excel/` (archivos
+  corruptos, cabeceras faltantes o en otro orden, tipos incorrectos,
+  SKU inexistentes, SKU duplicados, filas vacías, round-trip completo
+  incluidas las cuatro plantillas oficiales) y 16 pruebas nuevas en
+  `tests/presentation/desktop/test_main_window_excel_integration.py`
+  (integración completa bajo `offscreen`, sin abrir nunca un diálogo
+  real).
+- `docs/Excel.md` (esquema de columnas, plantillas oficiales, formato
+  profesional, integración en `MainWindow`, seguridad).
+
 ## [0.11.0] - 2026-07-15
 
 Catálogo reutilizable de productos y perfiles de Loading Space

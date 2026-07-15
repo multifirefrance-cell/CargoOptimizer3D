@@ -55,7 +55,14 @@ def test_toolbar_has_required_actions(qapp: QApplication, app_settings: AppSetti
         for action in toolbar.actions()
         if action.text()
     }
-    for expected in ("Nuevo", "Abrir", "Guardar", "Importar", "Ejecutar optimización", "Cancelar"):
+    for expected in (
+        "Nuevo",
+        "Abrir",
+        "Guardar",
+        "Importar Excel",
+        "Ejecutar optimización",
+        "Cancelar",
+    ):
         assert expected in action_texts
     window.close()
 
@@ -75,7 +82,7 @@ def test_unimplemented_action_shows_status_message(
     qapp: QApplication, app_settings: AppSettings
 ) -> None:
     window = MainWindow(app_settings)
-    window.action_export.trigger()
+    window.action_check_updates.trigger()
     assert "próxima versión" in window.statusBar().currentMessage()
     window.close()
 

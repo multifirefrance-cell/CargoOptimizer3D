@@ -26,7 +26,7 @@ src/cargo_optimizer/
 ├── domain/          # Entidades y reglas de negocio puras. Sin dependencias externas.
 ├── application/     # Casos de uso, orquestación, puertos hacia infraestructura.
 ├── infrastructure/  # Adaptadores concretos: persistence/ (proyectos .cargo3d, JSON),
-│                    #   database/ (catálogo SQLite/SQLAlchemy), Excel, PDF (fases posteriores).
+│                    #   database/ (catálogo SQLite/SQLAlchemy), excel/ (import/export .xlsx), PDF (fase posterior).
 └── presentation/
     └── desktop/     # Aplicación de escritorio (PySide6). Incluye viewer/ (visor 3D).
 ```
@@ -70,11 +70,14 @@ python -m venv .venv
 
 ## Estado del proyecto
 
-Fin de fase 7.1: motor de optimización, interfaz de escritorio, visor
-3D, persistencia de proyectos (`.cargo3d`, JSON versionado) y catálogo
-reutilizable de productos/perfiles respaldado por SQLite ya
+Fin de fase 8.0: motor de optimización, interfaz de escritorio, visor
+3D, persistencia de proyectos (`.cargo3d`, JSON versionado), catálogo
+reutilizable de productos/perfiles respaldado por SQLite e
+importación/exportación profesional de Excel (`.xlsx`) ya
 implementados — ver `docs/Roadmap.md` para el detalle fase a fase,
-`docs/ProjectFiles.md` para el formato de archivo de proyecto y
+`docs/ProjectFiles.md` para el formato de archivo de proyecto,
 `docs/Database.md` para el catálogo SQLite (productos, perfiles de
-Loading Space e historial básico). Reportes (Excel/PDF) e integración
-ERP se implementarán en fases posteriores.
+Loading Space e historial básico) y `docs/Excel.md` para el
+importador/exportador de Excel (plantillas oficiales en
+`examples/templates/`). Reportes PDF e integración ERP se
+implementarán en fases posteriores.

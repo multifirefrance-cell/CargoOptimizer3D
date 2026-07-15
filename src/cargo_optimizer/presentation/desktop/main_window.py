@@ -51,6 +51,16 @@ from cargo_optimizer.domain.load_unit import LoadUnit
 from cargo_optimizer.domain.packing_result import PackingResult
 from cargo_optimizer.domain.project import CargoProject
 from cargo_optimizer.infrastructure.database import CatalogService, DatabaseError, RepositoryError
+from cargo_optimizer.infrastructure.excel import (
+    ExcelError,
+    RowError,
+    detect_template_kind,
+    export_catalog,
+    export_packing_result,
+    import_catalog,
+    import_loading_spaces,
+    import_packing_list,
+)
 from cargo_optimizer.infrastructure.persistence import ProjectFileError, ProjectFileRepository
 from cargo_optimizer.optimization import GreedyExtremePointStrategy, PackingProgress, PackingRequest
 from cargo_optimizer.optimization.exceptions import PackingRequestValidationError
@@ -249,8 +259,12 @@ class MainWindow(QMainWindow):
         self.action_close_project = self._make_action(
             "cancel", "&Cerrar proyecto", None, self._on_close_project
         )
-        self.action_import = self._make_action("import", "&Importar…", None, self._on_import)
-        self.action_export = self._make_action("import", "&Exportar…", None, self._stub("Exportar"))
+        self.action_import = self._make_action(
+            "import", "Importar &Excel…", None, self._on_import_excel_auto
+        )
+        self.action_export = self._make_action(
+            "import", "Exportar &Excel…", None, self._on_export_excel_menu
+        )
         self.action_preferences = self._make_action(
             "preferences", "&Preferencias…", "Ctrl+,", self._stub("Preferencias")
         )
@@ -264,6 +278,9 @@ class MainWindow(QMainWindow):
         )
         self.action_save_as_profile = self._make_action(
             "save", "&Guardar espacio como perfil…", None, self._on_save_as_profile
+        )
+        self.action_import_loading_space_excel = self._make_action(
+            "import", "&Importar desde Excel…", None, self._on_import_loading_space_excel
         )
         self.action_delete_loading_space = self._make_action(
             "cancel", "&Eliminar espacio de carga", None, self._stub("Eliminar espacio de carga")
@@ -279,7 +296,7 @@ class MainWindow(QMainWindow):
             "cancel", "&Eliminar seleccionados", None, self.product_table_panel.remove_selected_rows
         )
         self.action_import_products = self._make_action(
-            "import", "Importar &productos…", None, self._on_import
+            "import", "Importar &productos…", None, self._on_import_excel_auto
         )
         self.action_open_catalog = self._make_action(
             "open", "&Catálogo de productos…", None, self._on_open_catalog
@@ -292,6 +309,18 @@ class MainWindow(QMainWindow):
         )
         self.action_add_from_catalog = self._make_action(
             "import", "Añadir &desde catálogo…", None, self._on_open_catalog
+        )
+        self.action_import_catalog_excel = self._make_action(
+            "import", "Importar catálogo (&Excel)…", None, self._on_import_catalog_excel
+        )
+        self.action_export_catalog_excel = self._make_action(
+            "import", "Exportar catálogo (E&xcel)…", None, self._on_export_catalog_excel
+        )
+        self.action_import_packing_list_excel = self._make_action(
+            "import", "Importar &Packing List…", None, self._on_import_packing_list_excel
+        )
+        self.action_export_result_excel = self._make_action(
+            "import", "Exportar resul&tado…", None, self._on_export_result_excel
         )
 
         self.action_run_optimization = self._make_action(
@@ -413,12 +442,16 @@ class MainWindow(QMainWindow):
         project_menu.addAction(self.action_new_loading_space)
         project_menu.addAction(self.action_new_product)
         project_menu.addSeparator()
+        project_menu.addAction(self.action_import_packing_list_excel)
+        project_menu.addAction(self.action_export_result_excel)
+        project_menu.addSeparator()
         project_menu.addAction(self.action_project_properties)
 
         loading_space_menu = menu_bar.addMenu("&Espacio de carga")
         loading_space_menu.addAction(self.action_new_loading_space)
         loading_space_menu.addAction(self.action_predefined_profiles)
         loading_space_menu.addAction(self.action_save_as_profile)
+        loading_space_menu.addAction(self.action_import_loading_space_excel)
         loading_space_menu.addSeparator()
         loading_space_menu.addAction(self.action_delete_loading_space)
 
@@ -430,6 +463,9 @@ class MainWindow(QMainWindow):
         products_menu.addAction(self.action_open_catalog)
         products_menu.addAction(self.action_add_from_catalog)
         products_menu.addAction(self.action_save_product_to_catalog)
+        products_menu.addSeparator()
+        products_menu.addAction(self.action_import_catalog_excel)
+        products_menu.addAction(self.action_export_catalog_excel)
         products_menu.addSeparator()
         products_menu.addAction(self.action_delete_products)
 
@@ -667,22 +703,303 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Proyecto guardado: {path.name}", _STATUS_MESSAGE_MS)
         return True
 
-    def _on_import(self) -> None:
-        path, _selected_filter = QFileDialog.getOpenFileName(
-            self,
-            "Importar",
-            self._settings.last_directory(),
-            "Hojas de cálculo (*.xlsx *.csv);;Todos los archivos (*)",
-        )
-        if not path:
-            return
-        self._remember_directory_of(path)
-        self.statusBar().showMessage(
-            "Importación: disponible en una próxima versión.", _NOT_IMPLEMENTED_MESSAGE_MS
-        )
-
     def _remember_directory_of(self, file_path: str) -> None:
         self._settings.set_last_directory(str(Path(file_path).parent))
+
+    # ------------------------------------------------------------------
+    # Importación y exportación profesional de Excel (fase 8.0)
+    # ------------------------------------------------------------------
+
+    def _prompt_open_excel_path(self, title: str) -> Path | None:
+        path_str, _selected_filter = QFileDialog.getOpenFileName(
+            self, title, self._settings.last_directory(), "Archivos Excel (*.xlsx)"
+        )
+        if not path_str:
+            return None
+        self._remember_directory_of(path_str)
+        return Path(path_str)
+
+    def _prompt_save_excel_path(self, title: str, default_name: str) -> Path | None:
+        path_str, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            title,
+            str(Path(self._settings.last_directory()) / default_name),
+            "Archivos Excel (*.xlsx)",
+        )
+        if not path_str:
+            return None
+        self._remember_directory_of(path_str)
+        path = Path(path_str)
+        if path.suffix.casefold() != ".xlsx":
+            path = path.with_suffix(".xlsx")
+        return path
+
+    def _on_import_excel_auto(self) -> None:
+        path = self._prompt_open_excel_path("Importar Excel")
+        if path is None:
+            return
+        try:
+            kind = detect_template_kind(path)
+        except ExcelError as exc:
+            self._show_error("No se pudo leer el archivo Excel", str(exc))
+            return
+
+        if kind == "catalog":
+            self._import_catalog_rows_into_project(path)
+        elif kind == "packing_list":
+            self._import_packing_list_from_path(path)
+        elif kind == "loading_space":
+            self._import_loading_spaces_from_path(path)
+        else:
+            self._show_warning(
+                "Archivo no reconocido",
+                f"'{path.name}' no coincide con ninguna plantilla oficial de "
+                "CargoOptimizer3D (catálogo, packing list o espacio de carga). "
+                "Verifica que la primera fila tenga las cabeceras esperadas.",
+            )
+
+    def _on_export_excel_menu(self) -> None:
+        options = ["Catálogo de productos", "Resultado de la optimización"]
+        choice, accepted = QInputDialog.getItem(
+            self, "Exportar Excel", "¿Qué deseas exportar?", options, 0, False
+        )
+        if not accepted:
+            return
+        if choice == options[0]:
+            self._on_export_catalog_excel()
+        else:
+            self._on_export_result_excel()
+
+    def _import_catalog_rows_into_project(self, path: Path) -> None:
+        """Importa un archivo con formato de catálogo directamente al proyecto actual.
+
+        A diferencia de `_on_import_catalog_excel` (que guarda en el
+        catálogo SQLite), esta ruta añade los productos como Load Units
+        del proyecto abierto — mismo destino que "Añadir desde
+        catálogo…" (fase 7.1), sin tocar la base de datos.
+        """
+        try:
+            result = import_catalog(path)
+        except ExcelError as exc:
+            self._show_error("No se pudo importar el archivo", str(exc))
+            return
+
+        existing_skus = {
+            unit.sku.casefold() for unit in self.product_table_panel.model.load_units()
+        }
+        to_add = []
+        skipped: list[str] = []
+        for unit in result.units:
+            if unit.sku.casefold() in existing_skus:
+                skipped.append(unit.sku)
+                continue
+            to_add.append(unit)
+            existing_skus.add(unit.sku.casefold())
+
+        if to_add:
+            self.product_table_panel.model.add_units(to_add)
+        self._report_import_outcome(
+            path,
+            imported_count=len(to_add),
+            imported_label="producto(s) añadido(s) al proyecto",
+            skipped_skus=skipped,
+            row_errors=result.errors,
+        )
+
+    def _on_import_catalog_excel(self) -> None:
+        if self._catalog_service is None:
+            return
+        path = self._prompt_open_excel_path("Importar catálogo (Excel)")
+        if path is None:
+            return
+        try:
+            result = import_catalog(path)
+        except ExcelError as exc:
+            self._show_error("No se pudo importar el catálogo", str(exc))
+            return
+
+        added = 0
+        skipped: list[str] = []
+        for unit in result.units:
+            if self._catalog_service.products.get_by_sku(unit.sku) is not None:
+                skipped.append(unit.sku)
+                continue
+            try:
+                self._catalog_service.products.add(unit)
+                added += 1
+            except RepositoryError as exc:
+                skipped.append(f"{unit.sku} ({exc})")
+
+        self._report_import_outcome(
+            path,
+            imported_count=added,
+            imported_label="producto(s) importado(s) al catálogo",
+            skipped_skus=skipped,
+            row_errors=result.errors,
+        )
+
+    def _report_import_outcome(
+        self,
+        path: Path,
+        *,
+        imported_count: int,
+        imported_label: str,
+        skipped_skus: list[str],
+        row_errors: tuple[RowError, ...],
+    ) -> None:
+        """Reporta el resultado de una importación; nunca oculta filas inválidas o SKU omitidos."""
+        parts = [f"{imported_count} {imported_label} desde '{path.name}'."]
+        if skipped_skus:
+            parts.append("SKU ya existentes, no importados: " + ", ".join(skipped_skus))
+        if row_errors:
+            parts.append(
+                "Filas con error (no importadas):\n"
+                + "\n".join(f"  Fila {e.row_number}: {e.message}" for e in row_errors)
+            )
+        if skipped_skus or row_errors:
+            self._show_warning("Importación con avisos", "\n\n".join(parts))
+        else:
+            self.statusBar().showMessage(parts[0], _STATUS_MESSAGE_MS)
+
+    def _on_export_catalog_excel(self) -> None:
+        if self._catalog_service is None:
+            return
+        units = self._catalog_service.products.list_active()
+        if not units:
+            self._show_warning("Catálogo vacío", "No hay productos activos en el catálogo.")
+            return
+        path = self._prompt_save_excel_path("Exportar catálogo", "Catalogo.xlsx")
+        if path is None:
+            return
+        try:
+            export_catalog(units, path)
+        except ExcelError as exc:
+            self._show_error("No se pudo exportar el catálogo", str(exc))
+            return
+        self.statusBar().showMessage(
+            f"Catálogo exportado a '{path.name}' ({len(units)} producto(s)).", _STATUS_MESSAGE_MS
+        )
+
+    def _import_packing_list_from_path(self, path: Path) -> None:
+        if self._catalog_service is None:
+            self._show_warning(
+                "Catálogo no disponible",
+                "Importar un Packing List requiere el catálogo de productos, "
+                "que no está disponible en modo limitado.",
+            )
+            return
+        try:
+            result = import_packing_list(path, self._catalog_service.products.get_by_sku)
+        except ExcelError as exc:
+            self._show_error("No se pudo importar el Packing List", str(exc))
+            return
+
+        if result.missing_skus:
+            response = QMessageBox.question(
+                self,
+                "SKU no encontrados en el catálogo",
+                "Los siguientes SKU del Packing List no existen en el catálogo:\n\n"
+                + ", ".join(result.missing_skus)
+                + "\n\n¿Deseas continuar e importar solo los productos encontrados?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Yes,
+            )
+            if response == QMessageBox.StandardButton.Cancel:
+                return
+
+        existing_skus = {
+            unit.sku.casefold() for unit in self.product_table_panel.model.load_units()
+        }
+        to_add = []
+        skipped: list[str] = []
+        for unit in result.resolved_units:
+            if unit.sku.casefold() in existing_skus:
+                skipped.append(unit.sku)
+                continue
+            to_add.append(unit)
+            existing_skus.add(unit.sku.casefold())
+
+        if to_add:
+            self.product_table_panel.model.add_units(to_add)
+        self._report_import_outcome(
+            path,
+            imported_count=len(to_add),
+            imported_label="producto(s) añadido(s) desde el Packing List",
+            skipped_skus=skipped,
+            row_errors=result.errors,
+        )
+
+    def _on_import_packing_list_excel(self) -> None:
+        if self._catalog_service is None:
+            return
+        path = self._prompt_open_excel_path("Importar Packing List")
+        if path is None:
+            return
+        self._import_packing_list_from_path(path)
+
+    def _on_export_result_excel(self) -> None:
+        if self._last_result is None:
+            self._show_warning(
+                "Sin resultado", "Ejecuta una optimización antes de exportar el resultado."
+            )
+            return
+        path = self._prompt_save_excel_path("Exportar resultado", "Resultado_optimizacion.xlsx")
+        if path is None:
+            return
+        try:
+            export_packing_result(
+                self._last_result,
+                self._last_load_units_by_id,
+                path,
+                application_version=__version__,
+            )
+        except ExcelError as exc:
+            self._show_error("No se pudo exportar el resultado", str(exc))
+            return
+        self.statusBar().showMessage(f"Resultado exportado a '{path.name}'.", _STATUS_MESSAGE_MS)
+
+    def _import_loading_spaces_from_path(self, path: Path) -> None:
+        try:
+            result = import_loading_spaces(path)
+        except ExcelError as exc:
+            self._show_error("No se pudo importar el archivo", str(exc))
+            return
+
+        if result.errors:
+            self._show_warning(
+                "Filas con error",
+                "Las siguientes filas no se pudieron importar:\n\n"
+                + "\n".join(f"Fila {e.row_number}: {e.message}" for e in result.errors),
+            )
+        if not result.spaces:
+            return
+
+        if len(result.spaces) == 1:
+            chosen = result.spaces[0]
+        else:
+            names = [space.name for space in result.spaces]
+            name, accepted = QInputDialog.getItem(
+                self,
+                "Elegir espacio de carga",
+                "El archivo contiene varios espacios:",
+                names,
+                0,
+                False,
+            )
+            if not accepted:
+                return
+            chosen = next(space for space in result.spaces if space.name == name)
+
+        self.loading_space_form_panel.set_loading_space(chosen)
+        self.statusBar().showMessage(
+            f"Espacio de carga '{chosen.name}' aplicado desde '{path.name}'.", _STATUS_MESSAGE_MS
+        )
+
+    def _on_import_loading_space_excel(self) -> None:
+        path = self._prompt_open_excel_path("Importar espacio de carga desde Excel")
+        if path is None:
+            return
+        self._import_loading_spaces_from_path(path)
 
     # ------------------------------------------------------------------
     # Catálogo de productos y perfiles de espacio (fase 7.1)
@@ -697,6 +1014,9 @@ class MainWindow(QMainWindow):
             self.action_save_product_to_catalog,
             self.action_predefined_profiles,
             self.action_save_as_profile,
+            self.action_import_catalog_excel,
+            self.action_export_catalog_excel,
+            self.action_import_packing_list_excel,
         ):
             action.setEnabled(available)
 
@@ -1178,8 +1498,20 @@ class MainWindow(QMainWindow):
             self.action_delete_products,
             self.action_import,
             self.action_import_products,
+            self.action_export,
+            self.action_export_result_excel,
+            self.action_import_loading_space_excel,
         ):
             action.setEnabled(enabled)
+        if enabled:
+            self._apply_catalog_availability()
+        else:
+            for action in (
+                self.action_import_catalog_excel,
+                self.action_export_catalog_excel,
+                self.action_import_packing_list_excel,
+            ):
+                action.setEnabled(False)
         self.action_cancel_optimization.setEnabled(not enabled)
         self.product_table_panel.setEnabled(enabled)
         self.loading_space_form_panel.setEnabled(enabled)

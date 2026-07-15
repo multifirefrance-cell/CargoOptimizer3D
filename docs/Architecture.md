@@ -18,7 +18,7 @@ entrega o cualquier detalle técnico externo.
 ┌─────────────────────────────────────────────────────────┐
 │ presentation   (desktop hoy; api / web en el futuro)     │
 ├─────────────────────────────────────────────────────────┤
-│ infrastructure (persistencia JSON — fase 7.0; SQLite/Excel/PDF — fases posteriores) │
+│ infrastructure (JSON — fase 7.0; SQLite — fase 7.1; Excel — fase 8.0; PDF — fase posterior) │
 ├─────────────────────────────────────────────────────────┤
 │ application    (casos de uso, orquestación, puertos)     │
 ├─────────────────────────────────────────────────────────┤
@@ -60,10 +60,12 @@ Desde la fase 7.0 contiene `infrastructure/persistence/` (repositorio
 de proyectos `.cargo3d`, JSON propio — ver `docs/ProjectFiles.md`).
 Desde la fase 7.1 contiene además `infrastructure/database/` (catálogo
 de productos, perfiles de espacio e historial en SQLite — ver
-`docs/Database.md`). openpyxl/ReportLab llegan en fases posteriores.
-Depende de `domain` (y de `application` cuando existan casos de uso
-reales que orquestar; ambos subpaquetes de momento solo necesitan
-`domain` para reconstruir las entidades).
+`docs/Database.md`). Desde la fase 8.0 contiene además
+`infrastructure/excel/` (importación/exportación profesional de
+`.xlsx` con `openpyxl` — ver `docs/Excel.md`). ReportLab (PDF) llega en
+una fase posterior. Depende de `domain` (y de `application` cuando
+existan casos de uso reales que orquestar; los tres subpaquetes de
+momento solo necesitan `domain` para reconstruir las entidades).
 
 ```
 infrastructure/
@@ -71,14 +73,28 @@ infrastructure/
 │   ├── exceptions.py               # ProjectFileError y subclases tipadas
 │   ├── serialization.py            # domain <-> dict, función a función, sin __dict__/pickle
 │   └── project_file_repository.py  # ProjectFileRepository: save/load/validate/backup, atómico
-└── database/
-    ├── paths.py                    # get_user_database_path(): %LOCALAPPDATA%, sin depender de Qt
-    ├── exceptions.py                # DatabaseError y subclases tipadas
-    ├── orm_models.py                 # SQLAlchemy 2.x declarativo: catálogo, perfiles, historial
-    ├── migrations.py                 # initialize_database/migrate_database, schema_version
-    ├── engine.py                     # DatabaseManager: sesiones cortas, PRAGMA, backup, salud
-    ├── repositories.py               # 4 repositorios: catálogo, perfiles, 2 historiales
-    └── catalog_service.py            # CatalogService: fachada única hacia presentation
+├── database/
+│   ├── paths.py                    # get_user_database_path(): %LOCALAPPDATA%, sin depender de Qt
+│   ├── exceptions.py                # DatabaseError y subclases tipadas
+│   ├── orm_models.py                 # SQLAlchemy 2.x declarativo: catálogo, perfiles, historial
+│   ├── migrations.py                 # initialize_database/migrate_database, schema_version
+│   ├── engine.py                     # DatabaseManager: sesiones cortas, PRAGMA, backup, salud
+│   ├── repositories.py               # 4 repositorios: catálogo, perfiles, 2 historiales
+│   └── catalog_service.py            # CatalogService: fachada única hacia presentation
+└── excel/
+    ├── exceptions.py                 # ExcelError y subclases tipadas
+    ├── row_parsing.py                 # Ayudas genéricas de parseo compartidas por los esquemas
+    ├── results.py                     # RowError, *ImportResult (nunca se importa una fila inválida en silencio)
+    ├── styles.py                      # Formato profesional compartido: cabeceras, bordes, tablas, autoajuste
+    ├── workbook_utils.py              # Apertura segura, cabeceras, iteración de filas, escritura atómica
+    ├── product_rows.py                # Esquema de columnas de LoadUnit (catálogo)
+    ├── loading_space_rows.py          # Esquema de columnas de LoadingSpace
+    ├── catalog_importer.py / catalog_exporter.py
+    ├── packing_list_importer.py       # Resuelve SKU vía un Callable inyectado, nunca importa SQLite directo
+    ├── loading_space_importer.py
+    ├── result_exporter.py             # PackingResult -> .xlsx con 5 hojas
+    ├── detection.py                   # detect_template_kind(): identifica la plantilla por cabeceras
+    └── templates.py                   # Genera las 4 plantillas oficiales (examples/templates/)
 ```
 
 ### `presentation`
@@ -178,6 +194,16 @@ diálogos de catálogo/perfiles y registrar historial. `None` significa
 modo limitado: la aplicación sigue abriendo y los proyectos `.cargo3d`
 siguen funcionando, solo se deshabilitan las acciones de
 catálogo/perfiles/historial.
+
+Desde la fase 8.0, `main_window.py` importa directamente
+`infrastructure/excel/` (`import_catalog`, `export_catalog`,
+`import_packing_list`, `import_loading_spaces`, `export_packing_result`,
+`detect_template_kind`) para las acciones de importación/exportación de
+Excel — ver `docs/Excel.md`. El importador de Packing List no depende
+de `infrastructure/database` directamente: recibe
+`CatalogService.products.get_by_sku` como un `Callable` inyectado desde
+`main_window.py`, manteniendo `infrastructure/excel` comprobable sin una
+base de datos real.
 
 ## Motores de negocio: geometry, rules, optimization
 

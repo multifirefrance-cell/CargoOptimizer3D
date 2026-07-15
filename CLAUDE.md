@@ -67,8 +67,10 @@ presentation  →  infrastructure  →  application  →  optimization  →  rul
   `infrastructure/persistence/` (proyectos `.cargo3d`, JSON propio —
   ver `docs/ProjectFiles.md`); desde la fase 7.1 incluye
   `infrastructure/database/` (catálogo de productos y perfiles de
-  Loading Space, SQLAlchemy/SQLite — ver `docs/Database.md`). openpyxl,
-  ReportLab llegan en fases posteriores.
+  Loading Space, SQLAlchemy/SQLite — ver `docs/Database.md`); desde la
+  fase 8.0 incluye `infrastructure/excel/` (importación/exportación
+  profesional de `.xlsx` con openpyxl — ver `docs/Excel.md`). ReportLab
+  (PDF) llega en una fase posterior.
 - **`presentation`**: mecanismos de entrega (`presentation/desktop`
   hoy con PySide6 y, dentro de él, `presentation/desktop/viewer/` con
   PyVista/PyVistaQt para el visor 3D — ver `docs/ThreeDViewer.md`;
@@ -100,8 +102,9 @@ ninguna dependencia de UI instalada (ADR-0003).
   implementada — ver `docs/Database.md`); base de datos ubicada en
   `%LOCALAPPDATA%/CargoOptimizer3D/`, nunca dentro del repositorio ni
   versionada.
-- openpyxl para Excel y ReportLab para PDF (fase 8, aún no
-  implementadas).
+- openpyxl para importación/exportación de Excel (`.xlsx`, fase 8.0,
+  implementada — ver `docs/Excel.md`); nunca `pandas`, `xlrd` ni CSV
+  como sustituto. ReportLab para PDF llega en una fase posterior.
 - Ruff para lint (incluye orden de imports). Black para formateo. No
   usar el formateador de Ruff para evitar conflictos con Black.
 - Mypy en modo estricto (`strict = true`).
