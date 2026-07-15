@@ -14,8 +14,9 @@ fase se adelanta a la anterior.
 | 4.0 | Diseño del motor de optimización | Ninguno (solo documentación: `docs/OptimizationEngineDesign.md`, `docs/GreedyLayerStrategyDesign.md`, ADR-0008, ADR-0009) | **Completada** |
 | 4.1 | Primer optimizador funcional | `optimization` (hermano de `domain`) | **Completada** |
 | 4.2 | Optimización de rendimiento del motor de packing | `optimization` (mismos módulos, sin nuevo paquete) | **Completada** |
-| 5 | Visualización 3D | `infrastructure` (adaptador VTK) | Pendiente |
-| 6 | Interfaz | `presentation/desktop` (pantallas reales) | Pendiente |
+| 5.0 | Base de la interfaz de escritorio | `presentation/desktop` (ventana principal, paneles, sin conectar el motor) | **Completada** |
+| 5.1 | Conectar el motor con la interfaz | `presentation/desktop` (invocar `PackingEngine` desde `MainWindow`) | Pendiente |
+| 6 | Visualización 3D | `infrastructure` (adaptador VTK) | Pendiente |
 | 7 | Persistencia | `infrastructure` (adaptador SQLAlchemy/SQLite) | Pendiente |
 | 8 | Reportes | `infrastructure` (adaptadores openpyxl/ReportLab) | Pendiente |
 | 9 | Integración ERP | `presentation` (nuevo adaptador, p. ej. `presentation/api`) | Pendiente |
@@ -54,29 +55,48 @@ documentadas en `CLAUDE.md` y `docs/Architecture.md`, para no romper
 referencias existentes por un ajuste que es de alcance, no de
 arquitectura.
 
+## Nota sobre la numeración de las fases 5 y 6
+
+La numeración original de este roadmap tenía "5 = Visualización 3D" y
+"6 = Interfaz". Al encargar la fase de interfaz se pidió explícitamente
+como **Fase 5.0**, con la vista 3D remitida a la **Fase 6** (el propio
+placeholder de `Viewport3DPlaceholder` dice "Vista 3D disponible en la
+Fase 6"): la interfaz de escritorio pasa a ir antes que VTK, no
+después, porque tiene sentido tener ya una aplicación navegable antes
+de invertir en el render 3D. Se actualiza aquí la tabla para que
+coincida con lo realmente construido, siguiendo el mismo criterio que
+la nota anterior (no renumerar en cascada fases ya cerradas sin
+necesidad; aquí sí hacía falta porque 5 y 6 todavía no se habían
+implementado). Fase 5 pasa a subdividirse en **5.0 Base de la interfaz**
+(completada) y **5.1 Conectar el motor con la interfaz** (pendiente),
+por el mismo motivo que las fases 2 y 4: no se puede diseñar
+`PackingEngine` en la UI en la misma entrega que se diseña la ventana
+que lo va a alojar.
+
 ## Estado actual
 
-Fin de fase 4.2: optimización de rendimiento del motor de packing
-(`GreedyExtremePointStrategy`, identificador `greedy_extreme_point_v1`
-sin cambios, misma API pública `from cargo_optimizer import
-PackingEngine, PackingRequest`). Se aplicaron tres optimizaciones
-seguras dentro de `optimization` (caché incremental de bounding box en
-`PackingState`, omisión del *score* para candidatos rechazados, poda
-geométrica de puntos candidatos en `pruning.py`), verificadas con 334
-pruebas en verde (suite automática completa, sin contar el benchmark
-manual de 500 instancias) y perfilado real con
-`cProfile` antes y después. **El objetivo obligatorio de esta fase (5x
-más rápido para 100 instancias) no se alcanzó**: el resultado real es
-~1.3x, porque el perfilado muestra que, tras optimizar, el 100% del
-tiempo restante vive dentro de `RulesEngine.evaluate_placement`
-(soporte, apilamiento, peso soportado, colisión), fuera del alcance
-autorizado de esta fase. Detalle completo, con las alternativas
-evaluadas y descartadas (índice espacial, precálculo de reglas
-independientes de posición), en `docs/OptimizerPerformance.md`. No se
-ha escrito código de visualización 3D, persistencia, exportación ni
-API. La siguiente sesión de desarrollo debe elegir entre: (a) el diseño
-de la fase 5 (visualización 3D), o (b) — si el rendimiento a gran
-escala (250+ instancias) sigue siendo prioritario — una fase nueva,
-con ADR explícito, para introducir una estructura de datos espacial
-**dentro de `rules`/`geometry`** (no solo en `optimization`), única vía
-identificada para reducir el coste dominante real.
+Fin de fase 5.0: base profesional de la interfaz de escritorio.
+`presentation/desktop` tiene ahora una `MainWindow` real (menús con
+acciones reales u honestamente marcadas "disponible en una próxima
+versión", toolbar, paneles acoplables, formulario de Loading Space con
+perfiles predefinidos y modo personalizado, tabla de productos sobre
+`QAbstractTableModel`/`QTableView`, panel de resultados vacío, y un
+placeholder de vista 3D), con estilo industrial neutro claro/oscuro y
+persistencia de tamaños/posiciones/columnas/último directorio/último
+perfil vía `QSettings` (nunca SQLite). El motor
+(`domain`/`geometry`/`rules`/`optimization`) queda intacto y congelado:
+esta fase no lo modifica ni lo invoca — `PackingEngine` no se llama
+todavía desde la interfaz. Se corrigió de paso una inconsistencia
+objetiva preexistente (`cargo_optimizer.__version__` seguía en "0.6.0"
+mientras `pyproject.toml` ya declaraba "0.6.1" tras la fase 4.2); ambos
+quedan en "0.7.0". 370 pruebas en verde (334 previas + 36 nuevas de
+`tests/presentation/desktop/`, todas ejecutadas con la plataforma Qt
+`offscreen` para no depender de un entorno gráfico). No se ha escrito
+código de visualización 3D, persistencia, exportación/importación real
+ni API. La siguiente sesión de desarrollo debe abordar la **fase 5.1**
+(conectar `PackingEngine` con la acción "Ejecutar optimización" y el
+panel de resultados) antes de pasar a la fase 6 (visualización 3D). Si
+el rendimiento del motor a gran escala (250+ instancias) sigue siendo
+prioritario en paralelo, ver `docs/OptimizerPerformance.md` para la
+alternativa pendiente (índice espacial dentro de `rules`/`geometry`,
+con ADR explícito).

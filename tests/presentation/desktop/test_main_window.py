@@ -1,0 +1,115 @@
+"""Pruebas de `MainWindow`: creación, estructura y persistencia de QSettings."""
+
+from __future__ import annotations
+
+from PySide6.QtWidgets import QApplication, QToolBar
+
+from cargo_optimizer import __version__
+from cargo_optimizer.presentation.desktop.main_window import MainWindow
+from cargo_optimizer.presentation.desktop.settings import _KEY_MAIN_WINDOW_GEOMETRY, AppSettings
+
+_EXPECTED_MENUS = (
+    "&Archivo",
+    "&Proyecto",
+    "&Espacio de carga",
+    "Pro&ductos",
+    "&Optimización",
+    "&Ver",
+    "&Herramientas",
+    "A&yuda",
+)
+
+
+def test_main_window_creates_without_error(qapp: QApplication, app_settings: AppSettings) -> None:
+    window = MainWindow(app_settings)
+    assert window.windowTitle() == f"CargoOptimizer3D v{__version__}"
+    window.close()
+
+
+def test_main_window_has_all_required_menus(qapp: QApplication, app_settings: AppSettings) -> None:
+    window = MainWindow(app_settings)
+    menu_titles = [action.text() for action in window.menuBar().actions()]
+    for expected in _EXPECTED_MENUS:
+        assert expected in menu_titles
+    window.close()
+
+
+def test_toolbar_has_required_actions(qapp: QApplication, app_settings: AppSettings) -> None:
+    window = MainWindow(app_settings)
+    toolbar = window.findChild(QToolBar, "mainToolBar")
+    assert toolbar is not None
+    action_texts = {
+        action.text().replace("&", "").replace("…", "")
+        for action in toolbar.actions()
+        if action.text()
+    }
+    for expected in ("Nuevo", "Abrir", "Guardar", "Importar", "Ejecutar optimización", "Cancelar"):
+        assert expected in action_texts
+    window.close()
+
+
+def test_status_bar_shows_project_engine_and_state(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    window = MainWindow(app_settings)
+    assert window.statusBar() is not None
+    assert window._project_status_label.text() != ""
+    assert "Motor" in window._engine_status_label.text()
+    assert "Estado" in window._state_status_label.text()
+    window.close()
+
+
+def test_unimplemented_action_shows_status_message(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    window = MainWindow(app_settings)
+    window.action_save_as.trigger()
+    assert "próxima versión" in window.statusBar().currentMessage()
+    window.close()
+
+
+def test_new_product_action_adds_row_to_table(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    window = MainWindow(app_settings)
+    initial_rows = window.product_table_panel.model.rowCount()
+    window.action_new_product.trigger()
+    assert window.product_table_panel.model.rowCount() == initial_rows + 1
+    window.close()
+
+
+def test_close_event_persists_window_state(qapp: QApplication, app_settings: AppSettings) -> None:
+    window = MainWindow(app_settings)
+    window.resize(1000, 700)
+    expected_bytes = window.saveGeometry()
+    window.close()
+
+    stored_bytes = app_settings.qsettings.value(_KEY_MAIN_WINDOW_GEOMETRY)
+    assert stored_bytes == expected_bytes
+
+    restored = MainWindow(app_settings)  # no debe lanzar excepción al restaurar
+    restored.close()
+
+
+def test_toggle_theme_updates_settings(qapp: QApplication, app_settings: AppSettings) -> None:
+    window = MainWindow(app_settings)
+    window.action_dark_theme.trigger()
+    assert app_settings.theme() == "dark"
+    window.action_light_theme.trigger()
+    assert app_settings.theme() == "light"
+    window.close()
+
+
+def test_project_dock_toggle_action_exists(qapp: QApplication, app_settings: AppSettings) -> None:
+    # `action_toggle_project_dock` es `QDockWidget.toggleViewAction()`, un
+    # QAction propio de Qt: aquí solo se comprueba que está bien conectado al
+    # dock (checkable, en el menú Ver, casado inicialmente con la
+    # visibilidad real del panel). El propio ciclo mostrar/ocultar del dock
+    # es responsabilidad de Qt, no de este código.
+    window = MainWindow(app_settings)
+    window.show()
+    assert window.action_toggle_project_dock.isCheckable()
+    assert window.action_toggle_project_dock.isChecked() == window.project_tree_dock.isVisible()
+    window.project_tree_dock.setVisible(False)
+    assert not window.project_tree_dock.isVisible()
+    window.close()

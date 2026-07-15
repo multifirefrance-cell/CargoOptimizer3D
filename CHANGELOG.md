@@ -4,6 +4,78 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Este proyecto aún no ha alcanzado la versión 1.0; el versionado 0.x
 puede incluir cambios estructurales entre versiones menores.
 
+## [0.7.0] - 2026-07-15
+
+Fase 5.0: base profesional de la interfaz de escritorio. Trabajo
+exclusivamente dentro de `presentation/desktop`; el motor
+(`domain`/`geometry`/`rules`/`optimization`) queda congelado y no se
+invoca todavía desde la interfaz.
+
+### Added
+
+- `MainWindow` real: `QMainWindow` con `QSplitter` anidados (panel de
+  trabajo + panel de resultados; formulario + tabla de productos +
+  vista 3D) y un `QDockWidget` para el árbol de proyecto. 8 menús
+  (Archivo, Proyecto, Espacio de carga, Productos, Optimización, Ver,
+  Herramientas, Ayuda) con acciones reales o, cuando el motor todavía
+  no aplica, un mensaje explícito "disponible en una próxima versión"
+  en la barra de estado — nunca una acción vacía. Toolbar con los 8
+  botones pedidos (Nuevo, Abrir, Guardar, Importar, Optimizar,
+  Cancelar, Vista 3D, Preferencias).
+- `panels/project_tree_panel.py`: árbol de secciones del proyecto
+  (Espacios, Productos, Resultados, Configuración).
+- `panels/loading_space_form_panel.py`: formulario del Loading Space
+  con perfiles predefinidos (20'/40'/40HQ vía
+  `LoadingSpace.standard_*_container()`, más camión/semirremolque/
+  furgón/van/bodega/otro definidos en esta capa) y modo
+  "Personalizado" que desbloquea la edición libre de todos los campos.
+- `models/product_table_model.py`: `ProductTableModel`
+  (`QAbstractTableModel`, no `QTableWidget`) sobre una lista de
+  `LoadUnit` reales, con las 14 columnas pedidas y edición preparada
+  (`setData` reconstruye el `LoadUnit` inmutable vía
+  `dataclasses.replace`, rechazando la edición si el dominio la
+  invalida). `panels/product_table_panel.py` la envuelve en un
+  `QTableView` con altas/bajas de filas mínimas.
+- `panels/results_panel.py`: resumen inferior (cantidad solicitada/
+  cargada, peso, volumen, utilización, tiempo, estado), con la forma
+  final que usará la fase 5.1 pero valores vacíos por ahora.
+- `panels/viewport_3d_placeholder.py`: placeholder elegante de la
+  vista 3D ("Vista 3D disponible en la Fase 6"), sin VTK.
+- `style.py`: paletas claro y oscuro completas (no solo la clara con
+  una promesa de oscuro futuro) más una hoja de estilos mínima de
+  aspecto industrial; alternables desde el menú Ver.
+- `icons.py` + `resources/icons/*.svg`: 8 iconos SVG monocromos
+  propios (nuevo, abrir, guardar, importar, optimizar, cancelar, vista
+  3D, preferencias).
+- `settings.py`: `AppSettings`, wrapper de `QSettings` con claves
+  centralizadas — geometría/estado de `MainWindow`, estado de los tres
+  `QSplitter`, anchos de columna de la tabla de productos, último
+  directorio usado y último perfil de Loading Space. Sin SQLite.
+- `tests/presentation/desktop/`: 36 pruebas nuevas (creación de
+  `MainWindow`, menús/toolbar/status bar, modelo de productos, carga y
+  bloqueo de perfiles del formulario de espacio, árbol de proyecto,
+  persistencia de `AppSettings`), todas bajo la plataforma Qt
+  `offscreen` para no depender de un entorno gráfico. 370 pruebas en
+  total.
+
+### Fixed
+
+- `cargo_optimizer.__version__` seguía en `"0.6.0"` mientras
+  `pyproject.toml` ya declaraba `"0.6.1"` desde la fase 4.2 (bug
+  objetivo y demostrable, no relacionado con el motor): ambos quedan
+  sincronizados en `"0.7.0"`.
+
+### Changed
+
+- `docs/Roadmap.md`: la fase 5 se renumera de "5 = Visualización 3D, 6
+  = Interfaz" a "5.0/5.1 = Interfaz, 6 = Visualización 3D" (ver la nota
+  dedicada en ese documento) para reflejar el orden realmente
+  construido.
+- No se conecta `PackingEngine` desde la interfaz todavía (fase 5.1);
+  no se implementa VTK, SQLite, Excel, PDF, importación/exportación
+  real, animaciones ni Undo/Redo — todo deliberadamente fuera de
+  alcance de esta fase.
+
 ## [0.6.1] - 2026-07-14
 
 Fase 4.2: optimización de rendimiento del motor de packing. Sin

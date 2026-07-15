@@ -129,8 +129,9 @@ userdata/            # Datos generados por el usuario en tiempo de ejecución. N
 0. Diseño completo — 1. Arquitectura — 2.1. Modelo de dominio puro —
    2.2. Motor geométrico — 3. Motor de restricciones — 4.0. Diseño del
    motor de optimización — 4.1. Primer optimizador funcional — 4.2.
-   Optimización de rendimiento del motor de packing — 5. Visualización
-   3D — 6. Interfaz — 7. Persistencia — 8. Reportes — 9. Integración
+   Optimización de rendimiento del motor de packing — 5.0. Base de la
+   interfaz de escritorio — 5.1. Conectar el motor con la interfaz —
+   6. Visualización 3D — 7. Persistencia — 8. Reportes — 9. Integración
    ERP — 10. Versión comercial.
 
 La fase 2 original ("Motor geométrico") se dividió en 2.1 (modelo de
@@ -139,24 +140,24 @@ de dominio sin implementar todavía colisiones ni packing. Ver
 `docs/Roadmap.md`, sección "Nota sobre la numeración de la fase 2". La
 fase 4 se dividió igual, en 4.0 (diseño puro) y 4.1 (implementación),
 por el mismo motivo: no crear `optimization/` antes de haber diseñado
-qué contendrá.
+qué contendrá. La fase 5 se renumeró de "5 = Visualización 3D, 6 =
+Interfaz" a "5.0/5.1 = Interfaz, 6 = Visualización 3D" al construir la
+interfaz antes que VTK — ver `docs/Roadmap.md`, sección "Nota sobre la
+numeración de las fases 5 y 6".
 
-Estado actual: **motor de optimización implementado y optimizado en lo
-seguro** (fin de fase 4.2). `optimization` existe, con la estrategia
-`greedy_extreme_point_v1` y la fachada `PackingEngine` ya exportada
-desde `cargo_optimizer`. La fase 4.2 añadió caché incremental de
-bounding box (`PackingState`) y poda geométrica segura de candidatos
-(`optimization/pruning.py`) sin cambiar el algoritmo, la API pública ni
-`rules`/`geometry`. **El objetivo de rendimiento de esa fase (5x más
-rápido para 100 instancias) no se alcanzó** (resultado real: ~1.3x):
-el perfilado real muestra que el coste restante vive dentro de
-`RulesEngine.evaluate_placement`, fuera del alcance autorizado de esa
-fase — ver `docs/OptimizerPerformance.md` para el detalle completo y
-las alternativas evaluadas y descartadas. No implementar todavía
-múltiples estrategias, algoritmo genético, beam search, índice
-espacial dentro de `rules`/`geometry`, visualización 3D, SQLite,
-Excel, PDF ni API, hasta que se indique explícitamente. Ver
-`docs/Roadmap.md` para el detalle fase a fase.
+Estado actual: **base profesional de la interfaz de escritorio
+construida** (fin de fase 5.0). `presentation/desktop` tiene una
+`MainWindow` real (menús, toolbar, paneles acoplables, formulario de
+Loading Space, tabla de productos, panel de resultados vacío,
+placeholder de vista 3D, tema claro/oscuro, persistencia de interfaz
+vía `QSettings`) — ver `docs/Architecture.md`, sección `presentation`.
+El motor (`domain`/`geometry`/`rules`/`optimization`) queda intacto y
+sin conectar todavía: `PackingEngine` no se invoca desde la interfaz
+hasta la fase 5.1. No implementar todavía VTK, SQLite, Excel, PDF,
+importación/exportación real, animaciones, Undo/Redo, ni volver a
+tocar `domain`/`geometry`/`rules`/`optimization` salvo bug objetivo y
+demostrable, hasta que se indique explícitamente. Ver `docs/Roadmap.md`
+para el detalle fase a fase.
 
 ## Invariantes del modelo de dominio (no romper sin ADR)
 
@@ -315,6 +316,50 @@ conservado como historial).
   alcance de la fase 4.2. No prometer rendimiento distinto al
   documentado en `docs/OptimizerPerformance.md` sin haber implementado
   esa estructura, con ADR explícito.
+
+## Invariantes de `presentation/desktop` (no romper sin ADR)
+
+Ver `docs/Architecture.md`, sección `presentation`, para el detalle
+completo de la estructura de `presentation/desktop/` construida en la
+fase 5.0.
+
+- `presentation/desktop` no invoca `PackingEngine` todavía: ninguna
+  acción de menú/toolbar ejecuta el motor de optimización. Conectarlo
+  es exactamente el alcance de la fase 5.1, no antes.
+- Toda acción de menú o toolbar sin implementación real muestra
+  "[acción]: disponible en una próxima versión." en la barra de
+  estado (`MainWindow._stub`); nunca queda una acción sin `slot`
+  conectado.
+- `ProductTableModel` es un `QAbstractTableModel` sobre `LoadUnit`
+  reales (frozen), no `QTableWidget` ni una copia paralela del
+  esquema de dominio. Una edición reconstruye la instancia con
+  `dataclasses.replace` y descarta el cambio (`setData` devuelve
+  `False`) si el dominio la rechaza (`DomainValidationError`) — nunca
+  se deja el modelo en un estado inconsistente ni se relaja la
+  validación de dominio para permitir la edición.
+- `LoadingSpaceFormPanel`: los campos del formulario permanecen
+  deshabilitados y muestran el valor del perfil elegido mientras el
+  perfil no sea "Personalizado"; solo "Personalizado" desbloquea
+  edición libre. No cambiar este bloqueo a una edición siempre libre
+  sin decisión explícita — es intencional, para que un perfil
+  estándar nunca quede editado por accidente.
+- Persistencia de interfaz exclusivamente vía `QSettings`
+  (`presentation/desktop/settings.py::AppSettings`), nunca SQLite ni
+  otro almacenamiento: eso pertenece a la fase 7 (persistencia de
+  proyectos), un concepto distinto de "recordar el estado de la
+  ventana".
+- `Viewport3DPlaceholder` no importa VTK ni ninguna biblioteca de
+  render 3D: es un `QWidget` de marcador de posición hasta la fase 6.
+- Los recursos (`resources/icons/*.svg`) viven dentro de
+  `presentation/desktop/`, cargados por ruta de archivo directa
+  (`icons.py::icon`) — no hay pipeline `.qrc`/`pyside6-rcc` todavía;
+  no introducirlo sin necesidad real (más iconos, i18n de recursos).
+- Las pruebas de `tests/presentation/desktop/` fijan
+  `QT_QPA_PLATFORM=offscreen` antes de crear el primer `QApplication`
+  (`conftest.py`), para no depender de un entorno gráfico ni abrir
+  ventanas reales durante la suite. Solo puede existir un
+  `QApplication` por proceso: el fixture `qapp` es de ámbito de
+  sesión, nunca crear uno nuevo por prueba.
 
 ## Reglas de trabajo con el asistente
 

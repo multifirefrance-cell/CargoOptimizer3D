@@ -1,21 +1,455 @@
-"""Ventana principal de la aplicación."""
+"""Ventana principal de la aplicación de escritorio.
+
+Base profesional de la fase 5.0: estructura, navegación, formularios y
+persistencia de interfaz. No ejecuta `PackingEngine` todavía (fase
+5.1) — toda acción de menú/toolbar que dependería del motor real
+muestra "Disponible en una próxima versión" en la barra de estado en
+vez de simular un resultado falso. Por el mismo motivo, esta ventana no
+importa nada de `cargo_optimizer.optimization`.
+"""
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QLabel, QMainWindow, QVBoxLayout, QWidget
+from collections.abc import Callable
+from pathlib import Path
+
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QAction, QCloseEvent
+from PySide6.QtWidgets import (
+    QApplication,
+    QDockWidget,
+    QFileDialog,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QSplitter,
+    QStatusBar,
+    QToolBar,
+)
 
 from cargo_optimizer import __version__
+from cargo_optimizer.presentation.desktop.icons import icon
+from cargo_optimizer.presentation.desktop.panels.loading_space_form_panel import (
+    LoadingSpaceFormPanel,
+)
+from cargo_optimizer.presentation.desktop.panels.product_table_panel import ProductTablePanel
+from cargo_optimizer.presentation.desktop.panels.project_tree_panel import ProjectTreePanel
+from cargo_optimizer.presentation.desktop.panels.results_panel import ResultsPanel
+from cargo_optimizer.presentation.desktop.panels.viewport_3d_placeholder import (
+    Viewport3DPlaceholder,
+)
+from cargo_optimizer.presentation.desktop.settings import AppSettings
+from cargo_optimizer.presentation.desktop.style import THEME_DARK, THEME_LIGHT, apply_theme
+
+_NOT_IMPLEMENTED_MESSAGE_MS = 4000
+_STATUS_MESSAGE_MS = 4000
+_SPLITTER_MAIN = "main"
+_SPLITTER_WORK_AREA = "workArea"
+_SPLITTER_LEFT_WORK = "leftWork"
+_HEADER_PRODUCT_TABLE = "productTable"
+_ENGINE_LABEL = "Motor: no conectado (fase 5.1)"
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    """Ventana principal: menús, toolbar, paneles acoplables y barra de estado."""
+
+    def __init__(self, settings: AppSettings | None = None) -> None:
         super().__init__()
+        self._settings = settings or AppSettings()
+        self._project_name = "Proyecto sin guardar"
 
         self.setWindowTitle(f"CargoOptimizer3D v{__version__}")
-        self.resize(800, 600)
+        self.resize(1280, 800)
 
-        central = QWidget(self)
-        layout = QVBoxLayout(central)
-        label = QLabel("CargoOptimizer3D — infraestructura base operativa.")
-        layout.addWidget(label)
-        self.setCentralWidget(central)
+        self._build_panels()
+        self._build_dock_widgets()
+        self._build_central_layout()
+        self._build_actions()
+        self._build_menu_bar()
+        self._build_toolbar()
+        self._build_status_bar()
+
+        self._restore_ui_state()
+
+    # ------------------------------------------------------------------
+    # Construcción de la interfaz
+    # ------------------------------------------------------------------
+
+    def _build_panels(self) -> None:
+        self.project_tree_panel = ProjectTreePanel(self)
+        self.loading_space_form_panel = LoadingSpaceFormPanel(self)
+        self.product_table_panel = ProductTablePanel(self)
+        self.results_panel = ResultsPanel(self)
+        self.viewport_3d_placeholder = Viewport3DPlaceholder(self)
+
+        self.project_tree_panel.section_activated.connect(self._on_project_section_activated)
+
+    def _build_dock_widgets(self) -> None:
+        self.project_tree_dock = QDockWidget("Proyecto", self)
+        self.project_tree_dock.setObjectName("projectTreeDock")
+        self.project_tree_dock.setWidget(self.project_tree_panel)
+        self.project_tree_dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        )
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_tree_dock)
+
+    def _build_central_layout(self) -> None:
+        self.left_work_splitter = QSplitter(Qt.Orientation.Vertical, self)
+        self.left_work_splitter.setObjectName(_SPLITTER_LEFT_WORK)
+        self.left_work_splitter.addWidget(self.loading_space_form_panel)
+        self.left_work_splitter.addWidget(self.product_table_panel)
+        self.left_work_splitter.setStretchFactor(1, 1)
+
+        self.work_area_splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        self.work_area_splitter.setObjectName(_SPLITTER_WORK_AREA)
+        self.work_area_splitter.addWidget(self.left_work_splitter)
+        self.work_area_splitter.addWidget(self.viewport_3d_placeholder)
+        self.work_area_splitter.setStretchFactor(0, 1)
+        self.work_area_splitter.setStretchFactor(1, 1)
+
+        self.main_splitter = QSplitter(Qt.Orientation.Vertical, self)
+        self.main_splitter.setObjectName(_SPLITTER_MAIN)
+        self.main_splitter.addWidget(self.work_area_splitter)
+        self.main_splitter.addWidget(self.results_panel)
+        self.main_splitter.setStretchFactor(0, 1)
+
+        self.setCentralWidget(self.main_splitter)
+
+    # ------------------------------------------------------------------
+    # Acciones
+    # ------------------------------------------------------------------
+
+    def _build_actions(self) -> None:
+        self.action_new = self._make_action("new", "&Nuevo", "Ctrl+N", self._on_new_project)
+        self.action_open = self._make_action("open", "&Abrir…", "Ctrl+O", self._on_open_project)
+        self.action_save = self._make_action("save", "&Guardar", "Ctrl+S", self._on_save_project)
+        self.action_save_as = self._make_action(
+            "save", "Guardar &como…", "Ctrl+Shift+S", self._stub("Guardar como")
+        )
+        self.action_import = self._make_action("import", "&Importar…", None, self._on_import)
+        self.action_export = self._make_action("import", "&Exportar…", None, self._stub("Exportar"))
+        self.action_preferences = self._make_action(
+            "preferences", "&Preferencias…", "Ctrl+,", self._stub("Preferencias")
+        )
+        self.action_exit = self._make_action("cancel", "&Salir", "Ctrl+Q", self.close)
+
+        self.action_new_loading_space = self._make_action(
+            "new", "&Nuevo espacio de carga", None, self._stub("Nuevo espacio de carga")
+        )
+        self.action_predefined_profiles = self._make_action(
+            "open", "&Perfiles predefinidos…", None, self._stub("Perfiles predefinidos")
+        )
+        self.action_delete_loading_space = self._make_action(
+            "cancel", "&Eliminar espacio de carga", None, self._stub("Eliminar espacio de carga")
+        )
+
+        self.action_new_product = self._make_action(
+            "new",
+            "&Nuevo producto",
+            "Ctrl+Shift+N",
+            self.product_table_panel.model.add_default_product,
+        )
+        self.action_delete_products = self._make_action(
+            "cancel", "&Eliminar seleccionados", None, self.product_table_panel.remove_selected_rows
+        )
+        self.action_import_products = self._make_action(
+            "import", "Importar &productos…", None, self._on_import
+        )
+
+        self.action_run_optimization = self._make_action(
+            "optimize", "&Ejecutar optimización", "F5", self._stub("Ejecutar optimización")
+        )
+        self.action_cancel_optimization = self._make_action(
+            "cancel", "&Cancelar", None, self._stub("Cancelar optimización")
+        )
+        self.action_cancel_optimization.setEnabled(False)
+        self.action_configure_optimization = self._make_action(
+            "preferences", "&Configurar optimización…", None, self._stub("Configurar optimización")
+        )
+        self.action_show_results = self._make_action(
+            "view3d", "&Ver resultados", None, self._on_show_results
+        )
+
+        self.action_toggle_project_dock = self.project_tree_dock.toggleViewAction()
+        self.action_toggle_project_dock.setText("Panel de &proyecto")
+
+        self.action_view_3d_focus = self._make_action(
+            "view3d", "&Vista 3D", "Ctrl+3", self._on_toggle_3d_focus
+        )
+        self.action_view_3d_focus.setCheckable(True)
+
+        self.action_light_theme = self._make_action(
+            "preferences", "Tema &claro", None, lambda: self._set_theme(THEME_LIGHT)
+        )
+        self.action_dark_theme = self._make_action(
+            "preferences", "Tema &oscuro", None, lambda: self._set_theme(THEME_DARK)
+        )
+        self.action_reset_layout = self._make_action(
+            "open", "&Restaurar diseño de paneles", None, self._on_reset_layout
+        )
+
+        self.action_project_properties = self._make_action(
+            "save", "&Propiedades del proyecto…", None, self._stub("Propiedades del proyecto")
+        )
+        self.action_event_log = self._make_action(
+            "preferences", "&Registro de eventos", None, self._stub("Registro de eventos")
+        )
+        self.action_check_updates = self._make_action(
+            "import", "&Comprobar actualizaciones", None, self._stub("Comprobar actualizaciones")
+        )
+
+        self.action_about = self._make_action(
+            "preferences", "&Acerca de CargoOptimizer3D…", None, self._on_about
+        )
+        self.action_documentation = self._make_action(
+            "open", "&Documentación", "F1", self._stub("Documentación")
+        )
+
+    def _make_action(
+        self,
+        icon_name: str,
+        text: str,
+        shortcut: str | None,
+        slot: Callable[..., object],
+    ) -> QAction:
+        action = QAction(icon(icon_name), text, self)
+        if shortcut:
+            action.setShortcut(shortcut)
+        action.triggered.connect(slot)
+        return action
+
+    def _stub(self, action_name: str) -> Callable[[], None]:
+        def _handler() -> None:
+            self.statusBar().showMessage(
+                f"{action_name}: disponible en una próxima versión.", _NOT_IMPLEMENTED_MESSAGE_MS
+            )
+
+        return _handler
+
+    def _build_menu_bar(self) -> None:
+        menu_bar = self.menuBar()
+
+        file_menu = menu_bar.addMenu("&Archivo")
+        file_menu.addAction(self.action_new)
+        file_menu.addAction(self.action_open)
+        file_menu.addAction(self.action_save)
+        file_menu.addAction(self.action_save_as)
+        file_menu.addSeparator()
+        file_menu.addAction(self.action_import)
+        file_menu.addAction(self.action_export)
+        file_menu.addSeparator()
+        file_menu.addAction(self.action_preferences)
+        file_menu.addSeparator()
+        file_menu.addAction(self.action_exit)
+
+        project_menu = menu_bar.addMenu("&Proyecto")
+        project_menu.addAction(self.action_new_loading_space)
+        project_menu.addAction(self.action_new_product)
+        project_menu.addSeparator()
+        project_menu.addAction(self.action_project_properties)
+
+        loading_space_menu = menu_bar.addMenu("&Espacio de carga")
+        loading_space_menu.addAction(self.action_new_loading_space)
+        loading_space_menu.addAction(self.action_predefined_profiles)
+        loading_space_menu.addSeparator()
+        loading_space_menu.addAction(self.action_delete_loading_space)
+
+        products_menu = menu_bar.addMenu("Pro&ductos")
+        products_menu.addAction(self.action_new_product)
+        products_menu.addAction(self.action_import_products)
+        products_menu.addAction(self.action_export)
+        products_menu.addSeparator()
+        products_menu.addAction(self.action_delete_products)
+
+        optimization_menu = menu_bar.addMenu("&Optimización")
+        optimization_menu.addAction(self.action_run_optimization)
+        optimization_menu.addAction(self.action_cancel_optimization)
+        optimization_menu.addSeparator()
+        optimization_menu.addAction(self.action_configure_optimization)
+        optimization_menu.addAction(self.action_show_results)
+
+        view_menu = menu_bar.addMenu("&Ver")
+        view_menu.addAction(self.action_toggle_project_dock)
+        view_menu.addAction(self.action_view_3d_focus)
+        view_menu.addSeparator()
+        view_menu.addAction(self.action_light_theme)
+        view_menu.addAction(self.action_dark_theme)
+        view_menu.addSeparator()
+        view_menu.addAction(self.action_reset_layout)
+
+        tools_menu = menu_bar.addMenu("&Herramientas")
+        tools_menu.addAction(self.action_preferences)
+        tools_menu.addAction(self.action_event_log)
+        tools_menu.addAction(self.action_check_updates)
+
+        help_menu = menu_bar.addMenu("A&yuda")
+        help_menu.addAction(self.action_documentation)
+        help_menu.addSeparator()
+        help_menu.addAction(self.action_about)
+
+    def _build_toolbar(self) -> None:
+        toolbar = QToolBar("Principal", self)
+        toolbar.setObjectName("mainToolBar")
+        toolbar.setIconSize(QSize(20, 20))
+        toolbar.setMovable(False)
+
+        toolbar.addAction(self.action_new)
+        toolbar.addAction(self.action_open)
+        toolbar.addAction(self.action_save)
+        toolbar.addSeparator()
+        toolbar.addAction(self.action_import)
+        toolbar.addSeparator()
+        toolbar.addAction(self.action_run_optimization)
+        toolbar.addAction(self.action_cancel_optimization)
+        toolbar.addSeparator()
+        toolbar.addAction(self.action_view_3d_focus)
+        toolbar.addSeparator()
+        toolbar.addAction(self.action_preferences)
+
+        self.addToolBar(toolbar)
+
+    def _build_status_bar(self) -> None:
+        bar = QStatusBar(self)
+        self.setStatusBar(bar)
+
+        self._project_status_label = QLabel(self._project_name, self)
+        self._engine_status_label = QLabel(_ENGINE_LABEL, self)
+        self._state_status_label = QLabel("Estado: inactivo", self)
+
+        bar.addPermanentWidget(self._project_status_label)
+        bar.addPermanentWidget(self._engine_status_label)
+        bar.addPermanentWidget(self._state_status_label)
+        bar.showMessage("Listo.", _STATUS_MESSAGE_MS)
+
+    # ------------------------------------------------------------------
+    # Manejadores de acciones reales
+    # ------------------------------------------------------------------
+
+    def _on_new_project(self) -> None:
+        model = self.product_table_panel.model
+        model.remove_rows_at(list(range(model.rowCount())))
+        self._project_name = "Proyecto sin guardar"
+        self._project_status_label.setText(self._project_name)
+        self.statusBar().showMessage("Nuevo proyecto creado.", _STATUS_MESSAGE_MS)
+
+    def _on_open_project(self) -> None:
+        path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "Abrir proyecto",
+            self._settings.last_directory(),
+            "Proyectos CargoOptimizer3D (*.cargo3d);;Todos los archivos (*)",
+        )
+        if not path:
+            return
+        self._remember_directory_of(path)
+        self.statusBar().showMessage(
+            "Apertura de proyectos: disponible en una próxima versión.", _NOT_IMPLEMENTED_MESSAGE_MS
+        )
+
+    def _on_save_project(self) -> None:
+        path, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "Guardar proyecto",
+            self._settings.last_directory(),
+            "Proyectos CargoOptimizer3D (*.cargo3d)",
+        )
+        if not path:
+            return
+        self._remember_directory_of(path)
+        self.statusBar().showMessage(
+            "Guardado de proyectos: disponible en una próxima versión.", _NOT_IMPLEMENTED_MESSAGE_MS
+        )
+
+    def _on_import(self) -> None:
+        path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "Importar",
+            self._settings.last_directory(),
+            "Hojas de cálculo (*.xlsx *.csv);;Todos los archivos (*)",
+        )
+        if not path:
+            return
+        self._remember_directory_of(path)
+        self.statusBar().showMessage(
+            "Importación: disponible en una próxima versión.", _NOT_IMPLEMENTED_MESSAGE_MS
+        )
+
+    def _remember_directory_of(self, file_path: str) -> None:
+        self._settings.set_last_directory(str(Path(file_path).parent))
+
+    def _on_project_section_activated(self, section: str) -> None:
+        self.statusBar().showMessage(f"Sección: {section}", _STATUS_MESSAGE_MS)
+
+    def _on_show_results(self) -> None:
+        self.results_panel.setFocus()
+        sizes = self.main_splitter.sizes()
+        if len(sizes) == 2 and sizes[1] < 80:
+            total = sum(sizes)
+            self.main_splitter.setSizes([total - 200, 200])
+
+    def _on_toggle_3d_focus(self, checked: bool) -> None:
+        total = sum(self.work_area_splitter.sizes()) or 1
+        if checked:
+            self.work_area_splitter.setSizes([0, total])
+        else:
+            self.work_area_splitter.setSizes([total // 2, total - total // 2])
+
+    def _set_theme(self, theme: str) -> None:
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            apply_theme(app, theme)
+        self._settings.set_theme(theme)
+
+    def _on_reset_layout(self) -> None:
+        total_width = self.work_area_splitter.width() or 1200
+        self.work_area_splitter.setSizes([total_width // 2, total_width - total_width // 2])
+        total_height = self.left_work_splitter.height() or 600
+        self.left_work_splitter.setSizes([total_height // 3, total_height - total_height // 3])
+        main_height = self.main_splitter.height() or 800
+        self.main_splitter.setSizes([main_height - 160, 160])
+        self.project_tree_dock.setFloating(False)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_tree_dock)
+        self.project_tree_dock.show()
+        self.statusBar().showMessage("Diseño de paneles restaurado.", _STATUS_MESSAGE_MS)
+
+    def _on_about(self) -> None:
+        QMessageBox.about(
+            self,
+            "Acerca de CargoOptimizer3D",
+            f"<b>CargoOptimizer3D</b> v{__version__}<br>"
+            "Software de optimización de carga 3D para espacios de carga universales.",
+        )
+
+    # ------------------------------------------------------------------
+    # Persistencia de interfaz (QSettings)
+    # ------------------------------------------------------------------
+
+    def _restore_ui_state(self) -> None:
+        self._settings.restore_main_window_state(self)
+        self._settings.restore_splitter_state(_SPLITTER_MAIN, self.main_splitter)
+        self._settings.restore_splitter_state(_SPLITTER_WORK_AREA, self.work_area_splitter)
+        self._settings.restore_splitter_state(_SPLITTER_LEFT_WORK, self.left_work_splitter)
+        self._settings.restore_header_state(
+            _HEADER_PRODUCT_TABLE, self.product_table_panel.table_view.horizontalHeader()
+        )
+        last_profile = self._settings.last_loading_space_profile()
+        if last_profile:
+            self.loading_space_form_panel.set_current_profile_name(last_profile)
+
+    def _save_ui_state(self) -> None:
+        self._settings.save_main_window_state(self)
+        self._settings.save_splitter_state(_SPLITTER_MAIN, self.main_splitter)
+        self._settings.save_splitter_state(_SPLITTER_WORK_AREA, self.work_area_splitter)
+        self._settings.save_splitter_state(_SPLITTER_LEFT_WORK, self.left_work_splitter)
+        self._settings.save_header_state(
+            _HEADER_PRODUCT_TABLE, self.product_table_panel.table_view.horizontalHeader()
+        )
+        self._settings.set_last_loading_space_profile(
+            self.loading_space_form_panel.current_profile_name()
+        )
+        self._settings.sync()
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 (nombre impuesto por Qt)
+        self._save_ui_state()
+        super().closeEvent(event)

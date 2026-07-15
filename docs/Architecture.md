@@ -71,6 +71,34 @@ dentro de ese adaptador — p. ej. `presentation/desktop/resources/` —
 nunca en un directorio compartido a nivel de proyecto, porque no son un
 recurso del SDK sino de un mecanismo de entrega concreto.
 
+Desde la fase 5.0, `presentation/desktop/` tiene esta forma:
+
+```
+presentation/desktop/
+├── app.py               # arranque: QApplication, tema, MainWindow
+├── main_window.py        # MainWindow: menús, toolbar, splitters, dock, status bar
+├── icons.py               # carga de resources/icons/*.svg como QIcon
+├── style.py                # paletas claro/oscuro + QSS (aspecto industrial)
+├── settings.py              # AppSettings: wrapper de QSettings, claves centralizadas
+├── models/
+│   └── product_table_model.py  # QAbstractTableModel sobre list[LoadUnit]
+├── panels/
+│   ├── project_tree_panel.py
+│   ├── loading_space_form_panel.py
+│   ├── product_table_panel.py
+│   ├── results_panel.py
+│   └── viewport_3d_placeholder.py
+└── resources/icons/*.svg
+```
+
+Todos los modelos y paneles pueden importar `cargo_optimizer.domain`
+(está por debajo de `presentation` en la regla de dependencia) — de
+hecho `ProductTableModel` y `LoadingSpaceFormPanel` construyen
+`LoadUnit`/`LoadingSpace` reales, no una copia paralela del esquema de
+dominio. Ninguno importa `cargo_optimizer.optimization` todavía: la
+fase 5.0 construye la interfaz sin invocar `PackingEngine` (ver
+`docs/OptimizationEngine.md`); conectarlo es la fase 5.1.
+
 ## Motores de negocio: geometry, rules, optimization
 
 ```
