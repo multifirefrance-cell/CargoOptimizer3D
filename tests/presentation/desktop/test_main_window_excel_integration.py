@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 from openpyxl import Workbook
-from PySide6.QtWidgets import QApplication, QFileDialog, QInputDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QInputDialog, QMessageBox
 
 from cargo_optimizer.domain.dimensions import Dimensions3D
 from cargo_optimizer.domain.enums import LoadingSpaceCategory
@@ -31,8 +31,25 @@ from cargo_optimizer.infrastructure.excel.loading_space_rows import (
 )
 from cargo_optimizer.infrastructure.excel.packing_list_importer import PACKING_LIST_COLUMNS
 from cargo_optimizer.infrastructure.excel.templates import generate_all_templates
+from cargo_optimizer.presentation.desktop.dialogs.duplicate_resolution_dialog import (
+    DuplicateResolutionDialog,
+)
+from cargo_optimizer.presentation.desktop.dialogs.import_preview_dialog import ImportPreviewDialog
 from cargo_optimizer.presentation.desktop.main_window import MainWindow
 from cargo_optimizer.presentation.desktop.settings import AppSettings
+
+
+def _accept_preview_dialog_all(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Simula aceptar `ImportPreviewDialog` en modo "Todas las filas" (fase 8.1).
+
+    Desde la fase 8.1, `_on_import_catalog_excel` siempre muestra esta
+    vista previa (nunca solo el diálogo de mapeo); un archivo real de
+    prueba que no la sustituya se queda esperando un clic que nunca
+    llega bajo `offscreen`.
+    """
+    monkeypatch.setattr(ImportPreviewDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
+    monkeypatch.setattr(ImportPreviewDialog, "result_selection_mode", lambda self: "all")
+    monkeypatch.setattr(ImportPreviewDialog, "result_selected_skus", lambda self: None)
 
 
 def _unit(**overrides: object) -> LoadUnit:
@@ -130,6 +147,7 @@ def test_on_import_catalog_excel_adds_to_sqlite_catalog(
     excel_path = tmp_path / "catalogo.xlsx"
     export_catalog([_unit(sku="CAT-EXCEL-1"), _unit(sku="CAT-EXCEL-2")], excel_path)
     monkeypatch.setattr(QFileDialog, "getOpenFileName", _fake_open_dialog(excel_path))
+    _accept_preview_dialog_all(monkeypatch)
 
     window._on_import_catalog_excel()
 
@@ -140,22 +158,33 @@ def test_on_import_catalog_excel_adds_to_sqlite_catalog(
     window.close()
 
 
-def test_on_import_catalog_excel_skips_existing_sku_with_warning(
+def test_on_import_catalog_excel_duplicate_sku_ignored_leaves_catalog_untouched(
     qapp: QApplication, app_settings: AppSettings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Desde la fase 8.1, un SKU ya existente se resuelve con `DuplicateResolutionDialog`.
+
+    Elegir "Ignorar" reemplaza el antiguo comportamiento por defecto de
+    la fase 8.0 (omitir siempre con un aviso): el resultado observable
+    (el producto existente no cambia) es el mismo, pero ahora es una
+    decisión explícita del usuario en vez de la única opción posible.
+    """
     service = CatalogService.create_default(base_dir=tmp_path / "db")
     service.products.add(_unit(sku="ALREADY-THERE"))
     window = MainWindow(app_settings, catalog_service=service)
     excel_path = tmp_path / "catalogo.xlsx"
     export_catalog([_unit(sku="ALREADY-THERE", weight_kg=99.0)], excel_path)
     monkeypatch.setattr(QFileDialog, "getOpenFileName", _fake_open_dialog(excel_path))
-    warnings: list[tuple[Any, ...]] = []
-    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: warnings.append(a)))
+    _accept_preview_dialog_all(monkeypatch)
+    monkeypatch.setattr(DuplicateResolutionDialog, "exec", lambda self: QDialog.DialogCode.Accepted)
+    monkeypatch.setattr(
+        DuplicateResolutionDialog,
+        "result_resolutions",
+        lambda self: {"ALREADY-THERE": "ignore"},
+    )
 
     window._on_import_catalog_excel()
 
     assert service.products.get_by_sku("ALREADY-THERE").weight_kg == 10.0  # type: ignore[union-attr]
-    assert len(warnings) == 1
     window.close()
 
 
@@ -164,6 +193,8 @@ def test_on_import_catalog_excel_disabled_in_limited_mode(
 ) -> None:
     window = MainWindow(app_settings, catalog_service=None)
     assert window.action_import_catalog_excel.isEnabled() is False
+    assert window.action_import_catalog_excel_mapping.isEnabled() is False
+    assert window.action_bulk_import_catalog_excel.isEnabled() is False
     assert window.action_export_catalog_excel.isEnabled() is False
     assert window.action_import_packing_list_excel.isEnabled() is False
     window.close()

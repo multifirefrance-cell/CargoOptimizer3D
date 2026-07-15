@@ -13,6 +13,7 @@ entidades de `domain` o los DTO de historial definidos aquí mismo.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,11 +37,13 @@ from cargo_optimizer.domain.packing_result import PackingResult
 from cargo_optimizer.infrastructure.database.engine import DatabaseManager
 from cargo_optimizer.infrastructure.database.exceptions import (
     DuplicateCatalogSkuError,
+    DuplicateImportMappingProfileError,
     DuplicateLoadingSpaceProfileError,
     RecordNotFoundError,
     RepositoryError,
 )
 from cargo_optimizer.infrastructure.database.orm_models import (
+    ImportMappingProfileORM,
     LoadingSpaceProfileORM,
     PackingRunHistoryORM,
     ProductCatalogORM,
@@ -264,6 +267,31 @@ class ProductCatalogRepository:
                 .where(ProductCatalogORM.is_active.is_(True))
             )
             return int(count or 0)
+
+    def apply_bulk(
+        self, *, to_add: Sequence[LoadUnit] = (), to_update: Sequence[LoadUnit] = ()
+    ) -> None:
+        """Añade y actualiza varios productos en una única transacción (todo o nada).
+
+        Usado por la importación masiva/con mapeo de la fase 8.1: si
+        cualquier fila falla (SKU duplicado, id inexistente), la
+        excepción sale de este `with` y `session_scope` revierte *toda*
+        la operación — el catálogo nunca queda modificado a medias.
+        """
+        now = datetime.now(UTC)
+        with self._db.session_scope() as session:
+            for unit in to_add:
+                self._check_sku_available(session, unit.sku, exclude_id=None)
+                session.add(_new_product_catalog_orm(unit, now=now))
+            for unit in to_update:
+                orm = session.get(ProductCatalogORM, str(unit.id))
+                if orm is None:
+                    raise RecordNotFoundError(
+                        f"No existe un producto de catálogo con id={unit.id}."
+                    )
+                self._check_sku_available(session, unit.sku, exclude_id=unit.id)
+                _apply_load_unit_fields(orm, unit)
+                orm.updated_at = now
 
     def _set_active(self, id: UUID, *, active: bool) -> None:
         with self._db.session_scope() as session:
@@ -503,6 +531,277 @@ class LoadingSpaceProfileRepository:
         if session.scalar(query) is not None:
             raise DuplicateLoadingSpaceProfileError(
                 f"Ya existe un perfil de espacio activo con el nombre '{name}'."
+            )
+
+
+# ----------------------------------------------------------------------
+# Perfiles de mapeo de columnas de importación Excel (fase 8.1)
+# ----------------------------------------------------------------------
+
+# Cabeceras canónicas de `infrastructure/excel/product_rows.py::PRODUCT_COLUMNS`
+# y `packing_list_importer.py::PACKING_LIST_COLUMNS`, copiadas aquí como datos
+# literales (nunca importadas): `infrastructure/database` nunca depende de
+# `infrastructure/excel` — mismo criterio que evita que
+# `packing_list_importer.py` dependa de este módulo (ver `docs/Excel.md`).
+_BUILTIN_MAPPING_PROFILES: tuple[tuple[str, str, dict[str, str]], ...] = (
+    (
+        "Formato estándar CargoOptimizer",
+        "catalog",
+        {
+            "SKU": "SKU",
+            "Nombre": "Nombre",
+            "Largo (cm)": "Largo (cm)",
+            "Ancho (cm)": "Ancho (cm)",
+            "Alto (cm)": "Alto (cm)",
+            "Peso (kg)": "Peso (kg)",
+            "Cantidad": "Cantidad",
+            "Color": "Color",
+            "Fragil": "Fragil",
+            "Tipo de empaque": "Tipo de empaque",
+            "Extintor": "Extintor",
+            "Agente": "Agente",
+            "Peso nominal (kg)": "Peso nominal (kg)",
+            "Apilamiento": "Apilamiento",
+            "Orientaciones": "Orientaciones",
+            "Notas": "Notas",
+        },
+    ),
+    (
+        "Kupfer",
+        "catalog",
+        {
+            "Código": "SKU",
+            "Descripción": "Nombre",
+            "Largo": "Largo (cm)",
+            "Ancho": "Ancho (cm)",
+            "Alto": "Alto (cm)",
+            "Peso bruto": "Peso (kg)",
+            "Cantidad": "Cantidad",
+        },
+    ),
+    (
+        "Joan",
+        "catalog",
+        {
+            "Item": "SKU",
+            "Producto": "Nombre",
+            "Largo cm": "Largo (cm)",
+            "Ancho cm": "Ancho (cm)",
+            "Alto cm": "Alto (cm)",
+            "Peso": "Peso (kg)",
+            "Unidades": "Cantidad",
+        },
+    ),
+    (
+        "Exanco",
+        "catalog",
+        {
+            "Referencia": "SKU",
+            "Denominación": "Nombre",
+            "Largo (cm)": "Largo (cm)",
+            "Ancho (cm)": "Ancho (cm)",
+            "Alto (cm)": "Alto (cm)",
+            "Peso Kg": "Peso (kg)",
+            "Cantidad": "Cantidad",
+        },
+    ),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ImportMappingProfileEntry:
+    """Perfil de mapeo de columnas de Excel: nombre, tipo de destino y el mapeo mismo.
+
+    ``column_mapping`` es ``{cabecera_en_el_archivo: columna_canonica}``.
+    ``target_kind`` es ``"catalog"``, ``"packing_list"`` o
+    ``"loading_space"`` — a qué esquema de columnas de
+    `infrastructure/excel` se aplica este perfil.
+    """
+
+    id: UUID
+    name: str
+    target_kind: str
+    column_mapping: dict[str, str]
+    created_at: datetime
+    last_used_at: datetime | None
+    is_active: bool
+    is_builtin: bool
+
+
+def _orm_to_mapping_profile_entry(orm: ImportMappingProfileORM) -> ImportMappingProfileEntry:
+    try:
+        column_mapping = json.loads(orm.column_mapping_json)
+    except (TypeError, ValueError) as exc:
+        raise RepositoryError(f"Perfil de mapeo corrupto (id={orm.id}): {exc}") from exc
+    return ImportMappingProfileEntry(
+        id=UUID(orm.id),
+        name=orm.name,
+        target_kind=orm.target_kind,
+        column_mapping=column_mapping,
+        created_at=orm.created_at,
+        last_used_at=orm.last_used_at,
+        is_active=orm.is_active,
+        is_builtin=orm.is_builtin,
+    )
+
+
+class ImportMappingProfileRepository:
+    """Perfiles de mapeo de columnas de Excel reutilizables entre importaciones."""
+
+    def __init__(self, db_manager: DatabaseManager) -> None:
+        self._db = db_manager
+
+    def add(
+        self,
+        name: str,
+        target_kind: str,
+        column_mapping: Mapping[str, str],
+        *,
+        is_builtin: bool = False,
+    ) -> ImportMappingProfileEntry:
+        now = datetime.now(UTC)
+        with self._db.session_scope() as session:
+            self._check_name_available(session, name, exclude_id=None)
+            orm = ImportMappingProfileORM(
+                id=str(uuid4()),
+                name=name,
+                target_kind=target_kind,
+                column_mapping_json=json.dumps(dict(column_mapping)),
+                created_at=now,
+                last_used_at=None,
+                is_active=True,
+                is_builtin=is_builtin,
+            )
+            session.add(orm)
+            session.flush()
+            return _orm_to_mapping_profile_entry(orm)
+
+    def update(
+        self, id: UUID, *, name: str, column_mapping: Mapping[str, str]
+    ) -> ImportMappingProfileEntry:
+        with self._db.session_scope() as session:
+            orm = session.get(ImportMappingProfileORM, str(id))
+            if orm is None:
+                raise RecordNotFoundError(f"No existe un perfil de mapeo con id={id}.")
+            if orm.is_builtin:
+                raise RepositoryError(
+                    "No se puede modificar un perfil de mapeo integrado directamente; "
+                    "duplícalo primero."
+                )
+            self._check_name_available(session, name, exclude_id=id)
+            orm.name = name
+            orm.column_mapping_json = json.dumps(dict(column_mapping))
+            session.flush()
+            return _orm_to_mapping_profile_entry(orm)
+
+    def get_by_id(self, id: UUID) -> ImportMappingProfileEntry | None:
+        with self._db.session_scope() as session:
+            orm = session.get(ImportMappingProfileORM, str(id))
+            return _orm_to_mapping_profile_entry(orm) if orm is not None else None
+
+    def get_by_name(self, name: str) -> ImportMappingProfileEntry | None:
+        with self._db.session_scope() as session:
+            orm = session.scalar(
+                select(ImportMappingProfileORM).where(
+                    func.lower(ImportMappingProfileORM.name) == name.lower(),
+                    ImportMappingProfileORM.is_active.is_(True),
+                )
+            )
+            return _orm_to_mapping_profile_entry(orm) if orm is not None else None
+
+    def list_active(self, target_kind: str | None = None) -> tuple[ImportMappingProfileEntry, ...]:
+        with self._db.session_scope() as session:
+            query = select(ImportMappingProfileORM).where(
+                ImportMappingProfileORM.is_active.is_(True)
+            )
+            if target_kind is not None:
+                query = query.where(ImportMappingProfileORM.target_kind == target_kind)
+            rows = session.scalars(query.order_by(func.lower(ImportMappingProfileORM.name))).all()
+            return tuple(_orm_to_mapping_profile_entry(row) for row in rows)
+
+    def list_all(self) -> tuple[ImportMappingProfileEntry, ...]:
+        """Activos y archivados juntos, para la columna "Activo" del diálogo de mapeos."""
+        with self._db.session_scope() as session:
+            rows = session.scalars(
+                select(ImportMappingProfileORM).order_by(func.lower(ImportMappingProfileORM.name))
+            ).all()
+            return tuple(_orm_to_mapping_profile_entry(row) for row in rows)
+
+    def archive(self, id: UUID) -> None:
+        self._set_active(id, active=False)
+
+    def restore(self, id: UUID) -> None:
+        self._set_active(id, active=True)
+
+    def duplicate(self, id: UUID, new_name: str) -> ImportMappingProfileEntry:
+        with self._db.session_scope() as session:
+            orm = session.get(ImportMappingProfileORM, str(id))
+            if orm is None:
+                raise RecordNotFoundError(f"No existe un perfil de mapeo con id={id}.")
+            self._check_name_available(session, new_name, exclude_id=None)
+            now = datetime.now(UTC)
+            new_orm = ImportMappingProfileORM(
+                id=str(uuid4()),
+                name=new_name,
+                target_kind=orm.target_kind,
+                column_mapping_json=orm.column_mapping_json,
+                created_at=now,
+                last_used_at=None,
+                is_active=True,
+                is_builtin=False,
+            )
+            session.add(new_orm)
+            session.flush()
+            return _orm_to_mapping_profile_entry(new_orm)
+
+    def touch_last_used(self, id: UUID) -> None:
+        with self._db.session_scope() as session:
+            orm = session.get(ImportMappingProfileORM, str(id))
+            if orm is None:
+                raise RecordNotFoundError(f"No existe un perfil de mapeo con id={id}.")
+            orm.last_used_at = datetime.now(UTC)
+
+    def ensure_builtin_profiles(self) -> None:
+        with self._db.session_scope() as session:
+            existing_names = {
+                name.lower() for name in session.scalars(select(ImportMappingProfileORM.name)).all()
+            }
+            now = datetime.now(UTC)
+            for name, target_kind, column_mapping in _BUILTIN_MAPPING_PROFILES:
+                if name.lower() in existing_names:
+                    continue
+                session.add(
+                    ImportMappingProfileORM(
+                        id=str(uuid4()),
+                        name=name,
+                        target_kind=target_kind,
+                        column_mapping_json=json.dumps(column_mapping),
+                        created_at=now,
+                        last_used_at=None,
+                        is_active=True,
+                        is_builtin=True,
+                    )
+                )
+
+    def _set_active(self, id: UUID, *, active: bool) -> None:
+        with self._db.session_scope() as session:
+            orm = session.get(ImportMappingProfileORM, str(id))
+            if orm is None:
+                raise RecordNotFoundError(f"No existe un perfil de mapeo con id={id}.")
+            orm.is_active = active
+
+    def _check_name_available(
+        self, session: Session, name: str, *, exclude_id: UUID | None
+    ) -> None:
+        query = select(ImportMappingProfileORM).where(
+            func.lower(ImportMappingProfileORM.name) == name.lower(),
+            ImportMappingProfileORM.is_active.is_(True),
+        )
+        if exclude_id is not None:
+            query = query.where(ImportMappingProfileORM.id != str(exclude_id))
+        if session.scalar(query) is not None:
+            raise DuplicateImportMappingProfileError(
+                f"Ya existe un perfil de mapeo activo con el nombre '{name}'."
             )
 
 

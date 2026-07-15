@@ -1,13 +1,15 @@
 """`CatalogService`: fachada única que `presentation` usa para el catálogo/perfiles/historial.
 
-Agrupa los cuatro repositorios y añade únicamente la lógica que no
-encaja en ninguno de ellos por sí sola: copiar un `LoadUnit`/
-`LoadingSpace` del catálogo a un proyecto concreto, generando una
-identidad nueva para que el proyecto quede completamente independiente
-del catálogo (ver `docs/Database.md`, sección "Diferencias con
-`.cargo3d`" — un cambio futuro en el catálogo nunca debe alterar un
-proyecto ya guardado). No es un *God Object*: no reimplementa nada de
-los repositorios, solo los expone juntos y añade estas dos operaciones.
+Agrupa los cinco repositorios (catálogo, perfiles de espacio, perfiles
+de mapeo de columnas de Excel, historial de proyectos, historial de
+ejecuciones) y añade únicamente la lógica que no encaja en ninguno de
+ellos por sí sola: copiar un `LoadUnit`/`LoadingSpace` del catálogo a
+un proyecto concreto, generando una identidad nueva para que el
+proyecto quede completamente independiente del catálogo (ver
+`docs/Database.md`, sección "Diferencias con `.cargo3d`" — un cambio
+futuro en el catálogo nunca debe alterar un proyecto ya guardado). No
+es un *God Object*: no reimplementa nada de los repositorios, solo los
+expone juntos y añade estas dos operaciones.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from cargo_optimizer.domain.loading_space import LoadingSpace
 from cargo_optimizer.infrastructure.database.engine import DatabaseHealth, DatabaseManager
 from cargo_optimizer.infrastructure.database.paths import get_user_database_path
 from cargo_optimizer.infrastructure.database.repositories import (
+    ImportMappingProfileRepository,
     LoadingSpaceProfileRepository,
     PackingRunHistoryRepository,
     ProductCatalogRepository,
@@ -35,6 +38,7 @@ class CatalogService:
         self.database = db_manager
         self.products = ProductCatalogRepository(db_manager)
         self.profiles = LoadingSpaceProfileRepository(db_manager)
+        self.import_mappings = ImportMappingProfileRepository(db_manager)
         self.project_history = ProjectHistoryRepository(db_manager)
         self.run_history = PackingRunHistoryRepository(db_manager)
 
@@ -50,6 +54,7 @@ class CatalogService:
         db_manager.initialize()
         service = cls(db_manager)
         service.profiles.ensure_builtin_profiles()
+        service.import_mappings.ensure_builtin_profiles()
         return service
 
     def health_check(self) -> DatabaseHealth:

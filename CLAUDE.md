@@ -66,11 +66,15 @@ presentation  →  infrastructure  →  application  →  optimization  →  rul
   puertos de `application`. Desde la fase 7.0 incluye
   `infrastructure/persistence/` (proyectos `.cargo3d`, JSON propio —
   ver `docs/ProjectFiles.md`); desde la fase 7.1 incluye
-  `infrastructure/database/` (catálogo de productos y perfiles de
-  Loading Space, SQLAlchemy/SQLite — ver `docs/Database.md`); desde la
-  fase 8.0 incluye `infrastructure/excel/` (importación/exportación
-  profesional de `.xlsx` con openpyxl — ver `docs/Excel.md`). ReportLab
-  (PDF) llega en una fase posterior.
+  `infrastructure/database/` (catálogo de productos, perfiles de
+  Loading Space y, desde la fase 8.1, perfiles de mapeo de columnas de
+  Excel; SQLAlchemy/SQLite — ver `docs/Database.md`); desde la fase 8.0
+  incluye `infrastructure/excel/` (importación/exportación profesional
+  de `.xlsx` con openpyxl — ver `docs/Excel.md`), ampliado en la fase
+  8.1 con mapeo de columnas, vista previa, importación parcial,
+  duplicados, informes y exportación avanzada, sin ningún formato
+  nuevo — ver `docs/ExcelAutomation.md`. ReportLab (PDF) llega en una
+  fase posterior.
 - **`presentation`**: mecanismos de entrega (`presentation/desktop`
   hoy con PySide6 y, dentro de él, `presentation/desktop/viewer/` con
   PyVista/PyVistaQt para el visor 3D — ver `docs/ThreeDViewer.md`;
@@ -103,8 +107,12 @@ ninguna dependencia de UI instalada (ADR-0003).
   `%LOCALAPPDATA%/CargoOptimizer3D/`, nunca dentro del repositorio ni
   versionada.
 - openpyxl para importación/exportación de Excel (`.xlsx`, fase 8.0,
-  implementada — ver `docs/Excel.md`); nunca `pandas`, `xlrd` ni CSV
-  como sustituto. ReportLab para PDF llega en una fase posterior.
+  implementada — ver `docs/Excel.md`; automatización del flujo —mapeo
+  de columnas, perfiles, vista previa, duplicados, drag&drop,
+  importación masiva, informes, exportación avanzada— en la fase 8.1,
+  implementada — ver `docs/ExcelAutomation.md`); nunca `pandas`,
+  `xlrd` ni CSV como sustituto. ReportLab para PDF llega en una fase
+  posterior.
 - Ruff para lint (incluye orden de imports). Black para formateo. No
   usar el formateador de Ruff para evitar conflictos con Black.
 - Mypy en modo estricto (`strict = true`).
@@ -121,7 +129,8 @@ src/cargo_optimizer/
 ├── optimization/    # Motor de empaquetado real. Depende de domain, geometry y rules.
 ├── application/     # Casos de uso, orquestación, puertos hacia infraestructura.
 ├── infrastructure/  # Adaptadores concretos: persistence/ (proyectos .cargo3d, JSON, fase 7.0),
-│                    #   database/ (catálogo SQLite/SQLAlchemy, fase 7.1), Excel, PDF (fases posteriores).
+│                    #   database/ (catálogo SQLite/SQLAlchemy, fase 7.1 + perfiles de mapeo, fase 8.1),
+│                    #   excel/ (import/export .xlsx, fase 8.0 + automatización, fase 8.1), PDF (fase posterior).
 └── presentation/
     └── desktop/     # Aplicación de escritorio PySide6. Incluye viewer/ (visor 3D, PyVista/PyVistaQt).
 tests/               # Pruebas, en espejo de la estructura de src/, + tests/integration/
@@ -154,8 +163,11 @@ userdata/            # Datos generados por el usuario en tiempo de ejecución. N
    6.2. Visor 3D: filtros/etiquetas/vistas/captura — 6.3. Visor 3D:
    animación y escala — 7.0. Persistencia de proyectos (.cargo3d,
    JSON) — 7.1. Catálogo de productos y perfiles reutilizables
-   (SQLite/SQLAlchemy) — 8. Reportes — 9. Integración ERP — 10. Versión
-   comercial.
+   (SQLite/SQLAlchemy) — 8.0. Importación y exportación profesional de
+   Excel — 8.1. Automatización del flujo Excel (mapeo de columnas,
+   perfiles, vista previa, importación parcial, duplicados, drag&drop,
+   importación masiva, informes, exportación avanzada) — 8.2. Reportes
+   PDF — 9. Integración ERP — 10. Versión comercial.
 
 La fase 2 original ("Motor geométrico") se dividió en 2.1 (modelo de
 dominio puro) y 2.2 (motor geométrico) para poder completar el modelo
@@ -170,32 +182,40 @@ no pertenece a `infrastructure` (como decía la fila original) sino a
 `presentation/desktop/viewer/`, y se subdivide en 6.0 (diseño) / 6.1
 (mínimo) / 6.2 (enriquecimiento) / 6.3 (escala y animación) — ver
 `docs/Roadmap.md`, secciones "Nota sobre la numeración de las fases 5 y
-6" y "Nota sobre la numeración y el paquete de la fase 6".
+6" y "Nota sobre la numeración y el paquete de la fase 6". La fase 8
+se subdivide igual: 8.0 (Excel básico) y lo que originalmente era 8.1
+(reportes PDF) pasa a **8.2**; un segundo encargo real sobre el módulo
+Excel ya en uso ocupa el hueco 8.1 con la automatización del flujo
+(mapeo de columnas, perfiles, vista previa, importación parcial,
+duplicados, drag&drop, importación masiva, informes, exportación
+avanzada) — ver `docs/Roadmap.md`, sección "Nota sobre la numeración de
+la fase 8".
 
-Estado actual: **catálogo de productos y perfiles reutilizables
-implementado y en uso** (fin de fase 7.1). Además de la persistencia de
-proyectos (`.cargo3d`, fase 7.0), la aplicación tiene ahora un catálogo
-respaldado por SQLite/SQLAlchemy (`infrastructure/database/`, ver
-`docs/Database.md`) para reutilizar productos y perfiles de Loading
-Space entre proyectos, y para llevar un historial básico de proyectos
-abiertos/guardados y ejecuciones de optimización. La base de datos vive
-fuera del repositorio (`%LOCALAPPDATA%/CargoOptimizer3D/
-cargo_optimizer.db`), nunca se versiona ni se guarda en OneDrive.
-`ProductCatalogRepository` y `LoadingSpaceProfileRepository` permiten
-añadir/editar/buscar/duplicar/archivar (nunca borrado físico) productos
-y perfiles; `ProjectHistoryRepository` y `PackingRunHistoryRepository`
-registran apertura/guardado de proyectos y ejecuciones correctas del
-optimizador, sin duplicar nunca el `.cargo3d` completo ni el layout
-íntegro del resultado. `CatalogService` es la fachada única que expone
-los cuatro repositorios y las conversiones catálogo→proyecto
-(`copy_to_project`/`copy_profile_to_project`, siempre con un `UUID`
-nuevo — un producto o perfil copiado a un proyecto es una copia
-independiente, nunca queda ligado al catálogo). `MainWindow` recibe un
-`CatalogService | None` opcional: si SQLite falla al iniciar, la
-aplicación abre igual en **modo limitado** (aviso al usuario, acciones
-de catálogo/perfiles deshabilitadas, `.cargo3d` sigue funcionando sin
-ninguna dependencia del catálogo). `domain`/`geometry`/`rules`/
-`optimization` siguen intactos.
+Estado actual: **automatización del flujo Excel implementada y en uso**
+(fin de fase 8.1). Sobre el catálogo de productos y perfiles
+reutilizables de la fase 7.1 (`infrastructure/database/`, ver
+`docs/Database.md`) y la importación/exportación profesional de Excel
+de la fase 8.0 (`infrastructure/excel/`, ver `docs/Excel.md`), esta
+fase añade: un mapeador de columnas con detección automática por alias
+y asignación manual (`mapping.py`); perfiles de mapeo reutilizables en
+el catálogo SQLite (`ImportMappingProfileRepository`, con cuatro
+perfiles oficiales integrados — Kupfer, Joan, Exanco, Formato estándar
+CargoOptimizer); vista previa antes de importar
+(`import_preview.py`); importación parcial y resolución de duplicados
+como función pura (`import_plan.py`); escritura transaccional
+todo-o-nada (`ProductCatalogRepository.apply_bulk`); arrastrar y soltar
+un `.xlsx` sobre `MainWindow`/`ProductCatalogDialog`
+(`presentation/desktop/drag_drop.py`); importación masiva de varios
+archivos con resumen final; un informe de importación exportable
+(`import_report.py`); y exportación avanzada de un `PackingResult`
+eligiendo hojas/orden/nombre (`advanced_export.py`). Detalle completo
+en `docs/ExcelAutomation.md`. La base de datos sigue viviendo fuera
+del repositorio (`%LOCALAPPDATA%/CargoOptimizer3D/cargo_optimizer.db`),
+nunca versionada ni guardada en OneDrive. `MainWindow` sigue abriendo
+en **modo limitado** si SQLite falla al iniciar (`catalog_service is
+None`): las tres acciones nuevas de importación de catálogo se
+deshabilitan igual que el resto de acciones dependientes del catálogo.
+`domain`/`geometry`/`rules`/`optimization` siguen intactos.
 
 El visor 3D (fase 6.1) sigue disponible y sin cambios en esta fase —
 ver `docs/ThreeDViewer.md` para su implementación completa
@@ -208,10 +228,10 @@ vuelca el `PackingResult` en cuatro pestañas del panel inferior y en el
 visor 3D, sin bloquear nunca el hilo de la interfaz. No implementar
 todavía filtros/etiquetas/modos de color/vistas predefinidas/captura de
 imagen del visor (fase 6.2), animación/capas/cortes/escala del visor
-(fase 6.3), Excel, PDF, importación/exportación real, Undo/Redo, ni
-volver a tocar `domain`/`geometry`/`rules`/`optimization` salvo bug
-objetivo y demostrable, hasta que se indique explícitamente. Ver
-`docs/Roadmap.md` para el detalle fase a fase.
+(fase 6.3), reportes PDF (fase 8.2), integración ERP (fase 9),
+Undo/Redo, ni volver a tocar `domain`/`geometry`/`rules`/`optimization`
+salvo bug objetivo y demostrable, hasta que se indique explícitamente.
+Ver `docs/Roadmap.md` para el detalle fase a fase.
 
 ## Invariantes del modelo de dominio (no romper sin ADR)
 

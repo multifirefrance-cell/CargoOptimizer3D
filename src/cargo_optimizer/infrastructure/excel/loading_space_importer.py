@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from openpyxl.worksheet.worksheet import Worksheet
+
 from cargo_optimizer.infrastructure.excel.loading_space_rows import (
     LOADING_SPACE_COLUMNS,
     row_to_loading_space,
@@ -29,7 +31,14 @@ def import_loading_spaces(path: Path) -> LoadingSpaceImportResult:
     workbook = open_workbook(path)
     worksheet = get_active_worksheet(workbook)
     require_headers(worksheet, LOADING_SPACE_COLUMNS)
+    return import_loading_spaces_from_worksheet(worksheet)
 
+
+def import_loading_spaces_from_worksheet(worksheet: Worksheet) -> LoadingSpaceImportResult:
+    """Igual que `import_loading_spaces`, pero sobre una hoja ya abierta con cabeceras canónicas.
+
+    Usado por `mapping.py` (fase 8.1) tras remapear las cabeceras.
+    """
     spaces = []
     errors: list[RowError] = []
     for row_number, values in iter_data_rows(worksheet, column_count=len(LOADING_SPACE_COLUMNS)):

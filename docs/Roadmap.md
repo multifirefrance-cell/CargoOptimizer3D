@@ -23,7 +23,8 @@ fase se adelanta a la anterior.
 | 7.0 | Persistencia de proyectos (`.cargo3d`, JSON versionado) | `infrastructure/persistence` (nuevo) | **Completada** |
 | 7.1 | Catálogo de productos y perfiles reutilizables (SQLite/SQLAlchemy) | `infrastructure/database` (nuevo) | **Completada** |
 | 8.0 | Importación y exportación profesional de Excel (`.xlsx`) | `infrastructure/excel` (nuevo) | **Completada** |
-| 8.1 | Reportes PDF | `infrastructure` (adaptador ReportLab) | Pendiente |
+| 8.1 | Automatización profesional del flujo Excel (mapeo de columnas, perfiles, vista previa, importación parcial, duplicados, drag&drop, importación masiva, informe, exportación avanzada) | `infrastructure/excel` (mismo paquete), `infrastructure/database` (perfiles de mapeo), `presentation/desktop` (4 diálogos nuevos + drag&drop) | **Completada** |
+| 8.2 | Reportes PDF | `infrastructure` (adaptador ReportLab) | Pendiente |
 | 9 | Integración ERP | `presentation` (nuevo adaptador, p. ej. `presentation/api`) | Pendiente |
 | 10 | Versión comercial | — | Pendiente |
 
@@ -120,40 +121,44 @@ La fila original de la fase 8 era simplemente "Reportes —
 formatos de salida completamente distintos (una hoja de cálculo
 editable y manipulable vs. un documento de solo lectura para imprimir o
 archivar) bajo un mismo número de fase. Se subdivide en **8.0**
-(importación y exportación profesional de Excel, `openpyxl`) y **8.1**
-(reportes PDF, `ReportLab`, pendiente), mismo criterio que las fases 2,
-4, 5, 6 y 7: no mezclar dos adaptadores de infraestructura con
-bibliotecas, formatos y casos de uso distintos en una sola entrega.
+(importación y exportación profesional de Excel, `openpyxl`) y lo que
+originalmente era 8.1 (reportes PDF, `ReportLab`) pasa a **8.2** —
+mismo criterio que las fases 2, 4, 5, 6 y 7: no mezclar dos adaptadores
+de infraestructura con bibliotecas, formatos y casos de uso distintos
+en una sola entrega.
+
+Un segundo encargo real, ya con la fase 8.0 completada y en uso, pidió
+explícitamente hacer del módulo Excel "una herramienta realmente cómoda
+para el trabajo diario de logística" — mapeo de columnas, perfiles
+reutilizables, vista previa, importación parcial, resolución de
+duplicados, drag&drop, importación masiva, informe y exportación
+avanzada — sin ningún formato nuevo. Ese encargo ocupa el hueco **8.1**
+que había quedado libre al mover PDF a 8.2, en vez de crear una fase
+8.3 nueva: es una entrega intermedia entre "Excel básico funciona" (8.0)
+y "reportes PDF" (8.2), no una fase posterior a ambas.
 
 ## Estado actual
 
-Fin de fase 8.0: importación y exportación profesional de Excel
-(`.xlsx`) con `openpyxl` — ver `docs/Excel.md` para el detalle completo
-(esquema de columnas, plantillas oficiales, formato profesional,
-integración en `MainWindow`, seguridad). Nuevo paquete
-`infrastructure/excel/` (`exceptions.py`, `row_parsing.py`,
-`results.py`, `styles.py`, `workbook_utils.py`, `product_rows.py`,
-`loading_space_rows.py`, `catalog_importer.py`/`catalog_exporter.py`,
-`packing_list_importer.py`, `loading_space_importer.py`,
-`result_exporter.py`, `detection.py`, `templates.py`), dependiente
-únicamente de `domain` (nunca de `optimization` ni de
-`infrastructure/database` directamente: el importador de Packing List
-recibe la resolución de SKU como un `Callable` inyectado desde
-`MainWindow`). Cuatro plantillas oficiales generadas con el propio
-código del paquete en `examples/templates/`
-(`CatalogTemplate.xlsx`, `PackingListTemplate.xlsx`,
-`LoadingSpaceTemplate.xlsx`, `OptimizationResultTemplate.xlsx`).
-`MainWindow` gana acciones reales de importación/exportación en los
-menús Archivo, Productos, Espacio de carga y Proyecto, incluida
-detección automática del tipo de plantilla
-(`detect_template_kind`) y el flujo Continuar/Cancelar cuando un
-Packing List referencia SKU ausentes del catálogo. Ninguna fila
-inválida se importa nunca en silencio: cada importador reporta los
-errores fila a fila junto con lo que sí pudo reconstruir.
+Fin de fase 8.1: automatización profesional del flujo Excel — ver
+`docs/ExcelAutomation.md` para el detalle completo (mapeador de
+columnas, perfiles de mapeo, vista previa, importación parcial,
+resolución de duplicados, drag&drop, importación masiva, informe de
+importación, exportación avanzada). Sobre el mismo paquete
+`infrastructure/excel/` de la fase 8.0 (`docs/Excel.md`), se añaden
+`mapping.py`, `import_preview.py`, `import_plan.py`, `import_report.py`
+y `advanced_export.py` — ningún formato de archivo nuevo, la misma
+dependencia exclusiva de `domain`. `infrastructure/database` gana una
+quinta tabla/repositorio (`ImportMappingProfileRepository`, perfiles de
+mapeo con cuatro perfiles oficiales integrados: Kupfer, Joan, Exanco,
+Formato estándar CargoOptimizer) y `ProductCatalogRepository.apply_bulk`
+(escritura transaccional todo-o-nada). `presentation/desktop` gana
+cuatro diálogos nuevos (`ColumnMappingDialog`, `DuplicateResolutionDialog`,
+`ImportPreviewDialog`, `BulkImportDialog`) y arrastrar-y-soltar sobre
+`MainWindow`/`ProductCatalogDialog` (`drag_drop.py`).
 `domain`/`geometry`/`rules`/`optimization` sin ningún cambio. La
 siguiente sesión de desarrollo puede abordar la **fase 6.2** (filtros,
 etiquetas, modos de color, vistas predefinidas, captura de imagen del
-visor 3D, pendiente desde la fase 6.1) o la **fase 8.1** (reportes
+visor 3D, pendiente desde la fase 6.1) o la **fase 8.2** (reportes
 PDF), según prioridad — a decidir explícitamente antes de empezar. Si
 el rendimiento del motor a gran escala (250+ instancias) sigue siendo
 prioritario en paralelo, ver `docs/OptimizerPerformance.md` para la

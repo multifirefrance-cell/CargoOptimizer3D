@@ -77,6 +77,25 @@ def require_headers(worksheet: Worksheet, expected_headers: Sequence[str]) -> No
         )
 
 
+def read_header_row(worksheet: Worksheet) -> tuple[str, ...]:
+    """Lee toda la fila de cabecera tal cual está en el archivo, sin asumir un esquema fijo.
+
+    A diferencia de `require_headers` (que compara contra un número
+    fijo de columnas esperadas), esto recorre todas las columnas que
+    el archivo realmente tiene — necesario para el mapeador de
+    columnas de la fase 8.1, que debe poder leer un archivo con
+    cualquier número de columnas en cualquier orden.
+    """
+    return tuple(
+        (
+            ""
+            if worksheet.cell(row=HEADER_ROW, column=i).value is None
+            else str(worksheet.cell(row=HEADER_ROW, column=i).value).strip()
+        )
+        for i in range(1, worksheet.max_column + 1)
+    )
+
+
 def iter_data_rows(
     worksheet: Worksheet, *, column_count: int
 ) -> Iterator[tuple[int, tuple[Any, ...]]]:

@@ -21,6 +21,8 @@ from dataclasses import replace
 from pathlib import Path
 from uuid import uuid4
 
+from openpyxl.worksheet.worksheet import Worksheet
+
 from cargo_optimizer.domain.load_unit import LoadUnit
 from cargo_optimizer.infrastructure.excel.results import PackingListImportResult, RowError
 from cargo_optimizer.infrastructure.excel.workbook_utils import (
@@ -48,7 +50,16 @@ def import_packing_list(
     workbook = open_workbook(path)
     worksheet = get_active_worksheet(workbook)
     require_headers(worksheet, PACKING_LIST_COLUMNS)
+    return import_packing_list_from_worksheet(worksheet, resolve_sku)
 
+
+def import_packing_list_from_worksheet(
+    worksheet: Worksheet, resolve_sku: Callable[[str], LoadUnit | None]
+) -> PackingListImportResult:
+    """Igual que `import_packing_list`, pero sobre una hoja ya abierta con cabeceras canónicas.
+
+    Usado por `mapping.py` (fase 8.1) tras remapear las cabeceras.
+    """
     quantities_by_sku: dict[str, int] = {}
     original_case_by_sku: dict[str, str] = {}
     errors: list[RowError] = []

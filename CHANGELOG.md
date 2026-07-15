@@ -4,6 +4,79 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Este proyecto aún no ha alcanzado la versión 1.0; el versionado 0.x
 puede incluir cambios estructurales entre versiones menores.
 
+## [0.13.0] - 2026-07-15
+
+Automatización profesional del flujo Excel (fase 8.1): sobre el módulo
+Excel de la fase 8.0, sin ningún formato nuevo, se añade mapeo de
+columnas con detección automática y perfiles reutilizables, vista
+previa antes de importar, importación parcial, resolución de
+duplicados, arrastrar y soltar, importación masiva, informe de
+importación y exportación avanzada. Ver `docs/ExcelAutomation.md` para
+el detalle completo.
+
+### Added
+
+- `infrastructure/excel/mapping.py`: alias de columna conocidos para
+  catálogo/packing list/loading space, `detect_column_mapping`,
+  `build_remapped_worksheet` (hoja reordenada y renombrada en memoria,
+  reutiliza sin duplicar el bucle de conversión fila a fila de la fase
+  8.0), `import_catalog_with_mapping`/`import_packing_list_with_mapping`/
+  `import_loading_spaces_with_mapping`.
+- `infrastructure/excel/import_preview.py`: `CatalogImportPreview` +
+  `build_catalog_preview` (clasifica un `CatalogImportResult` en
+  nuevos/existentes/duplicados/inválidos, sin escribir nada).
+- `infrastructure/excel/import_plan.py`: `ImportPlan` +
+  `build_import_plan`, función pura que aplica el modo de importación
+  parcial (todas/seleccionadas/solo nuevas/solo actualizadas/solo
+  válidas) y la resolución de duplicados
+  (Actualizar/Duplicar/Ignorar, con "aplicar a todos" vía un valor por
+  defecto).
+- `infrastructure/excel/import_report.py`: `ImportReport`,
+  `BulkImportReport` (con totales agregados), `build_import_report`,
+  `export_import_report` (hojas Resumen y Errores).
+- `infrastructure/excel/advanced_export.py`: `SheetSelection`,
+  `export_packing_result_advanced` (elegir hojas, orden, nombre,
+  ocultar vacías) sobre el mismo libro de cinco hojas de
+  `result_exporter.py`.
+- `infrastructure/database`: tabla y repositorio
+  `ImportMappingProfileRepository` (perfiles de mapeo de columnas,
+  cuatro perfiles oficiales integrados — Kupfer, Joan, Exanco, Formato
+  estándar CargoOptimizer — creados por `ensure_builtin_profiles`),
+  `ProductCatalogRepository.apply_bulk` (escritura transaccional
+  todo-o-nada: una única `session_scope()` para todo el lote de
+  altas/actualizaciones).
+- `presentation/desktop/drag_drop.py`: `has_excel_url`/
+  `first_excel_path`/`all_excel_paths`, usados por `MainWindow` y
+  `ProductCatalogDialog` para aceptar arrastrar y soltar un `.xlsx`.
+- Cuatro diálogos nuevos en `presentation/desktop/dialogs/`:
+  `ColumnMappingDialog` (mapeo + guardar/aplicar perfiles),
+  `DuplicateResolutionDialog` (Actualizar/Duplicar/Ignorar por SKU,
+  "aplicar a todos"), `ImportPreviewDialog` (contadores + modo de
+  importación parcial), `BulkImportDialog` (varios archivos, resumen
+  final, guardar informe).
+- `MainWindow`: acciones "Importar con mapeo de columnas…" e
+  "Importación masiva de Excel…" en el menú Productos;
+  `_run_smart_catalog_import` orquesta mapeo → vista previa →
+  duplicados → escritura transaccional para las tres acciones de
+  importación de catálogo; `dragEnterEvent`/`dropEvent` sobre la
+  ventana principal despachan por tipo de archivo (mismo criterio que
+  "Importar Excel…") con mapeo automático como último recurso antes de
+  rendirse; `ProductCatalogDialog` acepta arrastrar y soltar
+  directamente al catálogo SQLite.
+- 93 pruebas nuevas: mapeo de columnas y round-trip
+  (`tests/infrastructure/excel/test_mapping.py`), vista previa e
+  importación parcial/duplicados (`test_import_preview_plan.py`),
+  informes (`test_import_report.py`), exportación avanzada
+  (`test_advanced_export.py`), perfiles de mapeo
+  (`tests/infrastructure/database/test_import_mapping_profile_repository.py`),
+  transaccionalidad de `apply_bulk` (ampliación de
+  `test_product_catalog_repository.py`), los cuatro diálogos nuevos,
+  drag&drop (`test_drag_drop.py`) y el flujo completo en `MainWindow`
+  (`test_main_window_excel_automation.py`).
+- `docs/ExcelAutomation.md` (mapeador de columnas, perfiles, vista
+  previa, importación parcial, duplicados, drag&drop, importación
+  masiva, informe, exportación avanzada, transaccionalidad, pruebas).
+
 ## [0.12.0] - 2026-07-15
 
 Importación y exportación profesional de Excel (`.xlsx`, fase 8.0): un

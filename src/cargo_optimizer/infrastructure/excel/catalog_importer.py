@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from openpyxl.worksheet.worksheet import Worksheet
+
 from cargo_optimizer.infrastructure.excel.product_rows import PRODUCT_COLUMNS, row_to_load_unit
 from cargo_optimizer.infrastructure.excel.results import CatalogImportResult, RowError
 from cargo_optimizer.infrastructure.excel.row_parsing import RowConversionError
@@ -33,7 +35,16 @@ def import_catalog(path: Path) -> CatalogImportResult:
     workbook = open_workbook(path)
     worksheet = get_active_worksheet(workbook)
     require_headers(worksheet, PRODUCT_COLUMNS)
+    return import_catalog_from_worksheet(worksheet)
 
+
+def import_catalog_from_worksheet(worksheet: Worksheet) -> CatalogImportResult:
+    """Igual que `import_catalog`, pero sobre una hoja ya abierta con cabeceras canónicas.
+
+    Usado por `mapping.py` (fase 8.1) tras remapear las cabeceras de un
+    archivo con un formato distinto al oficial — evita duplicar el
+    bucle de conversión fila a fila.
+    """
     units = []
     errors: list[RowError] = []
     seen_skus: dict[str, int] = {}

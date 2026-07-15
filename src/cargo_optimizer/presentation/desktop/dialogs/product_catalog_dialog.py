@@ -4,10 +4,18 @@
 criterio que `ProductTablePanel` desde la fase 5.0). La edición de un
 producto siempre pasa por `CatalogProductEditorDialog` — este diálogo
 solo orquesta la lista y las llamadas al repositorio.
+
+Desde la fase 8.1 acepta arrastrar y soltar un `.xlsx` directamente
+sobre la ventana (``on_excel_dropped``): el diálogo solo detecta el
+archivo soltado y delega en el callback — nunca importa nada él mismo.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from pathlib import Path
+
+from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -30,6 +38,7 @@ from cargo_optimizer.infrastructure.database.repositories import (
 from cargo_optimizer.presentation.desktop.dialogs.catalog_product_editor_dialog import (
     CatalogProductEditorDialog,
 )
+from cargo_optimizer.presentation.desktop.drag_drop import first_excel_path, has_excel_url
 from cargo_optimizer.presentation.desktop.models.product_catalog_table_model import (
     ProductCatalogTableModel,
 )
@@ -38,12 +47,20 @@ from cargo_optimizer.presentation.desktop.models.product_catalog_table_model imp
 class ProductCatalogDialog(QDialog):
     """Diálogo modal del catálogo de productos: listar/buscar/CRUD/añadir al proyecto."""
 
-    def __init__(self, parent: QWidget | None, *, repository: ProductCatalogRepository) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None,
+        *,
+        repository: ProductCatalogRepository,
+        on_excel_dropped: Callable[[Path], None] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Catálogo de productos")
         self.resize(900, 500)
         self._repository = repository
         self._selected_units_to_add: tuple[LoadUnit, ...] = ()
+        self._on_excel_dropped = on_excel_dropped
+        self.setAcceptDrops(on_excel_dropped is not None)
 
         self._search_edit = QLineEdit(self)
         self._search_edit.setPlaceholderText("Buscar por SKU o nombre…")
@@ -99,6 +116,24 @@ class ProductCatalogDialog(QDialog):
         layout.addLayout(buttons_layout)
         layout.addWidget(self.table_view)
         layout.addLayout(bottom_layout)
+
+    def refresh(self) -> None:
+        """Vuelve a leer el catálogo (p. ej. tras una importación por arrastrar y soltar)."""
+        self._refresh()
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
+        if self._on_excel_dropped is not None and has_excel_url(event):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
+        path = first_excel_path(event)
+        if path is None or self._on_excel_dropped is None:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        self._on_excel_dropped(path)
 
     def _refresh(self) -> None:
         text = self._search_edit.text().strip()

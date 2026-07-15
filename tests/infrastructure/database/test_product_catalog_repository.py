@@ -205,3 +205,59 @@ def test_round_trip_without_max_supported_weight(db_manager: DatabaseManager) ->
     fetched = repo.get_by_id(added.id)
     assert fetched is not None
     assert fetched.max_supported_weight_kg is None
+
+
+def test_apply_bulk_adds_and_updates_in_a_single_transaction(db_manager: DatabaseManager) -> None:
+    repo = ProductCatalogRepository(db_manager)
+    existing = repo.add(_unit(sku="EXISTING-1", weight_kg=10.0))
+
+    repo.apply_bulk(
+        to_add=(_unit(sku="NEW-1"), _unit(sku="NEW-2")),
+        to_update=(
+            LoadUnit(
+                id=existing.id,
+                sku=existing.sku,
+                name="Actualizado",
+                dimensions=existing.dimensions,
+                weight_kg=99.0,
+            ),
+        ),
+    )
+
+    assert repo.get_by_sku("NEW-1") is not None
+    assert repo.get_by_sku("NEW-2") is not None
+    updated = repo.get_by_id(existing.id)
+    assert updated is not None
+    assert updated.name == "Actualizado"
+    assert updated.weight_kg == 99.0
+
+
+def test_apply_bulk_is_all_or_nothing_on_duplicate_sku(db_manager: DatabaseManager) -> None:
+    repo = ProductCatalogRepository(db_manager)
+    repo.add(_unit(sku="TAKEN"))
+
+    with pytest.raises(DuplicateCatalogSkuError):
+        repo.apply_bulk(to_add=(_unit(sku="NEW-VALID"), _unit(sku="TAKEN")))
+
+    # Ninguna fila debe haberse escrito: ni siquiera la que era válida.
+    assert repo.get_by_sku("NEW-VALID") is None
+    assert repo.count_active() == 1
+
+
+def test_apply_bulk_is_all_or_nothing_on_missing_update_target(
+    db_manager: DatabaseManager,
+) -> None:
+    repo = ProductCatalogRepository(db_manager)
+
+    with pytest.raises(RecordNotFoundError):
+        repo.apply_bulk(to_add=(_unit(sku="SHOULD-NOT-EXIST"),), to_update=(_unit(sku="MISSING"),))
+
+    assert repo.get_by_sku("SHOULD-NOT-EXIST") is None
+
+
+def test_apply_bulk_with_no_changes_is_a_no_op(db_manager: DatabaseManager) -> None:
+    repo = ProductCatalogRepository(db_manager)
+
+    repo.apply_bulk()
+
+    assert repo.count_active() == 0

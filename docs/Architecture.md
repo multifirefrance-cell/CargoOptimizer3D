@@ -18,7 +18,7 @@ entrega o cualquier detalle técnico externo.
 ┌─────────────────────────────────────────────────────────┐
 │ presentation   (desktop hoy; api / web en el futuro)     │
 ├─────────────────────────────────────────────────────────┤
-│ infrastructure (JSON — fase 7.0; SQLite — fase 7.1; Excel — fase 8.0; PDF — fase posterior) │
+│ infrastructure (JSON — 7.0; SQLite — 7.1; Excel — 8.0/8.1; PDF — fase posterior) │
 ├─────────────────────────────────────────────────────────┤
 │ application    (casos de uso, orquestación, puertos)     │
 ├─────────────────────────────────────────────────────────┤
@@ -60,12 +60,16 @@ Desde la fase 7.0 contiene `infrastructure/persistence/` (repositorio
 de proyectos `.cargo3d`, JSON propio — ver `docs/ProjectFiles.md`).
 Desde la fase 7.1 contiene además `infrastructure/database/` (catálogo
 de productos, perfiles de espacio e historial en SQLite — ver
-`docs/Database.md`). Desde la fase 8.0 contiene además
-`infrastructure/excel/` (importación/exportación profesional de
-`.xlsx` con `openpyxl` — ver `docs/Excel.md`). ReportLab (PDF) llega en
-una fase posterior. Depende de `domain` (y de `application` cuando
-existan casos de uso reales que orquestar; los tres subpaquetes de
-momento solo necesitan `domain` para reconstruir las entidades).
+`docs/Database.md`; desde la fase 8.1 incluye también los perfiles de
+mapeo de columnas de Excel, en la misma base de datos). Desde la fase
+8.0 contiene además `infrastructure/excel/` (importación/exportación
+profesional de `.xlsx` con `openpyxl` — ver `docs/Excel.md`; la fase
+8.1 añade mapeo de columnas, vista previa, importación parcial,
+duplicados, informes y exportación avanzada sobre ese mismo módulo,
+sin nuevos formatos — ver `docs/ExcelAutomation.md`). ReportLab (PDF)
+llega en una fase posterior. Depende de `domain` (y de `application`
+cuando existan casos de uso reales que orquestar; los tres subpaquetes
+de momento solo necesitan `domain` para reconstruir las entidades).
 
 ```
 infrastructure/
@@ -79,7 +83,8 @@ infrastructure/
 │   ├── orm_models.py                 # SQLAlchemy 2.x declarativo: catálogo, perfiles, historial
 │   ├── migrations.py                 # initialize_database/migrate_database, schema_version
 │   ├── engine.py                     # DatabaseManager: sesiones cortas, PRAGMA, backup, salud
-│   ├── repositories.py               # 4 repositorios: catálogo, perfiles, 2 historiales
+│   ├── repositories.py               # 5 repositorios: catálogo, perfiles de espacio, perfiles de
+│   │                                  #   mapeo de Excel (fase 8.1), 2 historiales
 │   └── catalog_service.py            # CatalogService: fachada única hacia presentation
 └── excel/
     ├── exceptions.py                 # ExcelError y subclases tipadas
@@ -94,7 +99,12 @@ infrastructure/
     ├── loading_space_importer.py
     ├── result_exporter.py             # PackingResult -> .xlsx con 5 hojas
     ├── detection.py                   # detect_template_kind(): identifica la plantilla por cabeceras
-    └── templates.py                   # Genera las 4 plantillas oficiales (examples/templates/)
+    ├── templates.py                   # Genera las 4 plantillas oficiales (examples/templates/)
+    ├── mapping.py                     # Fase 8.1: detección de alias, hoja remapeada en memoria
+    ├── import_preview.py              # Fase 8.1: clasificación nuevo/existente/duplicado/inválido
+    ├── import_plan.py                 # Fase 8.1: importación parcial + resolución de duplicados (función pura)
+    ├── import_report.py               # Fase 8.1: informe individual/masivo + exportación a .xlsx
+    └── advanced_export.py             # Fase 8.1: selección/orden/nombre de hojas, ocultar vacías
 ```
 
 ### `presentation`
@@ -136,11 +146,16 @@ presentation/desktop/
 │   ├── warnings_panel.py         # PackingResult.warnings
 │   ├── log_panel.py              # registro de inicio/fin/duración/cancelación/errores
 │   └── selection_details_panel.py  # detalle de la caja seleccionada en el visor 3D
-├── dialogs/                          # diálogos modales (fase 7.1)
-│   ├── product_catalog_dialog.py             # listar/buscar/CRUD/añadir al proyecto
+├── dialogs/                          # diálogos modales (fase 7.1; fase 8.1 añade los 4 siguientes)
+│   ├── product_catalog_dialog.py             # listar/buscar/CRUD/añadir al proyecto; acepta drag&drop (8.1)
 │   ├── catalog_product_editor_dialog.py      # editor modal de un LoadUnit de catálogo
 │   ├── loading_space_profiles_dialog.py      # listar/buscar/CRUD/aplicar perfiles
-│   └── loading_space_profile_editor_dialog.py  # reutiliza LoadingSpaceFormPanel tal cual
+│   ├── loading_space_profile_editor_dialog.py  # reutiliza LoadingSpaceFormPanel tal cual
+│   ├── column_mapping_dialog.py               # Fase 8.1: asistente de mapeo de columnas + perfiles
+│   ├── duplicate_resolution_dialog.py         # Fase 8.1: Actualizar/Duplicar/Ignorar por SKU
+│   ├── import_preview_dialog.py               # Fase 8.1: contadores + modo de importación parcial
+│   └── bulk_import_dialog.py                  # Fase 8.1: varios archivos, resumen final
+├── drag_drop.py                     # Fase 8.1: detección de `.xlsx` local en eventos de arrastre
 ├── viewer/                          # visor 3D — hermano de panels/models/workers, NO de infrastructure
 │   ├── __init__.py
 │   ├── widget.py                    # Packing3DViewer(QWidget): contrato público + fallback
@@ -204,6 +219,16 @@ de `infrastructure/database` directamente: recibe
 `CatalogService.products.get_by_sku` como un `Callable` inyectado desde
 `main_window.py`, manteniendo `infrastructure/excel` comprobable sin una
 base de datos real.
+
+Desde la fase 8.1, `_run_smart_catalog_import` en `main_window.py` es
+el único punto que orquesta el flujo automatizado completo (mapeo →
+vista previa → resolución de duplicados → escritura transaccional vía
+`ProductCatalogRepository.apply_bulk`) para las tres acciones de
+importación de catálogo y para arrastrar y soltar sobre
+`ProductCatalogDialog`; `MainWindow.dragEnterEvent`/`dropEvent`
+reutilizan `detect_template_kind` (mismo criterio que "Archivo >
+Importar Excel") para soltar directamente sobre la ventana principal.
+Ver `docs/ExcelAutomation.md` para el detalle completo.
 
 ## Motores de negocio: geometry, rules, optimization
 

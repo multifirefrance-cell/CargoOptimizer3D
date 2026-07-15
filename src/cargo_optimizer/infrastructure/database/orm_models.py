@@ -71,6 +71,19 @@ class LoadingSpaceProfileORM(Base):
     is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class ImportMappingProfileORM(Base):
+    __tablename__ = "import_mapping_profiles"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, index=True)
+    target_kind: Mapped[str] = mapped_column(String)
+    column_mapping_json: Mapped[str] = mapped_column(String)
+    created_at: Mapped[datetime] = mapped_column(_UTC_DATETIME)
+    last_used_at: Mapped[datetime | None] = mapped_column(_UTC_DATETIME, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class ProjectHistoryORM(Base):
     __tablename__ = "project_history"
 

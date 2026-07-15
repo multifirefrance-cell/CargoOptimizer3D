@@ -28,9 +28,10 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from PySide6.QtCore import QByteArray, QSize, Qt
-from PySide6.QtGui import QAction, QCloseEvent
+from PySide6.QtGui import QAction, QCloseEvent, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QDockWidget,
     QFileDialog,
     QInputDialog,
@@ -52,24 +53,42 @@ from cargo_optimizer.domain.packing_result import PackingResult
 from cargo_optimizer.domain.project import CargoProject
 from cargo_optimizer.infrastructure.database import CatalogService, DatabaseError, RepositoryError
 from cargo_optimizer.infrastructure.excel import (
+    DuplicateResolution,
     ExcelError,
+    ImportReport,
+    ImportSelectionMode,
     RowError,
+    build_catalog_preview,
+    build_import_plan,
+    build_import_report,
+    canonical_columns_for,
+    detect_column_mapping,
     detect_template_kind,
     export_catalog,
+    export_import_report,
     export_packing_result,
     import_catalog,
+    import_catalog_with_mapping,
     import_loading_spaces,
     import_packing_list,
+    read_source_headers,
 )
 from cargo_optimizer.infrastructure.persistence import ProjectFileError, ProjectFileRepository
 from cargo_optimizer.optimization import GreedyExtremePointStrategy, PackingProgress, PackingRequest
 from cargo_optimizer.optimization.exceptions import PackingRequestValidationError
+from cargo_optimizer.presentation.desktop.dialogs.bulk_import_dialog import BulkImportDialog
+from cargo_optimizer.presentation.desktop.dialogs.column_mapping_dialog import ColumnMappingDialog
+from cargo_optimizer.presentation.desktop.dialogs.duplicate_resolution_dialog import (
+    DuplicateResolutionDialog,
+)
+from cargo_optimizer.presentation.desktop.dialogs.import_preview_dialog import ImportPreviewDialog
 from cargo_optimizer.presentation.desktop.dialogs.loading_space_profiles_dialog import (
     LoadingSpaceProfilesDialog,
 )
 from cargo_optimizer.presentation.desktop.dialogs.product_catalog_dialog import (
     ProductCatalogDialog,
 )
+from cargo_optimizer.presentation.desktop.drag_drop import all_excel_paths, has_excel_url
 from cargo_optimizer.presentation.desktop.icons import icon
 from cargo_optimizer.presentation.desktop.panels.loading_space_form_panel import (
     LoadingSpaceFormPanel,
@@ -142,6 +161,7 @@ class MainWindow(QMainWindow):
         self._suspend_change_tracking: bool = False
 
         self.resize(1280, 800)
+        self.setAcceptDrops(True)
 
         self._build_panels()
         self._build_dock_widgets()
@@ -313,6 +333,15 @@ class MainWindow(QMainWindow):
         self.action_import_catalog_excel = self._make_action(
             "import", "Importar catálogo (&Excel)…", None, self._on_import_catalog_excel
         )
+        self.action_import_catalog_excel_mapping = self._make_action(
+            "import",
+            "Importar con &mapeo de columnas…",
+            None,
+            self._on_import_catalog_excel_with_mapping,
+        )
+        self.action_bulk_import_catalog_excel = self._make_action(
+            "import", "Importación &masiva de Excel…", None, self._on_bulk_import_catalog_excel
+        )
         self.action_export_catalog_excel = self._make_action(
             "import", "Exportar catálogo (E&xcel)…", None, self._on_export_catalog_excel
         )
@@ -465,6 +494,8 @@ class MainWindow(QMainWindow):
         products_menu.addAction(self.action_save_product_to_catalog)
         products_menu.addSeparator()
         products_menu.addAction(self.action_import_catalog_excel)
+        products_menu.addAction(self.action_import_catalog_excel_mapping)
+        products_menu.addAction(self.action_bulk_import_catalog_excel)
         products_menu.addAction(self.action_export_catalog_excel)
         products_menu.addSeparator()
         products_menu.addAction(self.action_delete_products)
@@ -812,31 +843,144 @@ class MainWindow(QMainWindow):
         path = self._prompt_open_excel_path("Importar catálogo (Excel)")
         if path is None:
             return
+        self._run_and_report_smart_catalog_import(path, force_mapping_dialog=False)
+
+    def _on_import_catalog_excel_with_mapping(self) -> None:
+        if self._catalog_service is None:
+            return
+        path = self._prompt_open_excel_path("Importar catálogo con mapeo de columnas")
+        if path is None:
+            return
+        self._run_and_report_smart_catalog_import(path, force_mapping_dialog=True)
+
+    def _run_and_report_smart_catalog_import(
+        self, path: Path, *, force_mapping_dialog: bool
+    ) -> None:
         try:
-            result = import_catalog(path)
+            report = self._run_smart_catalog_import(
+                path, interactive=True, force_mapping_dialog=force_mapping_dialog
+            )
         except ExcelError as exc:
             self._show_error("No se pudo importar el catálogo", str(exc))
             return
+        if report is None:
+            return
+        self._show_import_report(report)
 
-        added = 0
-        skipped: list[str] = []
-        for unit in result.units:
-            if self._catalog_service.products.get_by_sku(unit.sku) is not None:
-                skipped.append(unit.sku)
-                continue
-            try:
-                self._catalog_service.products.add(unit)
-                added += 1
-            except RepositoryError as exc:
-                skipped.append(f"{unit.sku} ({exc})")
+    def _run_smart_catalog_import(
+        self, path: Path, *, interactive: bool, force_mapping_dialog: bool = False
+    ) -> ImportReport | None:
+        """Mapeo -> vista previa -> resolución de duplicados -> escritura transaccional (fase 8.1).
 
-        self._report_import_outcome(
-            path,
-            imported_count=added,
-            imported_label="producto(s) importado(s) al catálogo",
-            skipped_skus=skipped,
-            row_errors=result.errors,
+        Devuelve `None` únicamente si el usuario cancela en algún paso
+        interactivo — nunca ocurre cuando ``interactive=False``
+        (importación masiva sin diálogos, con mapeo automático y
+        "Actualizar" como resolución por defecto para cada SKU
+        existente).
+        """
+        assert self._catalog_service is not None
+        start_time = time.monotonic()
+        headers = read_source_headers(path)
+        mapping, unrecognized = detect_column_mapping(headers, "catalog")
+
+        if interactive and (unrecognized or force_mapping_dialog):
+            dialog = ColumnMappingDialog(
+                self,
+                target_kind="catalog",
+                source_headers=headers,
+                detected_mapping=mapping,
+                profile_repository=self._catalog_service.import_mappings,
+            )
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return None
+            mapping = dialog.result_mapping() or {}
+
+        result = import_catalog_with_mapping(path, mapping)
+        preview = build_catalog_preview(
+            result,
+            self._catalog_service.products.get_by_sku,
+            column_count=len(canonical_columns_for("catalog")),
         )
+
+        selection_mode: ImportSelectionMode = "all"
+        selected_skus: frozenset[str] | None = None
+        if interactive:
+            preview_dialog = ImportPreviewDialog(self, preview=preview)
+            if preview_dialog.exec() != QDialog.DialogCode.Accepted:
+                return None
+            selection_mode = preview_dialog.result_selection_mode() or "all"
+            selected_skus = preview_dialog.result_selected_skus()
+
+        duplicate_resolutions: dict[str, DuplicateResolution] = {}
+        if interactive and preview.existing_units:
+            duplicate_dialog = DuplicateResolutionDialog(
+                self, existing_units=preview.existing_units
+            )
+            if duplicate_dialog.exec() != QDialog.DialogCode.Accepted:
+                return None
+            duplicate_resolutions = duplicate_dialog.result_resolutions() or {}
+
+        plan = build_import_plan(
+            preview,
+            self._catalog_service.products.get_by_sku,
+            selection_mode=selection_mode,
+            selected_skus=selected_skus,
+            duplicate_resolutions=duplicate_resolutions,
+        )
+        self._catalog_service.products.apply_bulk(to_add=plan.to_add, to_update=plan.to_update)
+
+        elapsed = time.monotonic() - start_time
+        return build_import_report(
+            source_name=path.name, preview=preview, plan=plan, elapsed_seconds=elapsed
+        )
+
+    def _show_import_report(self, report: ImportReport) -> None:
+        message = (
+            f"Archivo: {report.source_name}\n"
+            f"Filas leídas: {report.rows_read}\n"
+            f"Importadas: {report.imported_count}\n"
+            f"Actualizadas: {report.updated_count}\n"
+            f"Duplicadas: {report.duplicate_count}\n"
+            f"Ignoradas: {report.ignored_count}\n"
+            f"Errores: {report.error_count}\n"
+            f"Tiempo: {report.elapsed_seconds:.2f} s"
+        )
+        response = QMessageBox.question(
+            self,
+            "Importación completada",
+            message + "\n\n¿Guardar el informe como Excel?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if response == QMessageBox.StandardButton.Yes:
+            report_path = self._prompt_save_excel_path(
+                "Guardar informe de importación", "Informe_importacion.xlsx"
+            )
+            if report_path is not None:
+                export_import_report(report, report_path)
+
+    def _on_bulk_import_catalog_excel(self) -> None:
+        if self._catalog_service is None:
+            return
+        dialog = BulkImportDialog(self, import_one=self._bulk_import_one_catalog_file)
+        dialog.exec()
+
+    def _bulk_import_one_catalog_file(self, path: Path) -> ImportReport:
+        report = self._run_smart_catalog_import(path, interactive=False)
+        assert report is not None  # interactive=False nunca cancela
+        return report
+
+    def _on_catalog_dialog_excel_dropped(self, path: Path, dialog: ProductCatalogDialog) -> None:
+        """Callback de arrastrar y soltar sobre `ProductCatalogDialog` — importa al catálogo."""
+        try:
+            report = self._run_smart_catalog_import(path, interactive=True)
+        except ExcelError as exc:
+            self._show_error("No se pudo importar el catálogo", str(exc))
+            return
+        if report is None:
+            return
+        dialog.refresh()
+        self._show_import_report(report)
 
     def _report_import_outcome(
         self,
@@ -1015,6 +1159,8 @@ class MainWindow(QMainWindow):
             self.action_predefined_profiles,
             self.action_save_as_profile,
             self.action_import_catalog_excel,
+            self.action_import_catalog_excel_mapping,
+            self.action_bulk_import_catalog_excel,
             self.action_export_catalog_excel,
             self.action_import_packing_list_excel,
         ):
@@ -1023,7 +1169,11 @@ class MainWindow(QMainWindow):
     def _on_open_catalog(self) -> None:
         if self._catalog_service is None:
             return
-        dialog = ProductCatalogDialog(self, repository=self._catalog_service.products)
+        dialog = ProductCatalogDialog(
+            self,
+            repository=self._catalog_service.products,
+            on_excel_dropped=lambda path: self._on_catalog_dialog_excel_dropped(path, dialog),
+        )
         if dialog.exec() != ProductCatalogDialog.DialogCode.Accepted:
             return
         chosen = dialog.selected_units_to_add()
@@ -1508,6 +1658,8 @@ class MainWindow(QMainWindow):
         else:
             for action in (
                 self.action_import_catalog_excel,
+                self.action_import_catalog_excel_mapping,
+                self.action_bulk_import_catalog_excel,
                 self.action_export_catalog_excel,
                 self.action_import_packing_list_excel,
             ):
@@ -1678,3 +1830,79 @@ class MainWindow(QMainWindow):
         if self._catalog_service is not None:
             self._catalog_service.close()
         super().closeEvent(event)
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # noqa: N802
+        if has_excel_url(event):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event: QDropEvent) -> None:  # noqa: N802
+        paths = all_excel_paths(event)
+        if not paths:
+            event.ignore()
+            return
+        event.acceptProposedAction()
+        for path in paths:
+            self._handle_dropped_excel_file(path)
+
+    def _handle_dropped_excel_file(self, path: Path) -> None:
+        """Detecta automáticamente el tipo de un `.xlsx` soltado y lo despacha (fase 8.1)."""
+        try:
+            kind = detect_template_kind(path)
+        except ExcelError as exc:
+            self._show_error("No se pudo leer el archivo Excel", str(exc))
+            return
+
+        if kind == "catalog":
+            self._import_catalog_rows_into_project(path)
+        elif kind == "packing_list":
+            self._import_packing_list_from_path(path)
+        elif kind == "loading_space":
+            self._import_loading_spaces_from_path(path)
+        else:
+            self._handle_unrecognized_dropped_file(path)
+
+    def _handle_unrecognized_dropped_file(self, path: Path) -> None:
+        """Archivo soltado sin cabeceras oficiales: probar el mapeo por alias antes de rendirse."""
+        headers = read_source_headers(path)
+        mapping, _unrecognized = detect_column_mapping(headers, "catalog")
+        if not mapping:
+            self._show_warning(
+                "Archivo no reconocido",
+                f"'{path.name}' no coincide con ninguna plantilla oficial de CargoOptimizer3D "
+                "ni se detectaron columnas conocidas de catálogo.",
+            )
+            return
+        if self._catalog_service is None:
+            self._show_warning(
+                "Catálogo no disponible",
+                "El mapeo de columnas requiere el catálogo, no disponible en modo limitado.",
+            )
+            return
+
+        dialog = ColumnMappingDialog(
+            self,
+            target_kind="catalog",
+            source_headers=headers,
+            detected_mapping=mapping,
+            profile_repository=self._catalog_service.import_mappings,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        chosen_mapping = dialog.result_mapping() or {}
+        result = import_catalog_with_mapping(path, chosen_mapping)
+
+        existing_skus = {
+            unit.sku.casefold() for unit in self.product_table_panel.model.load_units()
+        }
+        to_add = [unit for unit in result.units if unit.sku.casefold() not in existing_skus]
+        if to_add:
+            self.product_table_panel.model.add_units(to_add)
+        self._report_import_outcome(
+            path,
+            imported_count=len(to_add),
+            imported_label="producto(s) añadido(s) al proyecto (mapeo manual)",
+            skipped_skus=[],
+            row_errors=result.errors,
+        )

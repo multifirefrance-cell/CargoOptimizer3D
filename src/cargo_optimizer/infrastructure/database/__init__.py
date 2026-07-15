@@ -14,6 +14,7 @@ from cargo_optimizer.infrastructure.database.exceptions import (
     DatabaseInitializationError,
     DatabaseMigrationError,
     DuplicateCatalogSkuError,
+    DuplicateImportMappingProfileError,
     DuplicateLoadingSpaceProfileError,
     RecordNotFoundError,
     RepositoryError,
@@ -21,6 +22,8 @@ from cargo_optimizer.infrastructure.database.exceptions import (
 from cargo_optimizer.infrastructure.database.paths import get_user_database_path
 from cargo_optimizer.infrastructure.database.repositories import (
     CatalogProductEntry,
+    ImportMappingProfileEntry,
+    ImportMappingProfileRepository,
     LoadingSpaceProfileEntry,
     LoadingSpaceProfileRepository,
     PackingRunHistoryEntry,
@@ -39,7 +42,10 @@ __all__ = [
     "DatabaseManager",
     "DatabaseMigrationError",
     "DuplicateCatalogSkuError",
+    "DuplicateImportMappingProfileError",
     "DuplicateLoadingSpaceProfileError",
+    "ImportMappingProfileEntry",
+    "ImportMappingProfileRepository",
     "LoadingSpaceProfileEntry",
     "LoadingSpaceProfileRepository",
     "PackingRunHistoryEntry",

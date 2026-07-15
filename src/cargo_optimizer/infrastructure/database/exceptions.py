@@ -32,5 +32,9 @@ class DuplicateLoadingSpaceProfileError(RepositoryError):
     """Ya existe un perfil de espacio activo con ese nombre (sin distinguir mayúsculas)."""
 
 
+class DuplicateImportMappingProfileError(RepositoryError):
+    """Ya existe un perfil de mapeo activo con ese nombre (sin distinguir mayúsculas)."""
+
+
 class RecordNotFoundError(RepositoryError):
     """No existe ningún registro con el identificador solicitado."""

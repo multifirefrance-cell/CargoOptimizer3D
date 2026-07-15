@@ -70,14 +70,19 @@ python -m venv .venv
 
 ## Estado del proyecto
 
-Fin de fase 8.0: motor de optimización, interfaz de escritorio, visor
+Fin de fase 8.1: motor de optimización, interfaz de escritorio, visor
 3D, persistencia de proyectos (`.cargo3d`, JSON versionado), catálogo
-reutilizable de productos/perfiles respaldado por SQLite e
-importación/exportación profesional de Excel (`.xlsx`) ya
-implementados — ver `docs/Roadmap.md` para el detalle fase a fase,
-`docs/ProjectFiles.md` para el formato de archivo de proyecto,
-`docs/Database.md` para el catálogo SQLite (productos, perfiles de
-Loading Space e historial básico) y `docs/Excel.md` para el
+reutilizable de productos/perfiles respaldado por SQLite,
+importación/exportación profesional de Excel (`.xlsx`) y
+automatización del flujo Excel (mapeo de columnas con perfiles
+reutilizables, vista previa, importación parcial, resolución de
+duplicados, arrastrar y soltar, importación masiva, informe de
+importación, exportación avanzada) ya implementados — ver
+`docs/Roadmap.md` para el detalle fase a fase, `docs/ProjectFiles.md`
+para el formato de archivo de proyecto, `docs/Database.md` para el
+catálogo SQLite (productos, perfiles de Loading Space, perfiles de
+mapeo de Excel e historial básico), `docs/Excel.md` para el
 importador/exportador de Excel (plantillas oficiales en
-`examples/templates/`). Reportes PDF e integración ERP se
+`examples/templates/`) y `docs/ExcelAutomation.md` para la
+automatización del flujo. Reportes PDF e integración ERP se
 implementarán en fases posteriores.

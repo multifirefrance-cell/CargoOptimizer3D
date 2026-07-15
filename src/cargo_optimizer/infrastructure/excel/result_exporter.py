@@ -205,14 +205,19 @@ def _finish_table_sheet(
     autofit_columns(worksheet, column_count=column_count)
 
 
-def export_packing_result(
+def build_packing_result_workbook(
     result: PackingResult,
     load_units_by_id: Mapping[UUID, LoadUnit],
-    path: Path,
     *,
     application_version: str,
-) -> None:
-    """Escribe `result` a `path` con el formato de `OptimizationResultTemplate.xlsx`."""
+) -> Workbook:
+    """Construye el libro completo (5 hojas) en memoria, sin guardarlo todavía.
+
+    Separado de `export_packing_result` para que `advanced_export.py`
+    (fase 8.1) pueda elegir un subconjunto de hojas, reordenarlas o
+    renombrarlas antes de escribir el archivo final, sin duplicar la
+    construcción de cada hoja.
+    """
     workbook = Workbook()
 
     summary_sheet = get_active_worksheet(workbook)
@@ -224,4 +229,18 @@ def export_packing_result(
     _build_warnings_sheet(workbook.create_sheet(SHEET_WARNINGS), result)
     _build_space_sheet(workbook.create_sheet(SHEET_SPACE), result)
 
+    return workbook
+
+
+def export_packing_result(
+    result: PackingResult,
+    load_units_by_id: Mapping[UUID, LoadUnit],
+    path: Path,
+    *,
+    application_version: str,
+) -> None:
+    """Escribe `result` a `path` con el formato de `OptimizationResultTemplate.xlsx`."""
+    workbook = build_packing_result_workbook(
+        result, load_units_by_id, application_version=application_version
+    )
     save_workbook_atomic(workbook, path)
