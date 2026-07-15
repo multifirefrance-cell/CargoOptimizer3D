@@ -16,7 +16,10 @@ fase se adelanta a la anterior.
 | 4.2 | Optimización de rendimiento del motor de packing | `optimization` (mismos módulos, sin nuevo paquete) | **Completada** |
 | 5.0 | Base de la interfaz de escritorio | `presentation/desktop` (ventana principal, paneles, sin conectar el motor) | **Completada** |
 | 5.1 | Conectar el motor con la interfaz | `presentation/desktop` (invocar `PackingEngine` desde `MainWindow`) | **Completada** |
-| 6 | Visualización 3D | `infrastructure` (adaptador VTK) | Pendiente |
+| 6.0 | Diseño del visor 3D | Ninguno (solo documentación: `docs/ThreeDViewerDesign.md`, `docs/ThreeDViewerImplementationPlan.md`, ADR-0010, ADR-0011) | **Completada** |
+| 6.1 | Visor 3D — implementación mínima | `presentation/desktop/viewer` (nuevo, hermano de `panels`/`models`/`workers`) | Pendiente |
+| 6.2 | Visor 3D — filtros, etiquetas, vistas, captura de imagen | `presentation/desktop/viewer` (mismos módulos) | Pendiente |
+| 6.3 | Visor 3D — animación y escala | `presentation/desktop/viewer` (mismos módulos) | Pendiente |
 | 7 | Persistencia | `infrastructure` (adaptador SQLAlchemy/SQLite) | Pendiente |
 | 8 | Reportes | `infrastructure` (adaptadores openpyxl/ReportLab) | Pendiente |
 | 9 | Integración ERP | `presentation` (nuevo adaptador, p. ej. `presentation/api`) | Pendiente |
@@ -73,42 +76,63 @@ por el mismo motivo que las fases 2 y 4: no se puede diseñar
 `PackingEngine` en la UI en la misma entrega que se diseña la ventana
 que lo va a alojar.
 
+## Nota sobre la numeración y el paquete de la fase 6
+
+La fila original de la fase 6 decía "Visualización 3D — `infrastructure`
+(adaptador VTK)". Al diseñar la fase formalmente
+(`docs/ThreeDViewerDesign.md`, sección 3) se determinó que el visor
+**no** pertenece a `infrastructure` (que son adaptadores de
+persistencia/exportación detrás de puertos de `application`, y
+`application` ni siquiera existe todavía) sino a
+`presentation/desktop/viewer/`, hermano de `panels/`/`models/`/
+`workers/` ya existentes — el visor es un mecanismo de presentación de
+datos ya calculados, no un adaptador de infraestructura. Se corrige
+aquí la tabla para reflejarlo. La fase 6 se subdivide además en **6.0
+Diseño** (completada, esta sesión), **6.1 Implementación mínima**,
+**6.2 Enriquecimiento** (filtros, etiquetas, vistas predefinidas,
+captura de imagen) y **6.3 Escala y animación** — mismo motivo que las
+fases 2, 4 y 5: separar diseño de implementación, y dentro de la
+implementación, lo mínimo funcional de lo que puede esperar a que 6.1
+esté en uso real. Detalle completo del reparto en
+`docs/ThreeDViewerImplementationPlan.md`.
+
 ## Estado actual
 
-Fin de fase 5.1: la interfaz de escritorio ya ejecuta el motor real de
-principio a fin. `MainWindow._build_packing_request()` lee el
-`LoadingSpace` del formulario y los `LoadUnit` de la tabla de
-productos, construye una `PackingRequest` real (o explica con claridad,
-vía `QMessageBox`, por qué no puede si falta algo) y "Ejecutar
-optimización" la despacha a `OptimizationWorker`
-(`presentation/desktop/workers/`), un `QThread` dedicado que llama a
-`PackingEngine.optimize(...)` con su propio `CancellationToken` y
-reenvía `PackingProgress`/`PackingResult` a la interfaz por señales —
-la optimización nunca bloquea el hilo de la GUI. "Cancelar" activa el
-`CancellationToken`; la interfaz queda consistente (controles
-rehabilitados, barra de progreso oculta) en cuanto el hilo termina,
-sin bloquear esperando. Los resultados se reparten en cuatro pestañas
-del panel inferior: Resumen (`ResultsPanel`, ahora con cantidad
-pendiente y conteo de avisos), No cargados (`UnpackedTablePanel`:
-SKU/Instancia/Razón/Código sobre las `UnpackedUnit` reales), Avisos
-(`WarningsPanel`, sobre `PackingResult.warnings`) y Registro
-(`LogPanel`: inicio, fin, duración, cancelación y errores, con marca de
-tiempo). Todo error real (`PackingRequestValidationError`,
-`OptimizationInternalError` o cualquier excepción inesperada del hilo
-del motor) se muestra con `QMessageBox`, nunca solo por consola. El
-motor (`domain`/`geometry`/`rules`/`optimization`) sigue intacto: esta
-fase solo consume su API pública
-(`PackingEngine`/`PackingRequest`/`PackingProgress`/`CancellationToken`),
-verificado por `git diff` vacío en esos cuatro paquetes antes del
-commit. 386 pruebas en verde (370 previas + 16 nuevas: `OptimizationWorker`
-en hilo real y síncrono, `UnpackedUnitTableModel`, y la integración
-completa de `MainWindow` — construcción de solicitud, validaciones,
-ejecución, cancelación, error, resultados —, todas bajo la plataforma
-Qt `offscreen`). No se ha escrito código de visualización 3D,
-persistencia, exportación/importación real, ni Undo/Redo. La siguiente
-sesión de desarrollo debe abordar la **fase 6** (visualización 3D),
-reutilizando este mismo flujo de ejecución en segundo plano para
-alimentar el visor con los `Placement` del `PackingResult`. Si el
+Fin de fase 6.0: diseño formal del visor 3D, sin código funcional
+nuevo. `docs/ThreeDViewerDesign.md` fija la tecnología (PyVista +
+PyVistaQt, confirmada frente a VTK directo, `QOpenGLWidget` propio y
+VisPy tras comparación formal — ADR-0010), la arquitectura
+(`presentation/desktop/viewer/`, seis archivos en vez de los diez
+sugeridos originalmente, con criterio explícito de cuándo separar los
+tres que se fusionan en `scene_controller.py`), el contrato del widget
+(`Packing3DViewer.display_result(result, load_units_by_id)` como única
+puerta de entrada de datos — ADR-0011), el modelo de escena
+(`SceneModel`/`PlacementVisualModel`), cómo `SceneBuilder` resuelve
+SKU/nombre/color de cada `Placement` (entregando también un mapping
+`UUID -> LoadUnit`, el mismo patrón ya usado para `UnpackedUnit` desde
+la fase 5.1), coordenadas (sin permutar ejes: "Z arriba" es una vista
+de cámara, no una transformación de datos), representación de
+`LoadingSpace` y `Placement`, colores (por SKU, determinismo real entre
+ejecuciones — no con `hash()` de Python, que está aleatorizado por
+proceso), cámara, picking/selección con prevención de ciclos de señal,
+qué filtros quedan dentro/fuera de 6.1, integración con `MainWindow`
+sin romper el `QThread`/progreso/cancelación/temas/`QSettings`/tests
+offscreen ya existentes, rendimiento (expectativas razonadas, no
+medidas), temas, captura de imagen y animación futuras, fallback
+cuando 3D no está disponible (la aplicación debe abrir igual), riesgos
+de empaquetado, y estrategia de pruebas en los cuatro niveles ya
+establecidos por el proyecto. `docs/ThreeDViewerImplementationPlan.md`
+separa el trabajo futuro en 6.1 (mínimo funcional), 6.2 (filtros,
+etiquetas, vistas predefinidas, captura de imagen) y 6.3 (animación,
+capas, cortes, explosión, escala). No se ha instalado ninguna
+dependencia, no se ha tocado `domain`/`geometry`/`rules`/`optimization`
+(verificado con `git diff` vacío en los cuatro paquetes antes del
+commit), y el placeholder actual
+(`viewport_3d_placeholder.py`) sigue sin cambios. 386 pruebas en verde,
+sin ninguna nueva en esta fase (fase exclusivamente documental, mismo
+criterio que la fase 4.0). La siguiente sesión de desarrollo debe
+abordar la **fase 6.1** (implementación mínima del visor), siguiendo el
+plan ya escrito en `docs/ThreeDViewerImplementationPlan.md`. Si el
 rendimiento del motor a gran escala (250+ instancias) sigue siendo
 prioritario en paralelo, ver `docs/OptimizerPerformance.md` para la
 alternativa pendiente (índice espacial dentro de `rules`/`geometry`,

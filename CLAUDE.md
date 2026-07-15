@@ -131,7 +131,9 @@ userdata/            # Datos generados por el usuario en tiempo de ejecución. N
    motor de optimización — 4.1. Primer optimizador funcional — 4.2.
    Optimización de rendimiento del motor de packing — 5.0. Base de la
    interfaz de escritorio — 5.1. Conectar el motor con la interfaz —
-   6. Visualización 3D — 7. Persistencia — 8. Reportes — 9. Integración
+   6.0. Diseño del visor 3D — 6.1. Visor 3D: implementación mínima —
+   6.2. Visor 3D: filtros/etiquetas/vistas/captura — 6.3. Visor 3D:
+   animación y escala — 7. Persistencia — 8. Reportes — 9. Integración
    ERP — 10. Versión comercial.
 
 La fase 2 original ("Motor geométrico") se dividió en 2.1 (modelo de
@@ -142,23 +144,31 @@ fase 4 se dividió igual, en 4.0 (diseño puro) y 4.1 (implementación),
 por el mismo motivo: no crear `optimization/` antes de haber diseñado
 qué contendrá. La fase 5 se renumeró de "5 = Visualización 3D, 6 =
 Interfaz" a "5.0/5.1 = Interfaz, 6 = Visualización 3D" al construir la
-interfaz antes que VTK — ver `docs/Roadmap.md`, sección "Nota sobre la
-numeración de las fases 5 y 6".
+interfaz antes que VTK. La fase 6 corrige además el paquete: el visor
+no pertenece a `infrastructure` (como decía la fila original) sino a
+`presentation/desktop/viewer/`, y se subdivide en 6.0 (diseño) / 6.1
+(mínimo) / 6.2 (enriquecimiento) / 6.3 (escala y animación) — ver
+`docs/Roadmap.md`, secciones "Nota sobre la numeración de las fases 5 y
+6" y "Nota sobre la numeración y el paquete de la fase 6".
 
-Estado actual: **la interfaz ya ejecuta el motor real de principio a
-fin** (fin de fase 5.1). `presentation/desktop` construye una
-`PackingRequest` desde el formulario de Loading Space y la tabla de
-productos, la ejecuta en `OptimizationWorker` (un `QThread` dedicado,
-`presentation/desktop/workers/`) y vuelca el `PackingResult` en cuatro
-pestañas del panel inferior (Resumen, No cargados, Avisos, Registro) —
-ver `docs/Architecture.md`, sección `presentation`. La optimización
-nunca bloquea el hilo de la interfaz, y "Cancelar" usa el
-`CancellationToken` cooperativo del motor. El motor
-(`domain`/`geometry`/`rules`/`optimization`) sigue intacto: la fase 5.1
-solo consumió su API pública, sin modificar ninguno de esos cuatro
-paquetes (verificado con `git diff` vacío antes del commit). No
-implementar todavía VTK, SQLite, Excel, PDF, importación/exportación
-real, animaciones, Undo/Redo, ni volver a tocar
+Estado actual: **visor 3D diseñado, no implementado** (fin de fase
+6.0). `docs/ThreeDViewerDesign.md` fija tecnología (PyVista + PyVistaQt,
+ADR-0010), arquitectura (`presentation/desktop/viewer/`, seis archivos),
+contrato (`Packing3DViewer.display_result(result, load_units_by_id)`,
+ADR-0011) y todo lo demás — ver `docs/Architecture.md`, sección
+`presentation`, y `docs/ThreeDViewerImplementationPlan.md` para el
+reparto 6.1/6.2/6.3. No se instaló ninguna dependencia nueva, el
+placeholder actual (`viewport_3d_placeholder.py`) sigue sin cambios, y
+`domain`/`geometry`/`rules`/`optimization` siguen intactos (verificado
+con `git diff` vacío antes del commit). La interfaz ya ejecuta el motor
+real de principio a fin desde la fase 5.1: `presentation/desktop`
+construye una `PackingRequest` desde el formulario de Loading Space y
+la tabla de productos, la ejecuta en `OptimizationWorker` (un `QThread`
+dedicado, `presentation/desktop/workers/`) y vuelca el `PackingResult`
+en cuatro pestañas del panel inferior (Resumen, No cargados, Avisos,
+Registro), sin bloquear nunca el hilo de la interfaz. No implementar
+todavía VTK/PyVista/PyVistaQt, SQLite, Excel, PDF,
+importación/exportación real, animaciones, Undo/Redo, ni volver a tocar
 `domain`/`geometry`/`rules`/`optimization` salvo bug objetivo y
 demostrable, hasta que se indique explícitamente. Ver `docs/Roadmap.md`
 para el detalle fase a fase.
@@ -382,7 +392,7 @@ fases 5.0 y 5.1.
   proyectos), un concepto distinto de "recordar el estado de la
   ventana".
 - `Viewport3DPlaceholder` no importa VTK ni ninguna biblioteca de
-  render 3D: es un `QWidget` de marcador de posición hasta la fase 6.
+  render 3D: es un `QWidget` de marcador de posición hasta la fase 6.1.
 - Los recursos (`resources/icons/*.svg`) viven dentro de
   `presentation/desktop/`, cargados por ruta de archivo directa
   (`icons.py::icon`) — no hay pipeline `.qrc`/`pyside6-rcc` todavía;
@@ -393,6 +403,61 @@ fases 5.0 y 5.1.
   ventanas reales durante la suite. Solo puede existir un
   `QApplication` por proceso: el fixture `qapp` es de ámbito de
   sesión, nunca crear uno nuevo por prueba.
+
+## Invariantes del futuro visor 3D (`presentation/desktop/viewer/`, diseñado en la fase 6.0, no romper sin ADR)
+
+Diseño completo en `docs/ThreeDViewerDesign.md`; plan de
+implementación en `docs/ThreeDViewerImplementationPlan.md`; decisiones
+formales en ADR-0010 (tecnología) y ADR-0011 (desacoplo y fallback). No
+existe código todavía (llega en la fase 6.1) — estas son las reglas que
+esa implementación debe respetar desde el primer commit.
+
+- `viewer/` nunca importa `cargo_optimizer.optimization`: recibe
+  siempre un `PackingResult` ya calculado
+  (`Packing3DViewer.display_result(result, load_units_by_id)`), nunca
+  ejecuta `PackingEngine`, `PackingRequest` ni `RulesEngine`. No lo
+  impone hoy `import-linter` de forma automática — es disciplina de
+  diseño verificable en revisión de código, igual que la separación
+  entre `optimization` y `rules` ya documentada más arriba.
+- `load_units_by_id: Mapping[UUID, LoadUnit]` se entrega junto al
+  `PackingResult` para resolver SKU/nombre/peso/color de cada
+  `Placement` — mismo patrón ya usado por `UnpackedUnitTableModel`
+  desde la fase 5.1. No ampliar `PackingResult`/`Placement` con datos
+  de `LoadUnit` para evitar este mapping (tocaría dominio sin
+  necesidad real); no crear un DTO visual paralelo a `LoadUnit`
+  mientras solo replicaría sus mismos campos.
+- La geometría de la escena **nunca permuta ejes**: un punto
+  `(x_cm, y_cm, z_cm)` del dominio se dibuja como `(x, y, z)` en
+  PyVista, sin reordenar componentes. "Z arriba" se consigue con el
+  parámetro de cámara `view_up = (0, 0, 1)`, nunca reordenando datos.
+- El color de una caja viene de `LoadUnit.color_hex`; el color de
+  repuesto (`ColorRegistry`, cuando el `LoadUnit` es desconocido) debe
+  ser determinista **entre ejecuciones del programa**, no solo dentro
+  de una — nunca usar `hash()` de Python sobre cadenas para esto
+  (aleatorizado por proceso desde Python 3.3); usar un hash estable
+  (`zlib.crc32`/`hashlib.md5`) sobre una paleta curada de alto
+  contraste. Nunca `random` sin semilla.
+- Seleccionar una caja cambia su contorno/resalte, nunca su color de
+  relleno — cambiar el relleno pierde la asociación visual "este color
+  = este SKU" justo cuando más se necesita.
+- `Packing3DViewer` debe poder fallar al inicializar (PyVista no
+  instalado, `QtInteractor` no arranca, sin OpenGL) sin tirar la
+  aplicación: `is_available()` refleja el estado, y todos los métodos
+  públicos se vuelven no-op seguros en modo fallback. `MainWindow`
+  nunca comprueba `is_available()` antes de llamar a
+  `display_result`/`clear_scene`/etc. — la responsabilidad es
+  enteramente del widget.
+- `set_selected_placement(...)`, cuando se llama desde fuera del
+  widget (p. ej. desde una tabla), actualiza el estado visual sin
+  volver a emitir la señal `placement_selected` — esa señal representa
+  únicamente "el usuario seleccionó algo haciendo clic en el visor",
+  para evitar un ciclo de señales con quien la escucha.
+- Estrategia de renderizado inicial (6.1): un actor por caja, no malla
+  combinada ni glyphs — decisión revisable en 6.3 si el rendimiento del
+  optimizador a gran escala lo justifica (ver
+  `docs/OptimizerPerformance.md`), pero no antes: el modelo de escena
+  (`SceneModel`/`PlacementVisualModel`) ya está diseñado para no
+  depender de esta estrategia concreta.
 
 ## Reglas de trabajo con el asistente
 

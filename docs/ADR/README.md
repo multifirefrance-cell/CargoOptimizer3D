@@ -16,3 +16,5 @@ cambia: se marcan como `Reemplazada por ADR-XXXX` y se añade una nueva.
 | [ADR-0007](ADR-0007-motor-de-reglas.md) | Motor de reglas separado del dominio y del optimizador, reglas de extintores, política de acumulación de violaciones | Aceptada |
 | [ADR-0008](ADR-0008-arquitectura-del-motor-de-optimizacion.md) | Arquitectura del motor de optimización: paquete separado, `PackingStrategy` como Protocol, determinismo | Aceptada |
 | [ADR-0009](ADR-0009-estrategia-greedy-y-separacion-objetivos.md) | Extreme-point greedy como primera estrategia; separación entre restricciones duras y objetivos | Aceptada |
+| [ADR-0010](ADR-0010-tecnologia-del-visor-3d.md) | Tecnología del visor 3D: PyVista + PyVistaQt, confirmada frente a VTK directo, `QOpenGLWidget` propio y VisPy | Aceptada |
+| [ADR-0011](ADR-0011-desacoplo-visor-y-fallback.md) | Desacoplo del visor 3D respecto al motor (API basada en `PackingResult` ya calculado) y fallback sin 3D | Aceptada |

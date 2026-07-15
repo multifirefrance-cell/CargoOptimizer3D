@@ -94,9 +94,37 @@ presentation/desktop/
 │   ├── unpacked_table_panel.py   # tabla de instancias no cargadas
 │   ├── warnings_panel.py         # PackingResult.warnings
 │   ├── log_panel.py              # registro de inicio/fin/duración/cancelación/errores
-│   └── viewport_3d_placeholder.py
+│   └── viewport_3d_placeholder.py  # placeholder actual — sin cambios en la fase 6.0
 └── resources/icons/*.svg
 ```
+
+Diseñado (fase 6.0), no creado todavía — llega en la fase 6.1, ver
+`docs/ThreeDViewerDesign.md` y `docs/ThreeDViewerImplementationPlan.md`:
+
+```
+presentation/desktop/
+├── viewer/                          # visor 3D — hermano de panels/models/workers, NO de infrastructure
+│   ├── __init__.py
+│   ├── widget.py                    # Packing3DViewer(QWidget): contrato público + fallback
+│   ├── scene_controller.py          # Plotter de PyVista, actores, cámara, picking, selección
+│   ├── scene_builder.py             # PackingResult + load_units_by_id -> SceneModel (sin VTK/Qt)
+│   ├── color_registry.py            # SKU -> QColor determinista entre ejecuciones
+│   ├── models.py                    # SceneModel, PlacementVisualModel (dataclasses)
+│   └── constants.py                 # paleta, opacidades, grosores — config. visual centralizada
+└── panels/
+    └── selection_details_panel.py   # detalle de la caja seleccionada
+```
+
+`viewer/` depende de `domain` (igual que el resto de
+`presentation/desktop`) y de `PyVista`/`PyVistaQt` (nueva dependencia
+de terceros, todavía no instalada — ADR-0010). **No** depende de
+`cargo_optimizer.optimization`: recibe siempre un `PackingResult` ya
+calculado (`display_result(result, load_units_by_id)`), nunca ejecuta
+el motor — ver ADR-0011. Esta restricción no la impone hoy
+`import-linter` de forma automática (`presentation` puede importar
+legítimamente `optimization`, como ya hace
+`workers/optimization_worker.py`): es disciplina de diseño, documentada
+aquí y en `CLAUDE.md`.
 
 Todos los modelos y paneles pueden importar `cargo_optimizer.domain`
 (está por debajo de `presentation` en la regla de dependencia) — de

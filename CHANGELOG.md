@@ -4,6 +4,63 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Este proyecto aún no ha alcanzado la versión 1.0; el versionado 0.x
 puede incluir cambios estructurales entre versiones menores.
 
+## [0.8.1] - 2026-07-15
+
+Sesión exclusivamente documental (fase 6.0). Ningún código funcional
+cambió — por eso el bump es de versión de parche, no menor, mismo
+criterio que la fase 4.0 (0.5.0 → 0.5.1). Sin dependencias nuevas
+instaladas; `domain`, `geometry`, `rules` y `optimization` sin ningún
+cambio (verificado con `git diff` vacío en los cuatro paquetes antes
+del commit).
+
+### Added
+
+- `docs/ThreeDViewerDesign.md`: diseño completo del futuro visor 3D —
+  evaluación formal de PyVista+PyVistaQt frente a VTK directo,
+  `QOpenGLWidget` propio y VisPy; arquitectura de
+  `presentation/desktop/viewer/` (seis archivos, no los diez
+  originalmente sugeridos, con criterio explícito de cuándo separar
+  los tres que se fusionan en 6.1); contrato de `Packing3DViewer`;
+  `SceneModel`/`PlacementVisualModel`; cómo `SceneBuilder` resuelve
+  SKU/nombre/color de cada `Placement` (mapping `UUID -> LoadUnit`
+  entregado junto al resultado, mismo patrón que `UnpackedUnit` desde
+  la fase 5.1); sistema de coordenadas (sin permutar ejes); LoadingSpace
+  y Placements; colores (determinismo real entre ejecuciones, no con
+  `hash()` de Python); cámara; picking y selección con prevención de
+  ciclos de señal; filtros dentro/fuera de 6.1; integración con
+  `MainWindow`; rendimiento (expectativas razonadas, no medidas);
+  temas; captura de imagen y animación futuras; fallback sin 3D
+  disponible; riesgos de empaquetado; estrategia de pruebas; decisiones
+  descartadas; revisión crítica de 8 preguntas.
+- `docs/ThreeDViewerImplementationPlan.md`: reparto en fase 6.1
+  (mínimo funcional: dependencia, widget real, LoadingSpace,
+  placements, cámara, color por SKU, selección, panel de detalles,
+  integración con `MainWindow`, tests), fase 6.2 (filtros, etiquetas,
+  modos de color, vistas predefinidas, captura de imagen) y fase 6.3
+  (animación, capas, cortes, explosión, optimizaciones de escala).
+- `docs/ADR/ADR-0010-tecnologia-del-visor-3d.md`: confirma PyVista +
+  PyVistaQt frente a las tres alternativas evaluadas, con riesgos
+  aceptados explícitos (empaquetado, renderizado offscreen no
+  garantizado, compatibilidad de versiones por confirmar).
+- `docs/ADR/ADR-0011-desacoplo-visor-y-fallback.md`: API del visor
+  basada en `PackingResult` ya calculado (nunca ejecuta el motor);
+  fallback informativo cuando 3D no está disponible, con todos los
+  métodos públicos convertidos en no-op seguros.
+
+### Changed
+
+- `docs/Architecture.md`: añadida la estructura diseñada (no creada)
+  de `presentation/desktop/viewer/`, hermana de `panels/`/`models/`/
+  `workers/`.
+- `docs/Roadmap.md`: corrige la fila original de la fase 6 (decía
+  "`infrastructure` (adaptador VTK)"; el visor pertenece a
+  `presentation/desktop/viewer/`, no a `infrastructure`) y la subdivide
+  en 6.0 (diseño, completada), 6.1/6.2/6.3 (implementación, pendientes)
+  — mismo criterio que las fases 2, 4 y 5.
+- `CLAUDE.md`: nueva sección de invariantes para el futuro
+  `presentation/desktop/viewer/` (desacoplo del motor, fallback,
+  determinismo de color, no permutar ejes).
+
 ## [0.8.0] - 2026-07-15
 
 Fase 5.1: conecta la interfaz de escritorio de la fase 5.0 con el
