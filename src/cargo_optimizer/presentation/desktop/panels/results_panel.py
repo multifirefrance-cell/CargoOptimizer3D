@@ -8,9 +8,10 @@ muestra el conteo, como resumen numérico.
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QFormLayout, QLabel, QWidget
+from PySide6.QtWidgets import QFormLayout, QLabel, QVBoxLayout, QWidget
 
 _EMPTY = "—"
+_STALE_MESSAGE = "⚠ El resultado anterior fue invalidado porque el proyecto cambió."
 
 
 class ResultsPanel(QWidget):
@@ -19,6 +20,11 @@ class ResultsPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("resultsPanel")
+
+        self._stale_label = QLabel(_STALE_MESSAGE, self)
+        self._stale_label.setObjectName("resultsStaleLabel")
+        self._stale_label.setWordWrap(True)
+        self._stale_label.setVisible(False)
 
         self._requested_label = QLabel(_EMPTY, self)
         self._packed_label = QLabel(_EMPTY, self)
@@ -30,17 +36,22 @@ class ResultsPanel(QWidget):
         self._status_label = QLabel(_EMPTY, self)
         self._warnings_label = QLabel(_EMPTY, self)
 
-        layout = QFormLayout(self)
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.addRow("Cantidad solicitada", self._requested_label)
+        form.addRow("Cantidad cargada", self._packed_label)
+        form.addRow("Cantidad pendiente", self._pending_label)
+        form.addRow("Peso", self._weight_label)
+        form.addRow("Volumen", self._volume_label)
+        form.addRow("Utilización", self._utilization_label)
+        form.addRow("Tiempo", self._time_label)
+        form.addRow("Estado", self._status_label)
+        form.addRow("Avisos", self._warnings_label)
+
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 4, 8, 4)
-        layout.addRow("Cantidad solicitada", self._requested_label)
-        layout.addRow("Cantidad cargada", self._packed_label)
-        layout.addRow("Cantidad pendiente", self._pending_label)
-        layout.addRow("Peso", self._weight_label)
-        layout.addRow("Volumen", self._volume_label)
-        layout.addRow("Utilización", self._utilization_label)
-        layout.addRow("Tiempo", self._time_label)
-        layout.addRow("Estado", self._status_label)
-        layout.addRow("Avisos", self._warnings_label)
+        layout.addWidget(self._stale_label)
+        layout.addLayout(form)
 
     def clear(self) -> None:
         for label in (
@@ -55,6 +66,11 @@ class ResultsPanel(QWidget):
             self._warnings_label,
         ):
             label.setText(_EMPTY)
+        self.set_stale(False)
+
+    def set_stale(self, stale: bool) -> None:
+        """Muestra u oculta el aviso de "resultado invalidado" (fase 7.0)."""
+        self._stale_label.setVisible(stale)
 
     def set_results(
         self,

@@ -20,11 +20,13 @@ importar nada de `viewer/` más allá de ese widget y su modelo visual
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from datetime import datetime
 from pathlib import Path
-from uuid import UUID
+from typing import Any
+from uuid import UUID, uuid4
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QByteArray, QSize, Qt
 from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
@@ -32,6 +34,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QLabel,
     QMainWindow,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QSplitter,
@@ -41,8 +44,11 @@ from PySide6.QtWidgets import (
 )
 
 from cargo_optimizer import __version__
+from cargo_optimizer.domain.exceptions import DomainValidationError, DuplicateSkuError
 from cargo_optimizer.domain.load_unit import LoadUnit
 from cargo_optimizer.domain.packing_result import PackingResult
+from cargo_optimizer.domain.project import CargoProject
+from cargo_optimizer.infrastructure.persistence import ProjectFileError, ProjectFileRepository
 from cargo_optimizer.optimization import GreedyExtremePointStrategy, PackingProgress, PackingRequest
 from cargo_optimizer.optimization.exceptions import PackingRequestValidationError
 from cargo_optimizer.presentation.desktop.icons import icon
@@ -74,6 +80,11 @@ _SPLITTER_LEFT_WORK = "leftWork"
 _HEADER_PRODUCT_TABLE = "productTable"
 _ENGINE_LABEL = f"Motor: {GreedyExtremePointStrategy.name}"
 
+_PROJECT_FILE_FILTER = "Proyectos CargoOptimizer3D (*.cargo3d)"
+_PROJECT_FILE_EXTENSION = ".cargo3d"
+_UNTITLED_PROJECT_NAME = "Proyecto sin guardar"
+_RESULT_INVALIDATED_MESSAGE = "El resultado anterior fue invalidado porque el proyecto cambió."
+
 STATE_READY = "listo"
 STATE_PREPARING = "preparando"
 STATE_OPTIMIZING = "optimizando"
@@ -88,13 +99,22 @@ class MainWindow(QMainWindow):
     def __init__(self, settings: AppSettings | None = None) -> None:
         super().__init__()
         self._settings = settings or AppSettings()
-        self._project_name = "Proyecto sin guardar"
+        self._project_repository = ProjectFileRepository()
         self._optimization_worker: OptimizationWorker | None = None
         self._last_load_units_by_id: dict[UUID, LoadUnit] = {}
         self._cancel_requested = False
         self._run_start_time = 0.0
 
-        self.setWindowTitle(f"CargoOptimizer3D v{__version__}")
+        # Estado de proyecto (fase 7.0 — persistencia).
+        self._current_project_id: UUID = uuid4()
+        self._current_project_path: Path | None = None
+        self._project_created_at: datetime | None = None
+        self._project_notes: str = ""
+        self._last_result: PackingResult | None = None
+        self._is_dirty: bool = False
+        self._result_stale: bool = False
+        self._suspend_change_tracking: bool = False
+
         self.resize(1280, 800)
 
         self._build_panels()
@@ -105,8 +125,13 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self._build_status_bar()
 
-        self._restore_ui_state()
+        self._suspend_change_tracking = True
+        try:
+            self._restore_ui_state()
+        finally:
+            self._suspend_change_tracking = False
         self.viewer_widget.set_dark_theme(self._settings.theme() == THEME_DARK)
+        self._update_window_title()
 
     # ------------------------------------------------------------------
     # Construcción de la interfaz
@@ -125,6 +150,13 @@ class MainWindow(QMainWindow):
 
         self.project_tree_panel.section_activated.connect(self._on_project_section_activated)
         self.viewer_widget.placement_selected.connect(self._on_placement_selected)
+
+        self.loading_space_form_panel.changed.connect(self._on_project_data_changed)
+        product_model = self.product_table_panel.model
+        product_model.dataChanged.connect(self._on_project_data_changed)
+        product_model.rowsInserted.connect(self._on_project_data_changed)
+        product_model.rowsRemoved.connect(self._on_project_data_changed)
+        product_model.modelReset.connect(self._on_project_data_changed)
 
     def _build_dock_widgets(self) -> None:
         self.project_tree_dock = QDockWidget("Proyecto", self)
@@ -181,9 +213,14 @@ class MainWindow(QMainWindow):
     def _build_actions(self) -> None:
         self.action_new = self._make_action("new", "&Nuevo", "Ctrl+N", self._on_new_project)
         self.action_open = self._make_action("open", "&Abrir…", "Ctrl+O", self._on_open_project)
-        self.action_save = self._make_action("save", "&Guardar", "Ctrl+S", self._on_save_project)
+        self.action_save = self._make_action(
+            "save", "&Guardar", "Ctrl+S", lambda: self._on_save_project()
+        )
         self.action_save_as = self._make_action(
-            "save", "Guardar &como…", "Ctrl+Shift+S", self._stub("Guardar como")
+            "save", "Guardar &como…", "Ctrl+Shift+S", lambda: self._on_save_project_as()
+        )
+        self.action_close_project = self._make_action(
+            "cancel", "&Cerrar proyecto", None, self._on_close_project
         )
         self.action_import = self._make_action("import", "&Importar…", None, self._on_import)
         self.action_export = self._make_action("import", "&Exportar…", None, self._stub("Exportar"))
@@ -316,8 +353,12 @@ class MainWindow(QMainWindow):
         file_menu = menu_bar.addMenu("&Archivo")
         file_menu.addAction(self.action_new)
         file_menu.addAction(self.action_open)
+        self.menu_recent_projects = QMenu("Proyectos &recientes", self)
+        self.menu_recent_projects.aboutToShow.connect(self._rebuild_recent_projects_menu)
+        file_menu.addMenu(self.menu_recent_projects)
         file_menu.addAction(self.action_save)
         file_menu.addAction(self.action_save_as)
+        file_menu.addAction(self.action_close_project)
         file_menu.addSeparator()
         file_menu.addAction(self.action_import)
         file_menu.addAction(self.action_export)
@@ -409,7 +450,7 @@ class MainWindow(QMainWindow):
         self._progress_bar.setVisible(False)
 
         self._progress_time_label = QLabel("", self)
-        self._project_status_label = QLabel(self._project_name, self)
+        self._project_status_label = QLabel(self._project_display_name(), self)
         self._engine_status_label = QLabel(_ENGINE_LABEL, self)
         self._state_status_label = QLabel("", self)
         self._set_state(STATE_READY)
@@ -426,41 +467,156 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _on_new_project(self) -> None:
-        model = self.product_table_panel.model
-        model.remove_rows_at(list(range(model.rowCount())))
-        self._project_name = "Proyecto sin guardar"
-        self._project_status_label.setText(self._project_name)
-        self.viewer_widget.clear_scene()
-        self.selection_details_panel.clear()
+        if not self._confirm_discard_unsaved_changes():
+            return
+        self._reset_to_blank_project()
         self.statusBar().showMessage("Nuevo proyecto creado.", _STATUS_MESSAGE_MS)
 
+    def _on_close_project(self) -> None:
+        if not self._confirm_discard_unsaved_changes():
+            return
+        self._reset_to_blank_project()
+        self.statusBar().showMessage("Proyecto cerrado.", _STATUS_MESSAGE_MS)
+
+    def _reset_to_blank_project(self) -> None:
+        self._suspend_change_tracking = True
+        try:
+            model = self.product_table_panel.model
+            model.remove_rows_at(list(range(model.rowCount())))
+            self.results_panel.clear()
+            self.unpacked_table_panel.model.clear()
+            self.warnings_panel.clear()
+            self.viewer_widget.clear_scene()
+            self.selection_details_panel.clear()
+        finally:
+            self._suspend_change_tracking = False
+
+        self._current_project_id = uuid4()
+        self._current_project_path = None
+        self._project_created_at = None
+        self._project_notes = ""
+        self._last_result = None
+        self._last_load_units_by_id = {}
+        self._result_stale = False
+        self._mark_clean()
+
     def _on_open_project(self) -> None:
-        path, _selected_filter = QFileDialog.getOpenFileName(
+        if not self._confirm_discard_unsaved_changes():
+            return
+        path_str, _selected_filter = QFileDialog.getOpenFileName(
             self,
             "Abrir proyecto",
             self._settings.last_directory(),
-            "Proyectos CargoOptimizer3D (*.cargo3d);;Todos los archivos (*)",
+            f"{_PROJECT_FILE_FILTER};;Todos los archivos (*)",
         )
-        if not path:
+        if not path_str:
             return
-        self._remember_directory_of(path)
-        self.statusBar().showMessage(
-            "Apertura de proyectos: disponible en una próxima versión.", _NOT_IMPLEMENTED_MESSAGE_MS
-        )
+        self._open_project_from_path(Path(path_str))
 
-    def _on_save_project(self) -> None:
-        path, _selected_filter = QFileDialog.getSaveFileName(
-            self,
-            "Guardar proyecto",
-            self._settings.last_directory(),
-            "Proyectos CargoOptimizer3D (*.cargo3d)",
-        )
-        if not path:
+    def _open_project_from_path(self, path: Path) -> None:
+        try:
+            loaded = self._project_repository.load(path)
+        except ProjectFileError as exc:
+            self._show_error("No se pudo abrir el proyecto", str(exc))
             return
-        self._remember_directory_of(path)
-        self.statusBar().showMessage(
-            "Guardado de proyectos: disponible en una próxima versión.", _NOT_IMPLEMENTED_MESSAGE_MS
+
+        self._suspend_change_tracking = True
+        try:
+            self.loading_space_form_panel.set_loading_space(loaded.project.loading_space)
+            self.product_table_panel.model.set_load_units(list(loaded.project.load_units))
+            self._project_notes = loaded.project.notes
+            self._current_project_id = loaded.project.id
+            self._project_created_at = loaded.metadata.created_at
+            self._last_load_units_by_id = {unit.id: unit for unit in loaded.project.load_units}
+            self._last_result = loaded.project.latest_result
+            self._result_stale = bool(loaded.presentation_state.get("result_stale", False))
+
+            self.selection_details_panel.clear()
+            if self._last_result is not None:
+                self._populate_results(self._last_result)
+                self.viewer_widget.display_result(self._last_result, self._last_load_units_by_id)
+            else:
+                self.results_panel.clear()
+                self.unpacked_table_panel.model.clear()
+                self.warnings_panel.clear()
+                self.viewer_widget.clear_scene()
+            self.results_panel.set_stale(self._result_stale)
+
+            ui_state = loaded.presentation_state.get("ui_state")
+            if isinstance(ui_state, dict):
+                self._apply_ui_state(ui_state)
+        finally:
+            self._suspend_change_tracking = False
+
+        self._current_project_path = path
+        self._mark_clean()
+        self._remember_directory_of(str(path))
+        self._settings.add_recent_project_file(str(path))
+        self.log_panel.append_entry(f"Proyecto abierto: {path}")
+        self.statusBar().showMessage(f"Proyecto abierto: {path.name}", _STATUS_MESSAGE_MS)
+
+    def _on_save_project(self) -> bool:
+        if self._current_project_path is None:
+            return self._on_save_project_as()
+        return self._save_to_path(self._current_project_path)
+
+    def _on_save_project_as(self) -> bool:
+        path_str, _selected_filter = QFileDialog.getSaveFileName(
+            self, "Guardar proyecto como", self._settings.last_directory(), _PROJECT_FILE_FILTER
         )
+        if not path_str:
+            return False
+        path = Path(path_str)
+        if path.suffix.lower() != _PROJECT_FILE_EXTENSION:
+            path = path.with_suffix(_PROJECT_FILE_EXTENSION)
+        return self._save_to_path(path)
+
+    def _save_to_path(self, path: Path) -> bool:
+        loading_space = self.loading_space_form_panel.build_loading_space()
+        if loading_space is None:
+            self._show_warning(
+                "Espacio de carga incompleto",
+                "Define un espacio de carga válido antes de guardar el proyecto.",
+            )
+            return False
+
+        try:
+            project = CargoProject(
+                id=self._current_project_id,
+                name=path.stem,
+                loading_space=loading_space,
+                load_units=self.product_table_panel.model.load_units(),
+                latest_result=self._last_result,
+                notes=self._project_notes,
+            )
+        except (DomainValidationError, DuplicateSkuError) as exc:
+            self._show_warning("Proyecto inválido", str(exc))
+            return False
+
+        presentation_state: dict[str, Any] = {
+            "result_stale": self._result_stale,
+            "ui_state": self._collect_ui_state(),
+        }
+        try:
+            metadata = self._project_repository.save(
+                project,
+                path,
+                application_version=__version__,
+                presentation_state=presentation_state,
+                created_at=self._project_created_at,
+            )
+        except ProjectFileError as exc:
+            self._show_error("No se pudo guardar el proyecto", str(exc))
+            return False
+
+        self._current_project_path = path
+        self._project_created_at = metadata.created_at
+        self._mark_clean()
+        self._remember_directory_of(str(path))
+        self._settings.add_recent_project_file(str(path))
+        self.log_panel.append_entry(f"Proyecto guardado: {path}")
+        self.statusBar().showMessage(f"Proyecto guardado: {path.name}", _STATUS_MESSAGE_MS)
+        return True
 
     def _on_import(self) -> None:
         path, _selected_filter = QFileDialog.getOpenFileName(
@@ -478,6 +634,42 @@ class MainWindow(QMainWindow):
 
     def _remember_directory_of(self, file_path: str) -> None:
         self._settings.set_last_directory(str(Path(file_path).parent))
+
+    def _rebuild_recent_projects_menu(self) -> None:
+        self.menu_recent_projects.clear()
+        existing = [p for p in self._settings.recent_project_files() if Path(p).is_file()]
+        if len(existing) != len(self._settings.recent_project_files()):
+            self._settings.set_recent_project_files(existing)
+
+        if not existing:
+            empty_action = self.menu_recent_projects.addAction("(sin proyectos recientes)")
+            empty_action.setEnabled(False)
+            return
+
+        for file_path in existing:
+            action = self.menu_recent_projects.addAction(Path(file_path).name)
+            action.setToolTip(file_path)
+            action.triggered.connect(
+                lambda checked=False, p=file_path: self._on_open_recent_project(p)
+            )
+        self.menu_recent_projects.addSeparator()
+        clear_action = self.menu_recent_projects.addAction("Limpiar lista")
+        clear_action.triggered.connect(self._on_clear_recent_projects)
+
+    def _on_open_recent_project(self, path_str: str) -> None:
+        path = Path(path_str)
+        if not path.is_file():
+            self._show_warning("Archivo no encontrado", f"'{path}' ya no existe.")
+            self._settings.set_recent_project_files(
+                [p for p in self._settings.recent_project_files() if p != path_str]
+            )
+            return
+        if not self._confirm_discard_unsaved_changes():
+            return
+        self._open_project_from_path(path)
+
+    def _on_clear_recent_projects(self) -> None:
+        self._settings.set_recent_project_files([])
 
     def _on_project_section_activated(self, section: str) -> None:
         self.statusBar().showMessage(f"Sección: {section}", _STATUS_MESSAGE_MS)
@@ -594,6 +786,7 @@ class MainWindow(QMainWindow):
         self._last_load_units_by_id = {unit.id: unit for unit in request.load_units}
         self._cancel_requested = False
         self._run_start_time = time.monotonic()
+        self._result_stale = False
 
         self._set_state(STATE_PREPARING)
         self._set_running_controls_enabled(False)
@@ -640,9 +833,12 @@ class MainWindow(QMainWindow):
         self._progress_time_label.setText(f"{progress.elapsed_seconds:.1f} s")
 
     def _on_optimization_finished(self, result: PackingResult) -> None:
+        self._last_result = result
+        self._result_stale = False
         self._populate_results(result)
         self.selection_details_panel.clear()
         self.viewer_widget.display_result(result, self._last_load_units_by_id)
+        self._mark_dirty()
         self._set_state(STATE_FINISHED)
         message = (
             "Optimización cancelada." if self._cancel_requested else "Optimización finalizada."
@@ -684,6 +880,7 @@ class MainWindow(QMainWindow):
             result.unpacked_units, self._last_load_units_by_id
         )
         self.warnings_panel.set_warnings(result.warnings)
+        self.results_panel.set_stale(self._result_stale)
 
     def _set_running_controls_enabled(self, enabled: bool) -> None:
         for action in (
@@ -738,7 +935,121 @@ class MainWindow(QMainWindow):
         )
         self._settings.sync()
 
+    # ------------------------------------------------------------------
+    # Ciclo de vida del proyecto (fase 7.0 — persistencia)
+    # ------------------------------------------------------------------
+
+    def _project_display_name(self) -> str:
+        if self._current_project_path is not None:
+            return self._current_project_path.stem
+        return _UNTITLED_PROJECT_NAME
+
+    def _update_window_title(self) -> None:
+        marker = "*" if self._is_dirty else ""
+        self.setWindowTitle(
+            f"CargoOptimizer3D v{__version__} — {self._project_display_name()}{marker}"
+        )
+        if hasattr(self, "_project_status_label"):
+            self._project_status_label.setText(f"{self._project_display_name()}{marker}")
+
+    def _mark_dirty(self) -> None:
+        if self._suspend_change_tracking:
+            return
+        self._is_dirty = True
+        self._update_window_title()
+
+    def _mark_clean(self) -> None:
+        self._is_dirty = False
+        self._update_window_title()
+
+    def _on_project_data_changed(self, *_args: object) -> None:
+        """Conectado a cambios de productos/espacio (fase 7.0).
+
+        No existe todavía un panel de configuración de reglas de
+        negocio (son fijas dentro de `rules`, sin controles de usuario
+        en esta fase), así que solo productos y espacio pueden disparar
+        esto — el mismo principio se aplicaría a un futuro panel de
+        reglas sin cambiar esta lógica.
+        """
+        if self._suspend_change_tracking:
+            return
+        self._mark_dirty()
+        if self._last_result is not None and not self._result_stale:
+            self._result_stale = True
+            self.results_panel.set_stale(True)
+            self.log_panel.append_entry(_RESULT_INVALIDATED_MESSAGE)
+            self.statusBar().showMessage(_RESULT_INVALIDATED_MESSAGE, _STATUS_MESSAGE_MS)
+
+    def _confirm_discard_unsaved_changes(self) -> bool:
+        """`True` si es seguro continuar (sin cambios, o el usuario ya decidió qué hacer)."""
+        if not self._is_dirty:
+            return True
+        response = QMessageBox.question(
+            self,
+            "Cambios sin guardar",
+            f"'{self._project_display_name()}' tiene cambios sin guardar. "
+            "¿Deseas guardarlos antes de continuar?",
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
+        )
+        if response == QMessageBox.StandardButton.Cancel:
+            return False
+        if response == QMessageBox.StandardButton.Save:
+            return self._on_save_project()
+        return True
+
+    def _collect_ui_state(self) -> dict[str, Any]:
+        return {
+            "theme": self._settings.theme(),
+            "splitters": {
+                _SPLITTER_MAIN: self._encode_bytes(self.main_splitter.saveState()),
+                _SPLITTER_WORK_AREA: self._encode_bytes(self.work_area_splitter.saveState()),
+                _SPLITTER_LEFT_WORK: self._encode_bytes(self.left_work_splitter.saveState()),
+            },
+            "docks_visible": {
+                "projectTreeDock": self.project_tree_dock.isVisible(),
+                "selectionDetailsDock": self.selection_details_dock.isVisible(),
+            },
+        }
+
+    def _apply_ui_state(self, ui_state: Mapping[str, Any]) -> None:
+        theme = ui_state.get("theme")
+        if isinstance(theme, str) and theme in (THEME_LIGHT, THEME_DARK):
+            self._set_theme(theme)
+
+        splitters = ui_state.get("splitters")
+        if isinstance(splitters, dict):
+            self._restore_splitter_from_state(self.main_splitter, splitters.get(_SPLITTER_MAIN))
+            self._restore_splitter_from_state(
+                self.work_area_splitter, splitters.get(_SPLITTER_WORK_AREA)
+            )
+            self._restore_splitter_from_state(
+                self.left_work_splitter, splitters.get(_SPLITTER_LEFT_WORK)
+            )
+
+        docks_visible = ui_state.get("docks_visible")
+        if isinstance(docks_visible, dict):
+            if "projectTreeDock" in docks_visible:
+                self.project_tree_dock.setVisible(bool(docks_visible["projectTreeDock"]))
+            if "selectionDetailsDock" in docks_visible:
+                self.selection_details_dock.setVisible(bool(docks_visible["selectionDetailsDock"]))
+
+    @staticmethod
+    def _encode_bytes(value: QByteArray) -> str:
+        return bytes(value.toBase64().data()).decode("ascii")
+
+    @staticmethod
+    def _restore_splitter_from_state(splitter: QSplitter, encoded: object) -> None:
+        if not isinstance(encoded, str) or not encoded:
+            return
+        splitter.restoreState(QByteArray.fromBase64(encoded.encode("ascii")))
+
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 (nombre impuesto por Qt)
+        if not self._confirm_discard_unsaved_changes():
+            event.ignore()
+            return
         worker = self._optimization_worker
         if worker is not None and worker.isRunning():
             worker.cancellation_token.cancel()

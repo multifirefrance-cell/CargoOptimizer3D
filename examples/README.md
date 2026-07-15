@@ -1,9 +1,15 @@
 # Ejemplos
 
-Esta carpeta contendrá proyectos y scripts de ejemplo que demuestren el
-uso real del SDK de CargoOptimizer3D (`from cargo_optimizer import
-Optimizer`) sobre casos concretos: un contenedor marítimo estándar, un
-camión, una bodega con Load Units irregulares, etc.
+Proyectos y scripts de ejemplo que demuestran el uso real de
+CargoOptimizer3D sobre casos concretos.
 
-Todavía no contiene ningún ejemplo porque el motor de optimización
-(fase 4) aún no existe. Se irá poblando a partir de esa fase.
+## `example_project.cargo3d`
+
+Proyecto de ejemplo (fase 7.0): un contenedor de 20 pies con tres Load
+Units representativos (una caja individual, un pallet sin apilamiento,
+una caja frágil) y un `PackingResult` real calculado con
+`greedy_extreme_point_v1` (24/24 unidades cargadas). Generado con el
+propio `ProjectFileRepository` — no escrito a mano — para garantizar
+que es un archivo `.cargo3d` válido y abrible directamente desde
+CargoOptimizer3D (`Archivo → Abrir…`). Ver `docs/ProjectFiles.md` para
+el detalle del formato.

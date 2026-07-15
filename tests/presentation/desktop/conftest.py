@@ -17,7 +17,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
 from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from cargo_optimizer.presentation.desktop.settings import AppSettings
 
@@ -39,3 +39,25 @@ def app_settings(tmp_path: Path, qapp: QApplication) -> AppSettings:
     ini_path = str(tmp_path / "test_settings.ini")
     qsettings = QSettings(ini_path, QSettings.Format.IniFormat)
     return AppSettings(qsettings)
+
+
+@pytest.fixture(autouse=True)
+def _no_blocking_question_dialog(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Red de seguridad: `QMessageBox.question` nunca debe abrir un diálogo real en esta suite.
+
+    Desde la fase 7.0, `MainWindow.closeEvent`/`_on_new_project`/etc.
+    llaman a `QMessageBox.question` cuando hay cambios sin guardar (ver
+    `_confirm_discard_unsaved_changes`). Bajo la plataforma `offscreen`
+    un diálogo real se queda esperando un clic que nunca llega y cuelga
+    el proceso de pytest. El valor por defecto aquí es "Descartar" (la
+    opción menos sorprendente para una prueba que no pidió guardar
+    explícitamente); cualquier prueba que necesite otra respuesta
+    (Guardar/Cancelar) sobrescribe este parche con su propio
+    `monkeypatch.setattr(QMessageBox, "question", ...)`, que gana por
+    aplicarse después.
+    """
+
+    def _fake(*_args: object, **_kwargs: object) -> QMessageBox.StandardButton:
+        return QMessageBox.StandardButton.Discard
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(_fake))

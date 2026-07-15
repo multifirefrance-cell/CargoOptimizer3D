@@ -18,7 +18,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from cargo_optimizer.presentation.desktop.main_window import MainWindow
 from cargo_optimizer.presentation.desktop.settings import AppSettings
@@ -33,6 +33,15 @@ def _wait_until_worker_finishes(
         app.processEvents()
         time.sleep(0.005)
     assert window._optimization_worker is None, "El worker no terminó dentro del tiempo esperado"
+
+
+def _allow_close_without_saving(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Responde "Descartar" al preguntar por cambios sin guardar (fase 7.0), ver `closeEvent`."""
+
+    def _fake(*args: object, **_kwargs: object) -> QMessageBox.StandardButton:
+        return QMessageBox.StandardButton.Discard
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(_fake))
 
 
 def test_main_window_creates_viewer_and_details_dock(
@@ -110,6 +119,7 @@ def test_run_optimization_clears_viewer_and_details_panel(
     assert "scene" in clear_calls
     assert "details" in clear_calls
     _wait_until_worker_finishes(qapp, window)
+    _allow_close_without_saving(monkeypatch)
     window.close()
 
 
@@ -136,6 +146,7 @@ def test_optimization_finished_displays_result_in_viewer(
     assert set(load_units_by_id.keys()) == {
         unit.id for unit in window.product_table_panel.model.load_units()
     }
+    _allow_close_without_saving(monkeypatch)
     window.close()
 
 

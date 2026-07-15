@@ -4,6 +4,70 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Este proyecto aún no ha alcanzado la versión 1.0; el versionado 0.x
 puede incluir cambios estructurales entre versiones menores.
 
+## [0.10.0] - 2026-07-15
+
+Persistencia completa de proyectos en archivos `.cargo3d` (fase 7.0):
+un usuario puede crear un proyecto, guardarlo, cerrar la aplicación y
+reabrirlo días después para continuar exactamente donde lo dejó. Ver
+`docs/ProjectFiles.md` para el formato completo.
+
+### Added
+
+- `infrastructure/persistence/`: `exceptions.py`
+  (`ProjectFileError`/`ProjectFileNotFoundError`/
+  `ProjectFileCorruptError`/`UnsupportedSchemaVersionError`/
+  `ProjectFileWriteError`), `serialization.py` (traducción explícita
+  campo a campo entre cada entidad de `domain` y un `dict` JSON-seguro,
+  sin `pickle`/`jsonpickle`/`__dict__`), `project_file_repository.py`
+  (`ProjectFileRepository.save`/`load`/`validate`/`backup`, escritura
+  atómica vía archivo temporal + `os.replace`, backup automático de un
+  nivel antes de sobrescribir, infraestructura de migración de
+  `schema_version` con solo "1.0" implementada).
+- Formato `.cargo3d`: JSON UTF-8 legible, con `format_name`,
+  `schema_version`, `application_version`, `created_at` (conservado
+  entre guardados sucesivos), `modified_at`, el `CargoProject`
+  completo (espacio, todos los Load Units, último `PackingResult` con
+  sus `Placement`/`UnpackedUnit`/avisos) y un `presentation_state`
+  opaco para `infrastructure` (tema, splitters, docks visibles, si el
+  resultado está desactualizado).
+- `MainWindow`: ciclo de vida completo de proyecto — Nuevo, Abrir,
+  Guardar, Guardar como, Cerrar proyecto, menú de Proyectos recientes
+  (últimos 10, vía `QSettings`, elimina rutas inexistentes al abrir el
+  menú), título con `*` cuando hay cambios sin guardar, confirmación
+  Guardar/Descartar/Cancelar antes de cerrar la ventana o cambiar de
+  proyecto con cambios pendientes, invalidación automática del
+  resultado al modificar productos o espacio ("El resultado anterior
+  fue invalidado porque el proyecto cambió.", sin volver a ejecutar el
+  algoritmo), restauración completa al abrir (espacio, productos,
+  resultado, panel de resultados, tabla de no cargados, avisos, visor
+  3D, tema, disposición de paneles).
+- `LoadingSpaceFormPanel.set_loading_space()` y señal `changed`;
+  `ProductTableModel.set_load_units()`; `ResultsPanel.set_stale()`;
+  `AppSettings.recent_project_files`/`add_recent_project_file`/
+  `set_recent_project_files`.
+- 48 pruebas nuevas: `tests/infrastructure/persistence/` (round-trip
+  de serialización, round-trip completo de archivo, errores tipados,
+  archivos corruptos, versión de esquema futura, backups, escritura
+  atómica, `validate` sin reconstrucción completa) y
+  `tests/presentation/desktop/test_main_window_project_persistence.py`
+  (ciclo de vida completo en `MainWindow`). Nueva fixture `autouse` en
+  `tests/presentation/desktop/conftest.py`
+  (`_no_blocking_question_dialog`) que evita que cualquier prueba se
+  cuelgue esperando un `QMessageBox.question` real bajo `offscreen`.
+- `docs/ProjectFiles.md`, `examples/example_project.cargo3d` (generado
+  con el propio `ProjectFileRepository`, no escrito a mano).
+
+### Fixed
+
+- `LoadingSpaceFormPanel.build_loading_space()` perdía el tipo de los
+  enums `LoadingSpaceCategory`/`DoorPosition`: `QComboBox.currentData()`
+  los devolvía como `str` planos (Qt aplana subclases de `str` como
+  estos `StrEnum` al pasar por `QVariant`), lo cual era invisible hasta
+  que la nueva serialización JSON necesitó `.value` por primera vez.
+  Corregido reconstruyendo explícitamente el enum
+  (`LoadingSpaceCategory(...)`/`DoorPosition(...)`) a partir del valor
+  devuelto por Qt.
+
 ## [0.9.0] - 2026-07-15
 
 Implementación mínima funcional del visor 3D (fase 6.1), exactamente

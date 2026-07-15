@@ -25,9 +25,10 @@ aplicación web, sin reescribirse.
 src/cargo_optimizer/
 ├── domain/          # Entidades y reglas de negocio puras. Sin dependencias externas.
 ├── application/     # Casos de uso, orquestación, puertos hacia infraestructura.
-├── infrastructure/  # Adaptadores concretos: SQLite, Excel, PDF, VTK (fases posteriores).
+├── infrastructure/  # Adaptadores concretos: persistence/ (proyectos .cargo3d, JSON),
+│                    #   SQLite/catálogos, Excel, PDF (fases posteriores).
 └── presentation/
-    └── desktop/     # Aplicación de escritorio (PySide6). Solo presentación.
+    └── desktop/     # Aplicación de escritorio (PySide6). Incluye viewer/ (visor 3D).
 ```
 
 La regla de dependencia (una capa solo importa las que están por
@@ -69,7 +70,9 @@ python -m venv .venv
 
 ## Estado del proyecto
 
-Fin de fase 1: infraestructura y arquitectura congeladas (ver
-`docs/Roadmap.md`). El motor geométrico, las reglas de restricciones,
-el motor de optimización, la visualización 3D, la persistencia y los
-reportes se implementarán en fases posteriores.
+Fin de fase 7.0: motor de optimización, interfaz de escritorio, visor
+3D y persistencia de proyectos (`.cargo3d`, JSON versionado) ya
+implementados — ver `docs/Roadmap.md` para el detalle fase a fase y
+`docs/ProjectFiles.md` para el formato de archivo de proyecto.
+Catálogos SQLite, reportes (Excel/PDF) e integración ERP se
+implementarán en fases posteriores.

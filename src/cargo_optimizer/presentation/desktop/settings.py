@@ -25,6 +25,9 @@ _KEY_MAIN_WINDOW_STATE = "mainWindow/state"
 _KEY_LAST_DIRECTORY = "session/lastDirectory"
 _KEY_LAST_LOADING_SPACE_PROFILE = "session/lastLoadingSpaceProfile"
 _KEY_THEME = "appearance/theme"
+_KEY_RECENT_PROJECT_FILES = "session/recentProjectFiles"
+
+MAX_RECENT_PROJECT_FILES = 10
 
 
 def _splitter_key(name: str) -> str:
@@ -93,6 +96,29 @@ class AppSettings:
 
     def set_theme(self, theme: str) -> None:
         self._settings.setValue(_KEY_THEME, theme)
+
+    def recent_project_files(self) -> list[str]:
+        """Últimos proyectos abiertos/guardados, más reciente primero.
+
+        `QSettings` puede devolver un único string en vez de una lista
+        de un elemento (comportamiento de fábrica en algunos backends),
+        de ahí la normalización explícita.
+        """
+        value = self._settings.value(_KEY_RECENT_PROJECT_FILES, [])
+        if isinstance(value, str):
+            return [value] if value else []
+        if isinstance(value, list):
+            return [str(item) for item in value]
+        return []
+
+    def set_recent_project_files(self, paths: list[str]) -> None:
+        self._settings.setValue(_KEY_RECENT_PROJECT_FILES, paths[:MAX_RECENT_PROJECT_FILES])
+
+    def add_recent_project_file(self, path: str) -> None:
+        """Inserta `path` al frente de la lista (sin duplicados), recortando a las últimas 10."""
+        existing = [p for p in self.recent_project_files() if p != path]
+        existing.insert(0, path)
+        self.set_recent_project_files(existing)
 
     def sync(self) -> None:
         self._settings.sync()

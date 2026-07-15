@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -140,6 +141,8 @@ def _profiles() -> dict[str, _Profile]:
 class LoadingSpaceFormPanel(QWidget):
     """Formulario del Loading Space actual, con perfiles predefinidos y modo personalizado."""
 
+    changed = Signal()
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("loadingSpaceForm")
@@ -187,6 +190,17 @@ class LoadingSpaceFormPanel(QWidget):
 
         self._profile_combo.currentTextChanged.connect(self._on_profile_changed)
         self._no_weight_limit_check.toggled.connect(self._on_no_weight_limit_toggled)
+
+        self._profile_combo.currentTextChanged.connect(self.changed)
+        self._name_edit.textChanged.connect(self.changed)
+        self._category_combo.currentIndexChanged.connect(self.changed)
+        self._length_spin.valueChanged.connect(self.changed)
+        self._width_spin.valueChanged.connect(self.changed)
+        self._height_spin.valueChanged.connect(self.changed)
+        self._no_weight_limit_check.toggled.connect(self.changed)
+        self._max_weight_spin.valueChanged.connect(self.changed)
+        self._door_combo.currentIndexChanged.connect(self.changed)
+        self._notes_edit.textChanged.connect(self.changed)
 
         self._profile_combo.setCurrentText("Contenedor 20'")
         self._apply_profile("Contenedor 20'")
@@ -250,6 +264,29 @@ class LoadingSpaceFormPanel(QWidget):
         if profile_name and self._profile_combo.findText(profile_name) >= 0:
             self._profile_combo.setCurrentText(profile_name)
 
+    def set_loading_space(self, space: LoadingSpace) -> None:
+        """Vuelca `space` en el formulario en modo "Personalizado" (apertura de un proyecto).
+
+        Un `LoadingSpace` guardado no coincide necesariamente con
+        ninguno de los perfiles predefinidos, así que siempre se
+        muestra como "Personalizado" — el mismo modo que ya desbloquea
+        los campos para edición libre.
+        """
+        self._profile_combo.setCurrentText(PROFILE_CUSTOM)
+        self._name_edit.setText(space.name)
+        index = self._category_combo.findData(space.category)
+        if index >= 0:
+            self._category_combo.setCurrentIndex(index)
+        self._length_spin.setValue(space.internal_dimensions.length_cm)
+        self._width_spin.setValue(space.internal_dimensions.width_cm)
+        self._height_spin.setValue(space.internal_dimensions.height_cm)
+        self._no_weight_limit_check.setChecked(space.max_weight_kg is None)
+        self._max_weight_spin.setValue(space.max_weight_kg or 0.0)
+        door_index = self._door_combo.findData(space.door_position)
+        if door_index >= 0:
+            self._door_combo.setCurrentIndex(door_index)
+        self._notes_edit.setPlainText(space.notes)
+
     def build_loading_space(self) -> LoadingSpace | None:
         """Construye el `LoadingSpace` actual, o `None` si los campos no son válidos todavía."""
         try:
@@ -258,13 +295,17 @@ class LoadingSpaceFormPanel(QWidget):
             )
             return LoadingSpace(
                 name=self._name_edit.text(),
-                category=self._category_combo.currentData(),
+                # `currentData()` pasa por `QVariant`: un `StrEnum` (subclase de
+                # `str`) vuelve como `str` plano, no como el enum original —
+                # se reconstruye explícitamente para no guardar strings sueltos
+                # en un campo tipado como enum (ver serialización, fase 7.0).
+                category=LoadingSpaceCategory(self._category_combo.currentData()),
                 internal_dimensions=Dimensions3D(
                     self._length_spin.value(), self._width_spin.value(), self._height_spin.value()
                 ),
-                door_position=self._door_combo.currentData(),
+                door_position=DoorPosition(self._door_combo.currentData()),
                 max_weight_kg=max_weight,
                 notes=self._notes_edit.toPlainText(),
             )
-        except DomainValidationError:
+        except (DomainValidationError, ValueError):
             return None

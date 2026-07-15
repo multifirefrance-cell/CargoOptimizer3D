@@ -62,8 +62,11 @@ presentation  →  infrastructure  →  application  →  optimization  →  rul
 - **`application`**: casos de uso, orquestación, puertos (interfaces)
   hacia `infrastructure`. Depende de `domain`, `geometry`, `rules` y
   `optimization`.
-- **`infrastructure`**: adaptadores concretos (SQLAlchemy, openpyxl,
-  ReportLab) que implementan los puertos de `application`.
+- **`infrastructure`**: adaptadores concretos que implementan los
+  puertos de `application`. Desde la fase 7.0 incluye
+  `infrastructure/persistence/` (proyectos `.cargo3d`, JSON propio —
+  ver `docs/ProjectFiles.md`); SQLAlchemy/SQLite (catálogos), openpyxl,
+  ReportLab llegan en fases posteriores.
 - **`presentation`**: mecanismos de entrega (`presentation/desktop`
   hoy con PySide6 y, dentro de él, `presentation/desktop/viewer/` con
   PyVista/PyVistaQt para el visor 3D — ver `docs/ThreeDViewer.md`;
@@ -88,7 +91,10 @@ ninguna dependencia de UI instalada (ADR-0003).
 - PyVista + PyVistaQt (sobre VTK) para el visor 3D
   (`presentation/desktop/viewer/`, implementado en la fase 6.1 — ver
   `docs/ThreeDViewer.md`).
-- SQLite + SQLAlchemy para persistencia (fase 7, aún no implementada).
+- JSON propio (`json` de la biblioteca estándar) para persistencia de
+  proyectos (`.cargo3d`, fase 7.0, implementada — ver
+  `docs/ProjectFiles.md`). SQLite + SQLAlchemy para catálogos (fase
+  7.x, aún no implementada).
 - openpyxl para Excel y ReportLab para PDF (fase 8, aún no
   implementadas).
 - Ruff para lint (incluye orden de imports). Black para formateo. No
@@ -106,7 +112,8 @@ src/cargo_optimizer/
 ├── rules/           # Motor de reglas de negocio. Depende de domain y, si hace falta, de geometry.
 ├── optimization/    # Motor de empaquetado real. Depende de domain, geometry y rules.
 ├── application/     # Casos de uso, orquestación, puertos hacia infraestructura.
-├── infrastructure/  # Adaptadores concretos: SQLite, Excel, PDF (fases posteriores).
+├── infrastructure/  # Adaptadores concretos: persistence/ (proyectos .cargo3d, JSON, fase 7.0),
+│                    #   SQLite/catálogos, Excel, PDF (fases posteriores).
 └── presentation/
     └── desktop/     # Aplicación de escritorio PySide6. Incluye viewer/ (visor 3D, PyVista/PyVistaQt).
 tests/               # Pruebas, en espejo de la estructura de src/, + tests/integration/
@@ -137,8 +144,9 @@ userdata/            # Datos generados por el usuario en tiempo de ejecución. N
    interfaz de escritorio — 5.1. Conectar el motor con la interfaz —
    6.0. Diseño del visor 3D — 6.1. Visor 3D: implementación mínima —
    6.2. Visor 3D: filtros/etiquetas/vistas/captura — 6.3. Visor 3D:
-   animación y escala — 7. Persistencia — 8. Reportes — 9. Integración
-   ERP — 10. Versión comercial.
+   animación y escala — 7.0. Persistencia de proyectos (.cargo3d,
+   JSON) — 7.x. Persistencia de catálogos (SQLite) — 8. Reportes — 9.
+   Integración ERP — 10. Versión comercial.
 
 La fase 2 original ("Motor geométrico") se dividió en 2.1 (modelo de
 dominio puro) y 2.2 (motor geométrico) para poder completar el modelo
@@ -155,41 +163,46 @@ no pertenece a `infrastructure` (como decía la fila original) sino a
 `docs/Roadmap.md`, secciones "Nota sobre la numeración de las fases 5 y
 6" y "Nota sobre la numeración y el paquete de la fase 6".
 
-Estado actual: **visor 3D implementado y en uso** (fin de fase 6.1).
-`presentation/desktop/viewer/` existe con sus seis módulos
-(`models.py`, `constants.py`, `color_registry.py`, `scene_builder.py`,
-`scene_controller.py`, `widget.py`) más
-`panels/selection_details_panel.py`; `pyvista`, `pyvistaqt` y `vtk`
-son dependencias instaladas; `viewport_3d_placeholder.py` se eliminó,
-sustituido por `Packing3DViewer` (con fallback propio integrado). Ver
-`docs/ThreeDViewer.md` para el detalle completo de la implementación
-real (arquitectura, API, selección, cámara, temas, fallback,
-integración con `MainWindow`, rendimiento medido, limitaciones) y
-`docs/ThreeDViewerDesign.md`/`docs/ThreeDViewerImplementationPlan.md`
-para el diseño original y las dos desviaciones puntuales frente a él
-(`set_dark_theme(enabled: bool)` en vez de `apply_theme(theme: str)`;
-`focus_placement` implementado en 6.1 en vez de aplazado a 6.2).
-**Hallazgo técnico documentado**: `pyvistaqt.QtInteractor` provoca un
-segmentation fault nativo de VTK en Windows bajo la plataforma Qt
-`offscreen` (no capturable con `try/except`) — mitigado detectando la
-plataforma antes de construir el interactor; nunca reintroducir un
-`try/except` como única defensa en ese punto sin releer
-`docs/ThreeDViewer.md`, sección 10. `domain`/`geometry`/`rules`/
-`optimization` siguen intactos (verificado con `git diff` vacío antes
-del commit). La interfaz ejecuta el motor real de principio a fin
-desde la fase 5.1: `presentation/desktop` construye una
-`PackingRequest` desde el formulario de Loading Space y la tabla de
-productos, la ejecuta en `OptimizationWorker` (un `QThread` dedicado,
-`presentation/desktop/workers/`), vuelca el `PackingResult` en cuatro
-pestañas del panel inferior (Resumen, No cargados, Avisos, Registro) y
-ahora también lo muestra en el visor 3D, sin bloquear nunca el hilo de
-la interfaz. No implementar todavía filtros/etiquetas/modos de
-color/vistas predefinidas/captura de imagen (fase 6.2),
-animación/capas/cortes/escala (fase 6.3), SQLite, Excel, PDF,
-importación/exportación real, Undo/Redo, ni volver a tocar
-`domain`/`geometry`/`rules`/`optimization` salvo bug objetivo y
-demostrable, hasta que se indique explícitamente. Ver `docs/Roadmap.md`
-para el detalle fase a fase.
+Estado actual: **persistencia de proyectos implementada y en uso**
+(fin de fase 7.0). Un usuario puede crear un proyecto, cargarlo con
+espacio y productos, optimizar, guardar en un archivo `.cargo3d`
+(JSON UTF-8 versionado, `infrastructure/persistence/`), cerrar la
+aplicación y reabrir el mismo archivo días después para continuar
+exactamente donde lo dejó (espacio, productos, último resultado,
+visor 3D, tema, disposición de paneles). Ver `docs/ProjectFiles.md`
+para el formato completo, `ProjectFileRepository` (`save`/`load`/
+`validate`/`backup`, escritura atómica, backup de un nivel,
+infraestructura de migración de `schema_version` preparada con solo
+"1.0" implementada). `MainWindow` implementa el ciclo de vida completo
+(nuevo/abrir/guardar/guardar como/cerrar proyecto/recientes, título con
+`*` cuando hay cambios sin guardar, confirmación
+Guardar/Descartar/Cancelar al cerrar o cambiar de proyecto con cambios
+pendientes) y la invalidación automática del resultado al modificar
+productos o espacio ("El resultado anterior fue invalidado porque el
+proyecto cambió." — nunca se re-ejecuta el algoritmo automáticamente).
+`domain`/`geometry`/`rules`/`optimization` siguen intactos; el único
+hallazgo real de esta fase
+(`LoadingSpaceFormPanel.build_loading_space` perdía el tipo de los
+enums `LoadingSpaceCategory`/`DoorPosition` al leerlos de un
+`QComboBox` vía `QVariant`) se corrigió en `presentation`, documentado
+en `docs/ProjectFiles.md`, sección 9.
+
+El visor 3D (fase 6.1) sigue disponible y ahora también se restaura al
+abrir un proyecto guardado — ver `docs/ThreeDViewer.md` para su
+implementación completa (arquitectura, selección, cámara, temas,
+fallback, el hallazgo del segmentation fault de VTK bajo `offscreen`,
+etc., sin cambios en esta fase). La interfaz ejecuta el motor real de
+principio a fin desde la fase 5.1: construye una `PackingRequest`
+desde el formulario de Loading Space y la tabla de productos, la
+ejecuta en `OptimizationWorker` (`QThread` dedicado), vuelca el
+`PackingResult` en cuatro pestañas del panel inferior y en el visor
+3D, sin bloquear nunca el hilo de la interfaz. No implementar todavía
+filtros/etiquetas/modos de color/vistas predefinidas/captura de imagen
+del visor (fase 6.2), animación/capas/cortes/escala del visor (fase
+6.3), catálogos SQLite (fase 7.x), Excel, PDF, importación/exportación
+real, Undo/Redo, ni volver a tocar `domain`/`geometry`/`rules`/
+`optimization` salvo bug objetivo y demostrable, hasta que se indique
+explícitamente. Ver `docs/Roadmap.md` para el detalle fase a fase.
 
 ## Invariantes del modelo de dominio (no romper sin ADR)
 
@@ -404,11 +417,18 @@ fases 5.0 y 5.1.
   edición libre. No cambiar este bloqueo a una edición siempre libre
   sin decisión explícita — es intencional, para que un perfil
   estándar nunca quede editado por accidente.
-- Persistencia de interfaz exclusivamente vía `QSettings`
-  (`presentation/desktop/settings.py::AppSettings`), nunca SQLite ni
-  otro almacenamiento: eso pertenece a la fase 7 (persistencia de
-  proyectos), un concepto distinto de "recordar el estado de la
-  ventana".
+- Persistencia de estado **de la aplicación** (geometría/estado de la
+  ventana, último directorio, último perfil de espacio, tema, lista de
+  recientes) exclusivamente vía `QSettings`
+  (`presentation/desktop/settings.py::AppSettings`) — nunca dentro de
+  un archivo `.cargo3d`. Persistencia de estado **de un proyecto**
+  (espacio, productos, resultado, y una fotografía de tema/splitters/
+  docks visibles en el momento de guardar) exclusivamente en el
+  archivo `.cargo3d` vía `ProjectFileRepository`
+  (`infrastructure/persistence/`, fase 7.0) — nunca en `QSettings`. Ver
+  `docs/ProjectFiles.md`, sección 4, para el desacoplo exacto entre
+  ambos (`presentation_state` es un `dict` opaco para
+  `infrastructure`, construido e interpretado solo por `MainWindow`).
 - Los recursos (`resources/icons/*.svg`) viven dentro de
   `presentation/desktop/`, cargados por ruta de archivo directa
   (`icons.py::icon`) — no hay pipeline `.qrc`/`pyside6-rcc` todavía;
@@ -482,6 +502,65 @@ ADR-0010 (tecnología) y ADR-0011 (desacoplo y fallback).
   Windows, no una excepción Python capturable — ver
   `docs/ThreeDViewer.md`, sección 10. No revertir esta comprobación
   proactiva a un `try/except` reactivo sin releer ese hallazgo.
+
+## Invariantes de persistencia de proyectos (`infrastructure/persistence/`, implementado en la fase 7.0, no romper sin ADR)
+
+Formato completo documentado en `docs/ProjectFiles.md`.
+
+- `infrastructure/persistence` depende únicamente de `domain`; nunca
+  de `presentation`, ni de PySide6/Qt. `presentation_state` es un
+  `Mapping[str, Any]` opaco que `ProjectFileRepository` serializa y
+  deserializa sin interpretar — construirlo/leerlo es responsabilidad
+  exclusiva de `MainWindow`. No introducir tipos de Qt (`QByteArray`,
+  `QColor`, etc.) dentro de `serialization.py`/
+  `project_file_repository.py`.
+- Serialización explícita campo a campo (`serialization.py`), nunca
+  `pickle`, `jsonpickle`, ni volcado de `__dict__`. Añadir un campo
+  nuevo a una entidad de `domain` exige actualizar a mano su función
+  `_to_dict`/`_from_dict` correspondiente — no hay generación
+  automática que lo haga por ti, y olvidarlo no falla en tiempo de
+  tipado (los diccionarios son `dict[str, Any]`), solo en tests o en
+  producción.
+- Escritura siempre atómica: archivo temporal en el mismo directorio
+  del destino + `os.replace`. Nunca escribir directamente sobre la
+  ruta final con `path.write_text(...)` — un corte a mitad de la
+  escritura dejaría un `.cargo3d` corrupto en vez de, en el peor caso,
+  un `.tmp` huérfano.
+- `save()` hace un backup de un solo nivel (`<archivo>.cargo3d.bak`)
+  antes de sobrescribir un archivo existente — no un historial de
+  versiones. No confundir esto con control de versiones; si se
+  necesita en el futuro, es una decisión nueva con su propio ADR.
+- `schema_version` (versión del formato del archivo) es un campo
+  completamente distinto de `application_version` (qué build de
+  CargoOptimizer3D lo escribió). La compatibilidad se decide siempre
+  por `schema_version`, nunca comparando `application_version`.
+  `_ensure_supported_schema_version` en `project_file_repository.py`
+  es el único punto de extensión para migraciones futuras — hoy solo
+  acepta `"1.0"`; añadir una versión nueva exige escribir la función de
+  migración real, no solo ampliar el conjunto de versiones aceptadas.
+- `CargoProject.name` se deriva del nombre del archivo (`path.stem`) al
+  guardar — no existe todavía un campo de "nombre de proyecto"
+  editable independiente del nombre de archivo. No inventar ese
+  concepto sin necesidad real confirmada (ver "Mejoras futuras" en
+  `docs/ProjectFiles.md`).
+- `MainWindow` nunca vuelve a ejecutar `PackingEngine` automáticamente
+  al detectar que el proyecto cambió después de calcular un resultado:
+  solo marca el resultado como desactualizado
+  (`_result_stale`/`ResultsPanel.set_stale`) e informa con el mensaje
+  exacto "El resultado anterior fue invalidado porque el proyecto
+  cambió." — recalcular automáticamente sería sorprendente (el usuario
+  no pidió optimizar) y potencialmente costoso (ver
+  `docs/OptimizerPerformance.md`).
+- Las pruebas de `presentation/desktop` tienen una red de seguridad
+  `autouse` en `conftest.py`
+  (`_no_blocking_question_dialog`) que sustituye `QMessageBox.question`
+  por una respuesta "Descartar" por defecto — sin ella, cualquier
+  prueba que deje la ventana con cambios sin guardar y llame a
+  `window.close()` se cuelga esperando un diálogo real bajo la
+  plataforma `offscreen`. No eliminar esa fixture; si una prueba
+  necesita otra respuesta (Guardar/Cancelar), debe sobrescribirla
+  localmente con su propio `monkeypatch`, nunca depender de que el
+  diálogo real responda.
 
 ## Reglas de trabajo con el asistente
 

@@ -12,6 +12,7 @@ se aplica — nunca se deja el modelo en un estado inconsistente.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
@@ -84,6 +85,12 @@ class ProductTableModel(QAbstractTableModel):
 
     def load_units(self) -> tuple[LoadUnit, ...]:
         return tuple(self._load_units)
+
+    def set_load_units(self, load_units: Sequence[LoadUnit]) -> None:
+        """Reemplaza toda la tabla (apertura de un proyecto guardado)."""
+        self.beginResetModel()
+        self._load_units = list(load_units)
+        self.endResetModel()
 
     def rowCount(  # noqa: N802
         self, parent: QModelIndex | QPersistentModelIndex = QModelIndex()  # noqa: B008

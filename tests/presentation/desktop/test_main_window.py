@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QApplication, QToolBar
+import pytest
+from PySide6.QtWidgets import QApplication, QMessageBox, QToolBar
 
 from cargo_optimizer import __version__
 from cargo_optimizer.presentation.desktop.main_window import MainWindow
 from cargo_optimizer.presentation.desktop.settings import _KEY_MAIN_WINDOW_GEOMETRY, AppSettings
+
+
+def _allow_close_without_saving(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Responde "Descartar" al preguntar por cambios sin guardar (fase 7.0), ver `closeEvent`."""
+
+    def _fake(*args: object, **_kwargs: object) -> QMessageBox.StandardButton:
+        return QMessageBox.StandardButton.Discard
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(_fake))
+
 
 _EXPECTED_MENUS = (
     "&Archivo",
@@ -22,7 +33,8 @@ _EXPECTED_MENUS = (
 
 def test_main_window_creates_without_error(qapp: QApplication, app_settings: AppSettings) -> None:
     window = MainWindow(app_settings)
-    assert window.windowTitle() == f"CargoOptimizer3D v{__version__}"
+    assert window.windowTitle().startswith(f"CargoOptimizer3D v{__version__}")
+    assert "Proyecto sin guardar" in window.windowTitle()
     window.close()
 
 
@@ -63,18 +75,19 @@ def test_unimplemented_action_shows_status_message(
     qapp: QApplication, app_settings: AppSettings
 ) -> None:
     window = MainWindow(app_settings)
-    window.action_save_as.trigger()
+    window.action_export.trigger()
     assert "próxima versión" in window.statusBar().currentMessage()
     window.close()
 
 
 def test_new_product_action_adds_row_to_table(
-    qapp: QApplication, app_settings: AppSettings
+    qapp: QApplication, app_settings: AppSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     window = MainWindow(app_settings)
     initial_rows = window.product_table_panel.model.rowCount()
     window.action_new_product.trigger()
     assert window.product_table_panel.model.rowCount() == initial_rows + 1
+    _allow_close_without_saving(monkeypatch)
     window.close()
 
 

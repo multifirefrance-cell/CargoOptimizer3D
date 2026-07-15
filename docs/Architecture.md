@@ -18,7 +18,7 @@ entrega o cualquier detalle técnico externo.
 ┌─────────────────────────────────────────────────────────┐
 │ presentation   (desktop hoy; api / web en el futuro)     │
 ├─────────────────────────────────────────────────────────┤
-│ infrastructure (SQLite, Excel, PDF, VTK — fases 5/7/8)   │
+│ infrastructure (persistencia JSON — fase 7.0; SQLite/Excel/PDF — fases posteriores) │
 ├─────────────────────────────────────────────────────────┤
 │ application    (casos de uso, orquestación, puertos)     │
 ├─────────────────────────────────────────────────────────┤
@@ -55,9 +55,21 @@ exportadores, proveedores de render. Depende solo de `domain`.
 
 ### `infrastructure`
 
-Adaptadores concretos de los puertos definidos en `application`:
-SQLAlchemy/SQLite (fase 7), openpyxl/ReportLab (fase 8), VTK (fase 5).
-Vacío hasta que llegue cada fase. Depende de `application` y `domain`.
+Adaptadores concretos de los puertos definidos en `application`.
+Desde la fase 7.0 contiene `infrastructure/persistence/` (repositorio
+de proyectos `.cargo3d`, JSON propio — ver `docs/ProjectFiles.md`);
+SQLite/catálogos, openpyxl/ReportLab llegan en fases posteriores.
+Depende de `domain` (y de `application` cuando existan casos de uso
+reales que orquestar; `persistence` de momento solo necesita `domain`
+para reconstruir las entidades).
+
+```
+infrastructure/
+└── persistence/
+    ├── exceptions.py               # ProjectFileError y subclases tipadas
+    ├── serialization.py            # domain <-> dict, función a función, sin __dict__/pickle
+    └── project_file_repository.py  # ProjectFileRepository: save/load/validate/backup, atómico
+```
 
 ### `presentation`
 
@@ -77,7 +89,8 @@ Desde la fase 5.1, `presentation/desktop/` tiene esta forma:
 presentation/desktop/
 ├── app.py               # arranque: QApplication, tema, MainWindow
 ├── main_window.py        # MainWindow: menús, toolbar, splitters, dock, status bar,
-│                          #   construcción de PackingRequest y ciclo de vida del worker
+│                          #   construcción de PackingRequest, ciclo de vida del worker
+│                          #   y ciclo de vida completo del proyecto (.cargo3d, fase 7.0)
 ├── icons.py               # carga de resources/icons/*.svg como QIcon
 ├── style.py                # paletas claro/oscuro + QSS (aspecto industrial)
 ├── settings.py              # AppSettings: wrapper de QSettings, claves centralizadas

@@ -41,6 +41,22 @@ def _silence_message_box(monkeypatch: pytest.MonkeyPatch, method: str) -> list[t
     return calls
 
 
+def _allow_close_without_saving(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Evita que `window.close()` se cuelgue esperando un `QMessageBox.question` real.
+
+    Desde la fase 7.0, `MainWindow` pregunta antes de cerrar si hay
+    cambios sin guardar (ver `_confirm_discard_unsaved_changes`). Las
+    pruebas de esta suite no guardan a propósito (no es lo que están
+    probando), así que responden "Descartar" para poder cerrar la
+    ventana sin bloquear la suite bajo la plataforma `offscreen`.
+    """
+
+    def _fake(*args: object, **_kwargs: object) -> QMessageBox.StandardButton:
+        return QMessageBox.StandardButton.Discard
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(_fake))
+
+
 def test_run_optimization_without_products_shows_warning_and_does_not_run(
     qapp: QApplication, app_settings: AppSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -66,11 +82,12 @@ def test_run_optimization_with_invalid_custom_space_shows_warning(
 
     assert window._optimization_worker is None
     assert len(warnings) == 1
+    _allow_close_without_saving(monkeypatch)
     window.close()
 
 
 def test_run_optimization_executes_and_populates_results(
-    qapp: QApplication, app_settings: AppSettings
+    qapp: QApplication, app_settings: AppSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     window = MainWindow(app_settings)
     for _ in range(5):
@@ -95,11 +112,12 @@ def test_run_optimization_executes_and_populates_results(
     assert not window._progress_bar.isVisible()
     assert window._state_status_label.text() == "Estado: finalizado"
     assert "finalizada" in window.log_panel.text().lower()
+    _allow_close_without_saving(monkeypatch)
     window.close()
 
 
 def test_cancel_optimization_leaves_interface_consistent(
-    qapp: QApplication, app_settings: AppSettings
+    qapp: QApplication, app_settings: AppSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     window = MainWindow(app_settings)
     for _ in range(80):
@@ -120,6 +138,7 @@ def test_cancel_optimization_leaves_interface_consistent(
     assert window.loading_space_form_panel.isEnabled()
     assert not window._progress_bar.isVisible()
     assert "cancelaci" in window.log_panel.text().lower()
+    _allow_close_without_saving(monkeypatch)
     window.close()
 
 
@@ -147,7 +166,7 @@ def test_optimization_failed_shows_critical_message_and_logs(
 
 
 def test_unpacked_units_and_pending_count_populate_when_space_is_too_small(
-    qapp: QApplication, app_settings: AppSettings
+    qapp: QApplication, app_settings: AppSettings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     window = MainWindow(app_settings)
     window.loading_space_form_panel.set_current_profile_name(PROFILE_CUSTOM)
@@ -163,6 +182,7 @@ def test_unpacked_units_and_pending_count_populate_when_space_is_too_small(
 
     assert window.results_panel._pending_label.text() != "0"
     assert window.unpacked_table_panel.model.rowCount() > 0
+    _allow_close_without_saving(monkeypatch)
     window.close()
 
 
