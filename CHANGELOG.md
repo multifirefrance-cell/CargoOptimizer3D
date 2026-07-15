@@ -4,6 +4,59 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Este proyecto aún no ha alcanzado la versión 1.0; el versionado 0.x
 puede incluir cambios estructurales entre versiones menores.
 
+## [0.6.1] - 2026-07-14
+
+Fase 4.2: optimización de rendimiento del motor de packing. Sin
+cambios de arquitectura, dominio, `geometry` ni `rules`; sin nueva
+dependencia externa; misma API pública y mismo algoritmo
+`greedy_extreme_point_v1`.
+
+### Added
+
+- `docs/PerformanceBaseline.md`: metodología, línea base medida (10 y
+  100 instancias, escenario mixto realista) y perfilado real con
+  `cProfile` antes de optimizar.
+- `docs/OptimizerPerformance.md`: resultado real después de optimizar,
+  con la conclusión honesta de que **el objetivo obligatorio (5x para
+  100 instancias) no se alcanzó** (resultado real: ~1.3x), por qué
+  (perfilado real muestra que el 100% del coste restante vive dentro
+  de `RulesEngine.evaluate_placement`, fuera del alcance de esta fase),
+  y qué alternativas se evaluaron y descartaron (índice espacial,
+  precálculo de reglas independientes de posición/orientación).
+- `scripts/benchmark_optimizer.py`: benchmark manual reutilizable
+  (tamaños configurables, mediana/min/max, conteo de candidatos vía
+  modo diagnóstico, memoria pico con `tracemalloc`).
+- `src/cargo_optimizer/optimization/pruning.py`:
+  `prune_candidate_positions`, poda geométrica segura de puntos
+  candidatos (fuera de límites, o estrictamente interiores a una caja
+  existente) — nunca poda por heurística de "punto dominado".
+- `PackingState.accepted_boxes` y `PackingState.bounding_dimensions`:
+  caché incremental, actualizada en O(1) por `accept_placement`.
+- `scoring.bounding_volume_increment_from_dimensions`: camino rápido
+  que usa dimensiones ya conocidas en vez de recorrer los placements.
+- 11 pruebas nuevas: `test_state.py`, `test_pruning.py`,
+  `test_regression_greedy_extreme_point.py` (334 pruebas en total en
+  la suite automática).
+
+### Changed
+
+- `optimization/candidates.py::build_candidate` ya no recalcula el
+  bounding box desde cero por candidato (usa la caché de
+  `PackingState`), y solo calcula el *score* (soporte, incremento de
+  bounding volume, espacio residual) si la colocación es válida — un
+  candidato rechazado nunca se compara por *score*, así que calcularlo
+  era trabajo desperdiciado.
+- `docs/OptimizationEngine.md`, `docs/Architecture.md`,
+  `docs/Roadmap.md`: actualizados con los resultados reales de la fase
+  4.2, incluyendo el objetivo no cumplido.
+
+### Fixed
+
+- Ninguna corrección de comportamiento: esta fase es exclusivamente de
+  rendimiento. Los resultados (`packed_count`, razones de
+  `UnpackedUnit`, determinismo) son idénticos a la fase 4.1,
+  verificado por pruebas de regresión dedicadas.
+
 ## [0.6.0] - 2026-07-14
 
 ### Added

@@ -19,7 +19,7 @@ from cargo_optimizer.geometry.box import AxisAlignedBox
 from cargo_optimizer.geometry.support import support_ratio as compute_support_ratio
 from cargo_optimizer.optimization.models import CandidatePlacement, PhysicalLoadInstance
 from cargo_optimizer.optimization.scoring import (
-    bounding_volume_increment_cm3,
+    bounding_volume_increment_from_dimensions,
     local_residual_space_cm3,
     score_candidate,
 )
@@ -44,6 +44,18 @@ def orientation_fits_loading_space(orientation: Orientation, loading_space: Load
     )
 
 
+_REJECTED_CANDIDATE_SCORE: tuple[float, float, float, float, float, float, int, int] = (
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0,
+    0,
+)
+
+
 def build_candidate(
     instance: PhysicalLoadInstance,
     position: Position3D,
@@ -52,6 +64,7 @@ def build_candidate(
     loading_space: LoadingSpace,
     existing_placements: tuple[Placement, ...],
     existing_boxes: tuple[AxisAlignedBox, ...],
+    existing_bounding_dimensions: tuple[float, float, float],
     load_units_by_id: Mapping[UUID, LoadUnit],
     rules_engine: RulesEngine,
     minimum_support_ratio: float,
@@ -62,9 +75,18 @@ def build_candidate(
     No elige entre candidatos (eso es responsabilidad de la
     estrategia) ni duplica ninguna regla geométrica o de negocio: solo
     arma el `PlacementRuleContext` y delega en `RulesEngine`.
-    `existing_boxes` se recibe ya calculado (una vez por instancia, no
-    una vez por candidato) para no reconstruir la lista de cajas en
-    cada llamada.
+    `existing_boxes` y `existing_bounding_dimensions` se reciben ya
+    calculados (una vez por instancia o mantenidos incrementalmente en
+    `PackingState`, no una vez por candidato) para no reconstruirlos en
+    cada llamada — el recálculo por candidato fue el cuello de botella
+    nº 1 medido por perfilado real (ver `docs/PerformanceBaseline.md`).
+
+    El *score* (soporte, incremento de bounding volume, espacio
+    residual) solo se calcula si la colocación resulta permitida: un
+    candidato rechazado nunca se compara por *score* (ver
+    `GreedyExtremePointStrategy._process_instance`), así que calcularlo
+    sería trabajo desperdiciado — y es, en concreto, la parte más cara
+    de construir un candidato (soporte físico vía unión de rectángulos).
     """
     context = PlacementRuleContext(
         loading_space=loading_space,
@@ -79,23 +101,30 @@ def build_candidate(
     )
 
     candidate_box = AxisAlignedBox(position=position, dimensions=orientation.dimensions)
-    support = compute_support_ratio(candidate_box, existing_boxes)
-    volume_increment = bounding_volume_increment_cm3(
-        existing_placements, candidate_box.max_x, candidate_box.max_y, candidate_box.max_z
-    )
-    residual = local_residual_space_cm3(
-        loading_space, candidate_box.max_x, candidate_box.max_y, candidate_box.max_z
-    )
-    score = score_candidate(
-        position.z_cm,
-        position.x_cm,
-        position.y_cm,
-        support,
-        volume_increment,
-        residual,
-        orientation_order_index,
-        generation_index,
-    )
+
+    if evaluation.is_allowed:
+        support = compute_support_ratio(candidate_box, existing_boxes)
+        volume_increment = bounding_volume_increment_from_dimensions(
+            existing_bounding_dimensions,
+            candidate_box.max_x,
+            candidate_box.max_y,
+            candidate_box.max_z,
+        )
+        residual = local_residual_space_cm3(
+            loading_space, candidate_box.max_x, candidate_box.max_y, candidate_box.max_z
+        )
+        score = score_candidate(
+            position.z_cm,
+            position.x_cm,
+            position.y_cm,
+            support,
+            volume_increment,
+            residual,
+            orientation_order_index,
+            generation_index,
+        )
+    else:
+        score = _REJECTED_CANDIDATE_SCORE
 
     provisional_placement = Placement(
         load_unit_id=instance.load_unit.id,

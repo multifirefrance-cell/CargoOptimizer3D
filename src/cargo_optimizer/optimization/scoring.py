@@ -49,6 +49,30 @@ def bounding_volume_cm3(placements: Sequence[Placement]) -> float:
     return x * y * z
 
 
+def bounding_volume_increment_from_dimensions(
+    existing_dimensions: tuple[float, float, float],
+    candidate_max_x_cm: float,
+    candidate_max_y_cm: float,
+    candidate_max_z_cm: float,
+) -> float:
+    """Como `bounding_volume_increment_cm3`, a partir de dimensiones ya conocidas.
+
+    Evita recorrer los placements existentes cuando el llamador ya
+    mantiene `(max_x, max_y, max_z)` cacheado de forma incremental (ver
+    `PackingState.bounding_dimensions`). Es el camino usado en la
+    búsqueda real de candidatos, donde se invoca una vez por candidato
+    evaluado (no una vez por instancia): recorrer todos los placements
+    en cada llamada fue el cuello de botella nº 1 medido por perfilado
+    real (ver `docs/PerformanceBaseline.md`).
+    """
+    existing_x, existing_y, existing_z = existing_dimensions
+    current_volume = existing_x * existing_y * existing_z
+    new_x = max(existing_x, candidate_max_x_cm)
+    new_y = max(existing_y, candidate_max_y_cm)
+    new_z = max(existing_z, candidate_max_z_cm)
+    return (new_x * new_y * new_z) - current_volume
+
+
 def bounding_volume_increment_cm3(
     existing_placements: Sequence[Placement],
     candidate_max_x_cm: float,
@@ -61,13 +85,18 @@ def bounding_volume_increment_cm3(
     (`PackingResult.used_volume_cm3`, suma de volúmenes de cajas): esto
     es el volumen de la caja envolvente de todo el layout, que casi
     siempre es mayor que el volumen realmente ocupado.
+
+    Recorre `existing_placements` para obtener sus dimensiones; cuando
+    ya se conocen de antemano (camino caliente de la búsqueda de
+    candidatos), usar `bounding_volume_increment_from_dimensions`
+    directamente en su lugar.
     """
-    current_volume = bounding_volume_cm3(existing_placements)
-    existing_x, existing_y, existing_z = bounding_dimensions(existing_placements)
-    new_x = max(existing_x, candidate_max_x_cm)
-    new_y = max(existing_y, candidate_max_y_cm)
-    new_z = max(existing_z, candidate_max_z_cm)
-    return (new_x * new_y * new_z) - current_volume
+    return bounding_volume_increment_from_dimensions(
+        bounding_dimensions(existing_placements),
+        candidate_max_x_cm,
+        candidate_max_y_cm,
+        candidate_max_z_cm,
+    )
 
 
 def local_residual_space_cm3(

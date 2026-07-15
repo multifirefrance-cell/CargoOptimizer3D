@@ -128,9 +128,10 @@ userdata/            # Datos generados por el usuario en tiempo de ejecución. N
 
 0. Diseño completo — 1. Arquitectura — 2.1. Modelo de dominio puro —
    2.2. Motor geométrico — 3. Motor de restricciones — 4.0. Diseño del
-   motor de optimización — 4.1. Primer optimizador funcional — 5.
-   Visualización 3D — 6. Interfaz — 7. Persistencia — 8. Reportes — 9.
-   Integración ERP — 10. Versión comercial.
+   motor de optimización — 4.1. Primer optimizador funcional — 4.2.
+   Optimización de rendimiento del motor de packing — 5. Visualización
+   3D — 6. Interfaz — 7. Persistencia — 8. Reportes — 9. Integración
+   ERP — 10. Versión comercial.
 
 La fase 2 original ("Motor geométrico") se dividió en 2.1 (modelo de
 dominio puro) y 2.2 (motor geométrico) para poder completar el modelo
@@ -140,16 +141,22 @@ fase 4 se dividió igual, en 4.0 (diseño puro) y 4.1 (implementación),
 por el mismo motivo: no crear `optimization/` antes de haber diseñado
 qué contendrá.
 
-Estado actual: **primer optimizador funcional implementado** (fin de
-fase 4.1). `optimization` existe, con la estrategia
+Estado actual: **motor de optimización implementado y optimizado en lo
+seguro** (fin de fase 4.2). `optimization` existe, con la estrategia
 `greedy_extreme_point_v1` y la fachada `PackingEngine` ya exportada
-desde `cargo_optimizer`. No implementar todavía múltiples estrategias,
-algoritmo genético, beam search, índice espacial, visualización 3D,
-SQLite, Excel, PDF ni API, hasta que se indique explícitamente. Ver
-`docs/Roadmap.md` para el detalle fase a fase y
-`docs/OptimizationEngine.md` para el rendimiento real medido (peor de
-lo estimado en el diseño de fase 4.0 — motivo documentado, no un bug
-de `rules`/`geometry`).
+desde `cargo_optimizer`. La fase 4.2 añadió caché incremental de
+bounding box (`PackingState`) y poda geométrica segura de candidatos
+(`optimization/pruning.py`) sin cambiar el algoritmo, la API pública ni
+`rules`/`geometry`. **El objetivo de rendimiento de esa fase (5x más
+rápido para 100 instancias) no se alcanzó** (resultado real: ~1.3x):
+el perfilado real muestra que el coste restante vive dentro de
+`RulesEngine.evaluate_placement`, fuera del alcance autorizado de esa
+fase — ver `docs/OptimizerPerformance.md` para el detalle completo y
+las alternativas evaluadas y descartadas. No implementar todavía
+múltiples estrategias, algoritmo genético, beam search, índice
+espacial dentro de `rules`/`geometry`, visualización 3D, SQLite,
+Excel, PDF ni API, hasta que se indique explícitamente. Ver
+`docs/Roadmap.md` para el detalle fase a fase.
 
 ## Invariantes del modelo de dominio (no romper sin ADR)
 
@@ -277,12 +284,37 @@ conservado como historial).
 - Una excepción del `progress_callback` del usuario se convierte en
   advertencia (`PackingResult.warnings`) y la ejecución continúa;
   nunca se propaga ni corrompe el empaquetado.
-- **Rendimiento real es O(n³)-ish y notablemente peor de lo estimado
-  en el diseño de fase 4.0** (~35 s para 100 instancias, medido). No es
-  un bug de `rules` ni `geometry`: es el coste ya anticipado y pospuesto
-  a v0.7 (poda de candidatos) / v0.8 (índice espacial). No prometer
-  rendimiento distinto al documentado en `docs/OptimizationEngine.md`
-  sin haber implementado esas mejoras.
+- `PackingState.accepted_boxes` y `PackingState.bounding_dimensions`
+  (fase 4.2) son cachés incrementales, actualizadas únicamente dentro
+  de `accept_placement`: no reintroducir un recálculo desde cero de
+  bounding box por candidato (fue el cuello de botella nº 1 medido por
+  perfilado real antes de la fase 4.2, ver `docs/PerformanceBaseline.md`).
+- `optimization/pruning.py` solo poda un punto candidato cuando es
+  geométricamente **cierto** que ninguna orientación podrá colocarse
+  ahí (fuera de límites, o estrictamente interior a una caja
+  existente); nunca por heurística de "punto dominado". Un punto
+  podado siempre contribuye su código de violación garantizado
+  (`OUT_OF_BOUNDS`/`COLLISION`) al conjunto agregado de violaciones de
+  la instancia, para no alterar `_classify_unpacked_reason`. No relajar
+  esta garantía sin releer la prueba de corrección en el docstring del
+  propio módulo.
+- No filtrar `existing_placements` por proximidad espacial antes de
+  pasarlo a `PlacementRuleContext`: se evaluó explícitamente en la fase
+  4.2 y se descartó porque `stacking_rules.evaluate_supported_weight`
+  necesita conocer todo lo que descansa, directa o transitivamente,
+  sobre cada soporte en cualquier parte del layout, no solo lo cercano
+  al candidato.
+- **Rendimiento real sigue siendo O(n³)-ish tras la fase 4.2** (~80 s
+  para 100 instancias con el escenario mixto de referencia, ~1.3x más
+  rápido que antes de esa fase, no el 5x que era el objetivo
+  obligatorio). No es un bug de `optimization`: el perfilado real
+  (`docs/OptimizerPerformance.md`) muestra que el coste restante vive
+  dentro de `RulesEngine.evaluate_placement` (soporte, apilamiento,
+  peso soportado, colisión) — reducirlo de raíz exigiría una
+  estructura de datos espacial dentro de `rules`/`geometry`, fuera del
+  alcance de la fase 4.2. No prometer rendimiento distinto al
+  documentado en `docs/OptimizerPerformance.md` sin haber implementado
+  esa estructura, con ADR explícito.
 
 ## Reglas de trabajo con el asistente
 

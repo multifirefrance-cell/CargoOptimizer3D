@@ -15,7 +15,6 @@ from collections.abc import Callable
 
 from cargo_optimizer.domain.orientation import Orientation
 from cargo_optimizer.domain.packing_result import PackingResult
-from cargo_optimizer.geometry.box import box_from_placement
 from cargo_optimizer.geometry.candidate_points import generate_candidate_positions
 from cargo_optimizer.optimization.cancellation import CancellationToken
 from cargo_optimizer.optimization.candidates import build_candidate, orientation_fits_loading_space
@@ -28,6 +27,7 @@ from cargo_optimizer.optimization.models import (
     PhysicalLoadInstance,
 )
 from cargo_optimizer.optimization.ordering import order_instances
+from cargo_optimizer.optimization.pruning import prune_candidate_positions
 from cargo_optimizer.optimization.result_builder import ALGORITHM_NAME, build_packing_result
 from cargo_optimizer.optimization.state import PackingState
 from cargo_optimizer.optimization.strategy import StrategyCapabilities
@@ -100,6 +100,13 @@ class GreedyExtremePointStrategy:
 
         self._emit_progress(progress_callback, state, total, None, start_time)
 
+        warnings = state.warnings
+        if request.diagnostic_mode:
+            warnings = (
+                *warnings,
+                f"[diagnostic] candidates_generated={state.candidate_generation_count}",
+            )
+
         return build_packing_result(
             loading_space=request.loading_space,
             placements=state.placements,
@@ -107,7 +114,7 @@ class GreedyExtremePointStrategy:
             requested_count=total,
             load_units_by_id=load_units_by_id,
             execution_time_seconds=time.monotonic() - start_time,
-            warnings=state.warnings,
+            warnings=warnings,
         )
 
     def _process_instance(
@@ -148,11 +155,15 @@ class GreedyExtremePointStrategy:
             return
 
         existing_placements = state.placements
-        existing_boxes = tuple(box_from_placement(p) for p in existing_placements)
-        positions = generate_candidate_positions(existing_placements)
+        existing_boxes = state.accepted_boxes
+        existing_bounding_dimensions = state.bounding_dimensions
+        raw_positions = generate_candidate_positions(existing_placements)
+        positions, pruned_violation_codes = prune_candidate_positions(
+            raw_positions, request.loading_space, existing_boxes
+        )
 
         best: CandidatePlacement | None = None
-        violation_codes_seen: set[str] = set()
+        violation_codes_seen: set[str] = set(pruned_violation_codes)
         generation_index = 0
 
         for position in positions:
@@ -165,6 +176,7 @@ class GreedyExtremePointStrategy:
                     loading_space=request.loading_space,
                     existing_placements=existing_placements,
                     existing_boxes=existing_boxes,
+                    existing_bounding_dimensions=existing_bounding_dimensions,
                     load_units_by_id=state.load_units_by_id,
                     rules_engine=rules_engine,
                     minimum_support_ratio=request.minimum_support_ratio,

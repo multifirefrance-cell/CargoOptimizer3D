@@ -96,7 +96,10 @@ ADR-0007. `optimization`: motor de empaquetado real, con la estrategia
 `docs/OptimizationEngine.md` (implementación real),
 `docs/OptimizationEngineDesign.md` y
 `docs/GreedyLayerStrategyDesign.md` (diseño original de fase 4.0,
-conservados como historial), ADR-0008 y ADR-0009.
+conservados como historial), ADR-0008 y ADR-0009. La fase 4.2 optimizó
+el rendimiento interno de `optimization` (caché incremental de
+bounding box, poda de candidatos) sin cambiar esta estructura ni la API
+pública — ver `docs/OptimizerPerformance.md`.
 
 Se crean como hermanos de `domain` (no como subpaquetes de `domain` ni
 de `application`) porque son subsistemas sustanciales con algoritmos

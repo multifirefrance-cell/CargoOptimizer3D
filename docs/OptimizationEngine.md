@@ -1,11 +1,15 @@
-# Motor de optimización: implementación real (Fase 4.1)
+# Motor de optimización: implementación real (Fases 4.1-4.2)
 
 Este documento describe lo que **realmente existe** en
 `src/cargo_optimizer/optimization/`, a diferencia de
 `docs/OptimizationEngineDesign.md` y
 `docs/GreedyLayerStrategyDesign.md` (fase 4.0), que describían el
 diseño antes de implementarlo. Donde la implementación difiere del
-diseño, se indica explícitamente.
+diseño, se indica explícitamente. La fase 4.2 (optimización de
+rendimiento) añadió caché incremental de bounding box y poda segura de
+candidatos sin cambiar el algoritmo ni la API pública — ver
+`docs/OptimizerPerformance.md` para el detalle completo, incluyendo por
+qué el objetivo de rendimiento de esa fase no se alcanzó del todo.
 
 ## Componentes implementados
 
@@ -14,12 +18,13 @@ diseño, se indica explícitamente.
 | `exceptions.py` | `OptimizationError`, `PackingRequestValidationError`, `OptimizationInternalError` |
 | `codes.py` | `UnpackedReason` (`StrEnum`) |
 | `models.py` | `PackingRequest`, `PhysicalLoadInstance`, `PackingProgress`, `CandidatePlacement` (todos inmutables) |
-| `state.py` | `PackingState` (mutable, interno, nunca público) |
+| `state.py` | `PackingState` (mutable, interno, nunca público); cachea incrementalmente `accepted_boxes` y `bounding_dimensions` (fase 4.2) |
 | `cancellation.py` | `CancellationToken` (basado en `threading.Event`) |
 | `expander.py` | `expand_load_units` |
 | `ordering.py` | `order_instances` |
-| `scoring.py` | `bounding_dimensions`, `bounding_volume_cm3`, `bounding_volume_increment_cm3`, `local_residual_space_cm3`, `score_candidate` |
-| `candidates.py` | `orientation_fits_loading_space`, `build_candidate` |
+| `scoring.py` | `bounding_dimensions`, `bounding_volume_cm3`, `bounding_volume_increment_cm3` (recorre placements, uso puntual), `bounding_volume_increment_from_dimensions` (camino rápido, fase 4.2), `local_residual_space_cm3`, `score_candidate` |
+| `candidates.py` | `orientation_fits_loading_space`, `build_candidate` (solo calcula *score* si el candidato es válido, fase 4.2) |
+| `pruning.py` | `prune_candidate_positions` (poda segura de puntos candidatos, fase 4.2) |
 | `result_builder.py` | `build_packing_result` |
 | `strategy.py` | `PackingStrategy` (Protocol), `StrategyCapabilities` |
 | `greedy_extreme_point.py` | `GreedyExtremePointStrategy` (identificador `greedy_extreme_point_v1`) |
@@ -185,35 +190,37 @@ oculta.
 
 **Corrección sobre `docs/OptimizationEngineDesign.md`:** el diseño de
 fase 4.0 estimaba, antes de medir, "100 cajas: milisegundos a un par
-de segundos". La medición real en la máquina de referencia de esta
-fase es sustancialmente más lenta:
+de segundos". La medición real (fase 4.1, antes de optimizar) fue
+sustancialmente más lenta: ~0.2 s para 10 instancias, ~103 s para 100
+(escenario mixto realista), del orden de 41 minutos para 500
+(`docs/PerformanceBaseline.md`).
 
-| Cantidad de instancias | Tiempo medido |
-|---|---|
-| 10 | ~0.1 s |
-| 50 | ~5.3 s |
-| 100 | ~35 s |
-| 500 | del orden de una hora (no completado en la sesión; extrapolado) |
-
-El crecimiento observado es marcadamente cúbico, consistente con el
-análisis de cuellos de botella ya documentado en
-`docs/OptimizationEngineDesign.md`: cada candidato evaluado vuelve a
-recorrer `O(instancias ya colocadas)` dentro de `RulesEngine` (bounds,
-colisión, soporte, apilamiento, peso soportado), y el número de
-candidatos por instancia crece con el número de instancias ya
-colocadas — el producto es cúbico. Esto **no es un bug de `rules` ni
-de `geometry`**: es exactamente el coste que
-`docs/OptimizationEngineDesign.md` ya anticipaba y explícitamente
-pospuso a las fases v0.7 (poda de candidatos) y v0.8 (índice
-espacial), no a esta (v0.6, correctitud primero). No se modifica
-`rules` ni `geometry` para corregir esto en esta fase.
+La fase 4.2 aplicó las optimizaciones seguras posibles dentro de
+`optimization` (caché incremental de bounding box, omisión de *score*
+para candidatos rechazados, poda geométrica de puntos candidatos — ver
+`docs/OptimizerPerformance.md`), con resultado real de **~1.3x** para
+10 y 100 instancias — muy por debajo del objetivo obligatorio de 5x
+que se había fijado para esa fase. El perfilado real (`cProfile`,
+repetido después de optimizar) muestra que el 100% del tiempo restante
+vive dentro de `RulesEngine.evaluate_placement`
+(`find_direct_supporting_placements`, `evaluate_collision`,
+`evaluate_supported_weight`), no en el código propio de
+`optimization`, que quedó con coste propio prácticamente nulo. El
+crecimiento observado sigue siendo marcadamente peor que lineal: cada
+candidato evaluado recorre `O(instancias ya colocadas)` dentro de
+`RulesEngine`, y el número de candidatos por instancia también crece
+con el layout — el producto es cúbico. Esto **no es un bug de `rules`
+ni de `geometry`**: es un diseño ya documentado de la fase 3, y
+reducirlo de raíz requeriría una estructura de datos espacial dentro
+de `rules`/`geometry` mismos, fuera del alcance autorizado de la fase
+4.2 (ver `docs/OptimizerPerformance.md`, sección "Conclusión
+honesta").
 
 **Consecuencia práctica para la suite de pruebas:** el benchmark
 automático (`tests/optimization/test_performance.py`) solo cubre
 10/30/60 instancias (segundos en total). 100 y 500 se documentan aquí
 como medición manual, no como parte de la suite normal — incluir 500
-en la suite automática la haría tardar del orden de una hora, lo cual
-el propio encargo de esta fase pide evitar explícitamente.
+en la suite automática la haría tardar decenas de minutos.
 
 ## Ejemplo de uso
 
@@ -244,8 +251,10 @@ for unpacked in result.unpacked_units:
 
 ## Limitaciones actuales
 
-- Rendimiento O(n³)-ish real (medido más arriba); no apto para cientos
-  de instancias en tiempo interactivo con esta primera versión.
+- Rendimiento O(n³)-ish real (medido más arriba), incluso tras la
+  optimización de la fase 4.2; no apto para cientos de instancias en
+  tiempo interactivo con esta primera versión. Reducirlo de raíz
+  requeriría tocar `rules`/`geometry` (ver `docs/OptimizerPerformance.md`).
 - Una sola estrategia (`greedy_extreme_point_v1`); sin registro
   dinámico ni plugins.
 - Un único `LoadingSpace` por ejecución.

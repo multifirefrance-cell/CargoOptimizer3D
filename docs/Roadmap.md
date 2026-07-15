@@ -13,6 +13,7 @@ fase se adelanta a la anterior.
 | 3 | Motor de restricciones | `rules` (hermano de `domain`) | **Completada** |
 | 4.0 | Diseño del motor de optimización | Ninguno (solo documentación: `docs/OptimizationEngineDesign.md`, `docs/GreedyLayerStrategyDesign.md`, ADR-0008, ADR-0009) | **Completada** |
 | 4.1 | Primer optimizador funcional | `optimization` (hermano de `domain`) | **Completada** |
+| 4.2 | Optimización de rendimiento del motor de packing | `optimization` (mismos módulos, sin nuevo paquete) | **Completada** |
 | 5 | Visualización 3D | `infrastructure` (adaptador VTK) | Pendiente |
 | 6 | Interfaz | `presentation/desktop` (pantallas reales) | Pendiente |
 | 7 | Persistencia | `infrastructure` (adaptador SQLAlchemy/SQLite) | Pendiente |
@@ -55,21 +56,27 @@ arquitectura.
 
 ## Estado actual
 
-Fin de fase 4.1: primer optimizador 3D funcional
-(`GreedyExtremePointStrategy`, identificador `greedy_extreme_point_v1`,
-tras `PackingEngine().optimize(request)`), con 319 pruebas unitarias e
-integración en verde (240 previas + expansión, orden, *scoring*,
-cancelación, progreso, escenarios de packing y de extintores, y
-pruebas de integración de la pila completa). `optimization` depende
-únicamente de `domain`, `geometry` y `rules`, verificado por
-`import-linter`. La API pública `from cargo_optimizer import
-PackingEngine, PackingRequest` funciona. Rendimiento real medido (no
-solo estimado): ~35 s para 100 instancias, crecimiento cúbico —
-sustancialmente más lento que la estimación optimista de la fase 4.0;
-documentado en `docs/OptimizationEngine.md`, con la poda (v0.7) y el
-índice espacial (v0.8) como próximos pasos naturales, no abordados en
-esta fase. No se ha escrito código de visualización 3D, persistencia,
-exportación ni API. La siguiente sesión de desarrollo debe empezar por
-el diseño de la fase 5 (visualización 3D) o, si el rendimiento del
-optimizador se vuelve prioritario antes, por la poda de candidatos
-(v0.7) descrita en `docs/OptimizationEngine.md`.
+Fin de fase 4.2: optimización de rendimiento del motor de packing
+(`GreedyExtremePointStrategy`, identificador `greedy_extreme_point_v1`
+sin cambios, misma API pública `from cargo_optimizer import
+PackingEngine, PackingRequest`). Se aplicaron tres optimizaciones
+seguras dentro de `optimization` (caché incremental de bounding box en
+`PackingState`, omisión del *score* para candidatos rechazados, poda
+geométrica de puntos candidatos en `pruning.py`), verificadas con 334
+pruebas en verde (suite automática completa, sin contar el benchmark
+manual de 500 instancias) y perfilado real con
+`cProfile` antes y después. **El objetivo obligatorio de esta fase (5x
+más rápido para 100 instancias) no se alcanzó**: el resultado real es
+~1.3x, porque el perfilado muestra que, tras optimizar, el 100% del
+tiempo restante vive dentro de `RulesEngine.evaluate_placement`
+(soporte, apilamiento, peso soportado, colisión), fuera del alcance
+autorizado de esta fase. Detalle completo, con las alternativas
+evaluadas y descartadas (índice espacial, precálculo de reglas
+independientes de posición), en `docs/OptimizerPerformance.md`. No se
+ha escrito código de visualización 3D, persistencia, exportación ni
+API. La siguiente sesión de desarrollo debe elegir entre: (a) el diseño
+de la fase 5 (visualización 3D), o (b) — si el rendimiento a gran
+escala (250+ instancias) sigue siendo prioritario — una fase nueva,
+con ADR explícito, para introducir una estructura de datos espacial
+**dentro de `rules`/`geometry`** (no solo en `optimization`), única vía
+identificada para reducir el coste dominante real.
