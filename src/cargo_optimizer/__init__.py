@@ -13,7 +13,7 @@ from cargo_optimizer.domain import (
 )
 from cargo_optimizer.optimization import PackingEngine, PackingRequest
 
-__version__ = "0.8.1"
+__version__ = "0.9.0"
 
 __all__ = [
     "CargoProject",

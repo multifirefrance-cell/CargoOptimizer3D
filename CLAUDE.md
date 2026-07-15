@@ -63,10 +63,12 @@ presentation  →  infrastructure  →  application  →  optimization  →  rul
   hacia `infrastructure`. Depende de `domain`, `geometry`, `rules` y
   `optimization`.
 - **`infrastructure`**: adaptadores concretos (SQLAlchemy, openpyxl,
-  ReportLab, VTK) que implementan los puertos de `application`.
+  ReportLab) que implementan los puertos de `application`.
 - **`presentation`**: mecanismos de entrega (`presentation/desktop`
-  hoy con PySide6; `presentation/api` o web en el futuro, como
-  hermanos, sin tocar el código existente).
+  hoy con PySide6 y, dentro de él, `presentation/desktop/viewer/` con
+  PyVista/PyVistaQt para el visor 3D — ver `docs/ThreeDViewer.md`;
+  `presentation/api` o web en el futuro, como hermanos, sin tocar el
+  código existente).
 
 Esta regla se verifica automáticamente con `import-linter` (contrato
 `layers` en `pyproject.toml`), no es solo documentación. Detalle
@@ -83,7 +85,9 @@ ninguna dependencia de UI instalada (ADR-0003).
 - Python 3.12+, tipado obligatorio (type hints en todo el código
   nuevo).
 - PySide6 para la interfaz de escritorio.
-- VTK para visualización 3D (fase 5, aún no implementada).
+- PyVista + PyVistaQt (sobre VTK) para el visor 3D
+  (`presentation/desktop/viewer/`, implementado en la fase 6.1 — ver
+  `docs/ThreeDViewer.md`).
 - SQLite + SQLAlchemy para persistencia (fase 7, aún no implementada).
 - openpyxl para Excel y ReportLab para PDF (fase 8, aún no
   implementadas).
@@ -102,9 +106,9 @@ src/cargo_optimizer/
 ├── rules/           # Motor de reglas de negocio. Depende de domain y, si hace falta, de geometry.
 ├── optimization/    # Motor de empaquetado real. Depende de domain, geometry y rules.
 ├── application/     # Casos de uso, orquestación, puertos hacia infraestructura.
-├── infrastructure/  # Adaptadores concretos: SQLite, Excel, PDF, VTK (fases posteriores).
+├── infrastructure/  # Adaptadores concretos: SQLite, Excel, PDF (fases posteriores).
 └── presentation/
-    └── desktop/     # Aplicación de escritorio PySide6. Solo presentación.
+    └── desktop/     # Aplicación de escritorio PySide6. Incluye viewer/ (visor 3D, PyVista/PyVistaQt).
 tests/               # Pruebas, en espejo de la estructura de src/, + tests/integration/
 docs/                # Architecture.md, Roadmap.md, GeometryEngine.md, RulesEngine.md,
                      # OptimizationEngine.md (implementación real),
@@ -151,24 +155,38 @@ no pertenece a `infrastructure` (como decía la fila original) sino a
 `docs/Roadmap.md`, secciones "Nota sobre la numeración de las fases 5 y
 6" y "Nota sobre la numeración y el paquete de la fase 6".
 
-Estado actual: **visor 3D diseñado, no implementado** (fin de fase
-6.0). `docs/ThreeDViewerDesign.md` fija tecnología (PyVista + PyVistaQt,
-ADR-0010), arquitectura (`presentation/desktop/viewer/`, seis archivos),
-contrato (`Packing3DViewer.display_result(result, load_units_by_id)`,
-ADR-0011) y todo lo demás — ver `docs/Architecture.md`, sección
-`presentation`, y `docs/ThreeDViewerImplementationPlan.md` para el
-reparto 6.1/6.2/6.3. No se instaló ninguna dependencia nueva, el
-placeholder actual (`viewport_3d_placeholder.py`) sigue sin cambios, y
-`domain`/`geometry`/`rules`/`optimization` siguen intactos (verificado
-con `git diff` vacío antes del commit). La interfaz ya ejecuta el motor
-real de principio a fin desde la fase 5.1: `presentation/desktop`
-construye una `PackingRequest` desde el formulario de Loading Space y
-la tabla de productos, la ejecuta en `OptimizationWorker` (un `QThread`
-dedicado, `presentation/desktop/workers/`) y vuelca el `PackingResult`
-en cuatro pestañas del panel inferior (Resumen, No cargados, Avisos,
-Registro), sin bloquear nunca el hilo de la interfaz. No implementar
-todavía VTK/PyVista/PyVistaQt, SQLite, Excel, PDF,
-importación/exportación real, animaciones, Undo/Redo, ni volver a tocar
+Estado actual: **visor 3D implementado y en uso** (fin de fase 6.1).
+`presentation/desktop/viewer/` existe con sus seis módulos
+(`models.py`, `constants.py`, `color_registry.py`, `scene_builder.py`,
+`scene_controller.py`, `widget.py`) más
+`panels/selection_details_panel.py`; `pyvista`, `pyvistaqt` y `vtk`
+son dependencias instaladas; `viewport_3d_placeholder.py` se eliminó,
+sustituido por `Packing3DViewer` (con fallback propio integrado). Ver
+`docs/ThreeDViewer.md` para el detalle completo de la implementación
+real (arquitectura, API, selección, cámara, temas, fallback,
+integración con `MainWindow`, rendimiento medido, limitaciones) y
+`docs/ThreeDViewerDesign.md`/`docs/ThreeDViewerImplementationPlan.md`
+para el diseño original y las dos desviaciones puntuales frente a él
+(`set_dark_theme(enabled: bool)` en vez de `apply_theme(theme: str)`;
+`focus_placement` implementado en 6.1 en vez de aplazado a 6.2).
+**Hallazgo técnico documentado**: `pyvistaqt.QtInteractor` provoca un
+segmentation fault nativo de VTK en Windows bajo la plataforma Qt
+`offscreen` (no capturable con `try/except`) — mitigado detectando la
+plataforma antes de construir el interactor; nunca reintroducir un
+`try/except` como única defensa en ese punto sin releer
+`docs/ThreeDViewer.md`, sección 10. `domain`/`geometry`/`rules`/
+`optimization` siguen intactos (verificado con `git diff` vacío antes
+del commit). La interfaz ejecuta el motor real de principio a fin
+desde la fase 5.1: `presentation/desktop` construye una
+`PackingRequest` desde el formulario de Loading Space y la tabla de
+productos, la ejecuta en `OptimizationWorker` (un `QThread` dedicado,
+`presentation/desktop/workers/`), vuelca el `PackingResult` en cuatro
+pestañas del panel inferior (Resumen, No cargados, Avisos, Registro) y
+ahora también lo muestra en el visor 3D, sin bloquear nunca el hilo de
+la interfaz. No implementar todavía filtros/etiquetas/modos de
+color/vistas predefinidas/captura de imagen (fase 6.2),
+animación/capas/cortes/escala (fase 6.3), SQLite, Excel, PDF,
+importación/exportación real, Undo/Redo, ni volver a tocar
 `domain`/`geometry`/`rules`/`optimization` salvo bug objetivo y
 demostrable, hasta que se indique explícitamente. Ver `docs/Roadmap.md`
 para el detalle fase a fase.
@@ -391,8 +409,6 @@ fases 5.0 y 5.1.
   otro almacenamiento: eso pertenece a la fase 7 (persistencia de
   proyectos), un concepto distinto de "recordar el estado de la
   ventana".
-- `Viewport3DPlaceholder` no importa VTK ni ninguna biblioteca de
-  render 3D: es un `QWidget` de marcador de posición hasta la fase 6.1.
 - Los recursos (`resources/icons/*.svg`) viven dentro de
   `presentation/desktop/`, cargados por ruta de archivo directa
   (`icons.py::icon`) — no hay pipeline `.qrc`/`pyside6-rcc` todavía;
@@ -404,13 +420,12 @@ fases 5.0 y 5.1.
   `QApplication` por proceso: el fixture `qapp` es de ámbito de
   sesión, nunca crear uno nuevo por prueba.
 
-## Invariantes del futuro visor 3D (`presentation/desktop/viewer/`, diseñado en la fase 6.0, no romper sin ADR)
+## Invariantes del visor 3D (`presentation/desktop/viewer/`, implementado en la fase 6.1, no romper sin ADR)
 
-Diseño completo en `docs/ThreeDViewerDesign.md`; plan de
-implementación en `docs/ThreeDViewerImplementationPlan.md`; decisiones
-formales en ADR-0010 (tecnología) y ADR-0011 (desacoplo y fallback). No
-existe código todavía (llega en la fase 6.1) — estas son las reglas que
-esa implementación debe respetar desde el primer commit.
+Implementación real documentada en `docs/ThreeDViewer.md`; diseño
+original en `docs/ThreeDViewerDesign.md`; plan de fases en
+`docs/ThreeDViewerImplementationPlan.md`; decisiones formales en
+ADR-0010 (tecnología) y ADR-0011 (desacoplo y fallback).
 
 - `viewer/` nunca importa `cargo_optimizer.optimization`: recibe
   siempre un `PackingResult` ya calculado
@@ -452,12 +467,21 @@ esa implementación debe respetar desde el primer commit.
   volver a emitir la señal `placement_selected` — esa señal representa
   únicamente "el usuario seleccionó algo haciendo clic en el visor",
   para evitar un ciclo de señales con quien la escucha.
-- Estrategia de renderizado inicial (6.1): un actor por caja, no malla
+- Estrategia de renderizado (6.1): un actor por caja, no malla
   combinada ni glyphs — decisión revisable en 6.3 si el rendimiento del
   optimizador a gran escala lo justifica (ver
-  `docs/OptimizerPerformance.md`), pero no antes: el modelo de escena
-  (`SceneModel`/`PlacementVisualModel`) ya está diseñado para no
+  `docs/OptimizerPerformance.md`, y el rendimiento medido en
+  `docs/ThreeDViewer.md`, sección 12), pero no antes: el modelo de
+  escena (`SceneModel`/`PlacementVisualModel`) ya está diseñado para no
   depender de esta estrategia concreta.
+- `Packing3DViewer._try_create_interactor` comprueba
+  `QApplication.platformName() == "offscreen"` **antes** de importar o
+  construir `pyvistaqt.QtInteractor`, nunca dentro de un
+  `try/except` como única defensa: construir un `QtInteractor` bajo la
+  plataforma `offscreen` provoca un segmentation fault nativo de VTK en
+  Windows, no una excepción Python capturable — ver
+  `docs/ThreeDViewer.md`, sección 10. No revertir esta comprobación
+  proactiva a un `try/except` reactivo sin releer ese hallazgo.
 
 ## Reglas de trabajo con el asistente
 

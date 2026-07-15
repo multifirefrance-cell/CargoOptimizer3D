@@ -64,7 +64,8 @@ mensaje específico del motivo en vez de "disponible en la Fase 6").
 Todos los métodos públicos del contrato (`display_result`,
 `clear_scene`, `reset_camera`, `set_container_visible`,
 `set_boxes_visible`, `set_axes_visible`, `set_selected_placement`,
-`apply_theme`) se convierten en no-op seguros cuando
+`focus_placement`, `set_dark_theme`) se convierten en no-op seguros
+cuando
 `is_available()` es `False`. `MainWindow` nunca necesita comprobar
 `is_available()` antes de llamarlos: el widget decide internamente si
 hay algo que dibujar, igual que `MainWindow` ya trata los errores del

@@ -4,6 +4,72 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Este proyecto aún no ha alcanzado la versión 1.0; el versionado 0.x
 puede incluir cambios estructurales entre versiones menores.
 
+## [0.9.0] - 2026-07-15
+
+Implementación mínima funcional del visor 3D (fase 6.1), exactamente
+según el diseño aprobado en la fase 6.0 (`docs/ThreeDViewerDesign.md`,
+`docs/ThreeDViewerImplementationPlan.md`, ADR-0010, ADR-0011). Cambio
+de código real (no documental) — por eso el bump es de versión menor,
+mismo criterio que las fases 5.0 y 5.1. `domain`, `geometry`, `rules`
+y `optimization` sin ningún cambio (verificado con `git diff` vacío en
+los cuatro paquetes antes del commit).
+
+### Added
+
+- Dependencias nuevas: `pyvista>=0.48,<1`, `pyvistaqt>=0.12,<1`,
+  `vtk>=9.6,<10` (versiones instaladas confirmadas: pyvista 0.48.4,
+  pyvistaqt 0.12.0, vtk 9.6.2, sobre PySide6 6.11.1 / Python 3.12.10).
+- `presentation/desktop/viewer/`: `models.py` (`SceneModel`,
+  `PlacementVisualModel`), `constants.py` (paleta y colores por tema),
+  `color_registry.py` (color por SKU determinista vía `zlib.crc32`,
+  nunca `hash()` de Python), `scene_builder.py` (`PackingResult` +
+  `load_units_by_id` -> `SceneModel`, función pura sin Qt/VTK),
+  `scene_controller.py` (posesión del `Plotter`, construcción de
+  `LoadingSpace` y cajas, picking, selección, cámara, temas), `widget.py`
+  (`Packing3DViewer(QWidget)`, contrato público completo + fallback
+  interno cuando el 3D no está disponible).
+- `presentation/desktop/panels/selection_details_panel.py`: panel de
+  solo lectura con los datos de la caja seleccionada (SKU, nombre,
+  instancia, secuencia de carga, posición, dimensiones orientadas,
+  orientación, peso, tipo de empaque, extintor, fragilidad,
+  apilamiento, notas).
+- Integración completa en `MainWindow`: `Packing3DViewer` sustituye a
+  `viewport_3d_placeholder.py` (eliminado) en `work_area_splitter`;
+  nuevo `QDockWidget` de detalles de selección en el lado derecho;
+  acciones de menú Ver (resetear cámara, mostrar/ocultar espacio de
+  carga, cajas, ejes, panel de detalles); el resultado de cada
+  optimización se muestra en el visor y una nueva optimización limpia
+  la escena anterior; el tema claro/oscuro se propaga al visor.
+- `docs/ThreeDViewer.md`: documentación de la implementación real —
+  arquitectura, `SceneModel`/`SceneBuilder`/`Packing3DViewer`,
+  selección, cámara, temas, fallback, integración, ciclo de vida,
+  rendimiento medido (no solo razonado) y limitaciones conocidas,
+  incluido el hallazgo de que `pyvistaqt.QtInteractor` provoca un
+  segmentation fault nativo de VTK en Windows bajo la plataforma Qt
+  `offscreen` (mitigado detectando la plataforma antes de construir el
+  interactor, no con un `try/except`).
+- 61 pruebas nuevas (`ColorRegistry`, `SceneBuilder`,
+  `SceneController` contra un `pyvista.Plotter(off_screen=True)` real,
+  `Packing3DViewer` en modo de repuesto bajo `offscreen`,
+  `SelectionDetailsPanel`, integración con `MainWindow`).
+
+### Changed
+
+- `docs/ThreeDViewerDesign.md` y `docs/ThreeDViewerImplementationPlan.md`
+  marcados como implementados, con nota de las dos desviaciones reales
+  (`set_dark_theme(enabled: bool)` en vez de `apply_theme(theme: str)`;
+  `focus_placement` implementado en 6.1 en vez de aplazado a 6.2).
+- `docs/ADR/ADR-0011-desacoplo-visor-y-fallback.md`: lista de métodos
+  no-op del fallback corregida para reflejar los nombres reales.
+- `docs/Architecture.md`, `docs/Roadmap.md`, `CLAUDE.md` actualizados
+  al estado real de `presentation/desktop/viewer/`.
+
+### Removed
+
+- `presentation/desktop/panels/viewport_3d_placeholder.py`: sustituido
+  por `Packing3DViewer`, que incluye su propio contenido de reemplazo
+  cuando el 3D no está disponible.
+
 ## [0.8.1] - 2026-07-15
 
 Sesión exclusivamente documental (fase 6.0). Ningún código funcional

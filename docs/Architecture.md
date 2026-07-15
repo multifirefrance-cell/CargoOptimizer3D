@@ -94,30 +94,27 @@ presentation/desktop/
 │   ├── unpacked_table_panel.py   # tabla de instancias no cargadas
 │   ├── warnings_panel.py         # PackingResult.warnings
 │   ├── log_panel.py              # registro de inicio/fin/duración/cancelación/errores
-│   └── viewport_3d_placeholder.py  # placeholder actual — sin cambios en la fase 6.0
-└── resources/icons/*.svg
-```
-
-Diseñado (fase 6.0), no creado todavía — llega en la fase 6.1, ver
-`docs/ThreeDViewerDesign.md` y `docs/ThreeDViewerImplementationPlan.md`:
-
-```
-presentation/desktop/
+│   └── selection_details_panel.py  # detalle de la caja seleccionada en el visor 3D
 ├── viewer/                          # visor 3D — hermano de panels/models/workers, NO de infrastructure
 │   ├── __init__.py
 │   ├── widget.py                    # Packing3DViewer(QWidget): contrato público + fallback
 │   ├── scene_controller.py          # Plotter de PyVista, actores, cámara, picking, selección
 │   ├── scene_builder.py             # PackingResult + load_units_by_id -> SceneModel (sin VTK/Qt)
-│   ├── color_registry.py            # SKU -> QColor determinista entre ejecuciones
+│   ├── color_registry.py            # SKU -> color hex determinista entre ejecuciones
 │   ├── models.py                    # SceneModel, PlacementVisualModel (dataclasses)
 │   └── constants.py                 # paleta, opacidades, grosores — config. visual centralizada
-└── panels/
-    └── selection_details_panel.py   # detalle de la caja seleccionada
+└── resources/icons/*.svg
 ```
 
+`presentation/desktop/panels/viewport_3d_placeholder.py` (fase 5.0/6.0)
+se eliminó en la fase 6.1: `Packing3DViewer` (con su propio fallback
+interno cuando el 3D no está disponible) ocupa su lugar en
+`work_area_splitter`. Detalle completo de la implementación real en
+`docs/ThreeDViewer.md`.
+
 `viewer/` depende de `domain` (igual que el resto de
-`presentation/desktop`) y de `PyVista`/`PyVistaQt` (nueva dependencia
-de terceros, todavía no instalada — ADR-0010). **No** depende de
+`presentation/desktop`) y de `PyVista`/`PyVistaQt`/`vtk` (dependencias
+de terceros añadidas en la fase 6.1 — ADR-0010). **No** depende de
 `cargo_optimizer.optimization`: recibe siempre un `PackingResult` ya
 calculado (`display_result(result, load_units_by_id)`), nunca ejecuta
 el motor — ver ADR-0011. Esta restricción no la impone hoy

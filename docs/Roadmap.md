@@ -17,7 +17,7 @@ fase se adelanta a la anterior.
 | 5.0 | Base de la interfaz de escritorio | `presentation/desktop` (ventana principal, paneles, sin conectar el motor) | **Completada** |
 | 5.1 | Conectar el motor con la interfaz | `presentation/desktop` (invocar `PackingEngine` desde `MainWindow`) | **Completada** |
 | 6.0 | Diseño del visor 3D | Ninguno (solo documentación: `docs/ThreeDViewerDesign.md`, `docs/ThreeDViewerImplementationPlan.md`, ADR-0010, ADR-0011) | **Completada** |
-| 6.1 | Visor 3D — implementación mínima | `presentation/desktop/viewer` (nuevo, hermano de `panels`/`models`/`workers`) | Pendiente |
+| 6.1 | Visor 3D — implementación mínima | `presentation/desktop/viewer` (nuevo, hermano de `panels`/`models`/`workers`) | **Completada** |
 | 6.2 | Visor 3D — filtros, etiquetas, vistas, captura de imagen | `presentation/desktop/viewer` (mismos módulos) | Pendiente |
 | 6.3 | Visor 3D — animación y escala | `presentation/desktop/viewer` (mismos módulos) | Pendiente |
 | 7 | Persistencia | `infrastructure` (adaptador SQLAlchemy/SQLite) | Pendiente |
@@ -98,42 +98,29 @@ esté en uso real. Detalle completo del reparto en
 
 ## Estado actual
 
-Fin de fase 6.0: diseño formal del visor 3D, sin código funcional
-nuevo. `docs/ThreeDViewerDesign.md` fija la tecnología (PyVista +
-PyVistaQt, confirmada frente a VTK directo, `QOpenGLWidget` propio y
-VisPy tras comparación formal — ADR-0010), la arquitectura
-(`presentation/desktop/viewer/`, seis archivos en vez de los diez
-sugeridos originalmente, con criterio explícito de cuándo separar los
-tres que se fusionan en `scene_controller.py`), el contrato del widget
-(`Packing3DViewer.display_result(result, load_units_by_id)` como única
-puerta de entrada de datos — ADR-0011), el modelo de escena
-(`SceneModel`/`PlacementVisualModel`), cómo `SceneBuilder` resuelve
-SKU/nombre/color de cada `Placement` (entregando también un mapping
-`UUID -> LoadUnit`, el mismo patrón ya usado para `UnpackedUnit` desde
-la fase 5.1), coordenadas (sin permutar ejes: "Z arriba" es una vista
-de cámara, no una transformación de datos), representación de
-`LoadingSpace` y `Placement`, colores (por SKU, determinismo real entre
-ejecuciones — no con `hash()` de Python, que está aleatorizado por
-proceso), cámara, picking/selección con prevención de ciclos de señal,
-qué filtros quedan dentro/fuera de 6.1, integración con `MainWindow`
-sin romper el `QThread`/progreso/cancelación/temas/`QSettings`/tests
-offscreen ya existentes, rendimiento (expectativas razonadas, no
-medidas), temas, captura de imagen y animación futuras, fallback
-cuando 3D no está disponible (la aplicación debe abrir igual), riesgos
-de empaquetado, y estrategia de pruebas en los cuatro niveles ya
-establecidos por el proyecto. `docs/ThreeDViewerImplementationPlan.md`
-separa el trabajo futuro en 6.1 (mínimo funcional), 6.2 (filtros,
-etiquetas, vistas predefinidas, captura de imagen) y 6.3 (animación,
-capas, cortes, explosión, escala). No se ha instalado ninguna
-dependencia, no se ha tocado `domain`/`geometry`/`rules`/`optimization`
-(verificado con `git diff` vacío en los cuatro paquetes antes del
-commit), y el placeholder actual
-(`viewport_3d_placeholder.py`) sigue sin cambios. 386 pruebas en verde,
-sin ninguna nueva en esta fase (fase exclusivamente documental, mismo
-criterio que la fase 4.0). La siguiente sesión de desarrollo debe
-abordar la **fase 6.1** (implementación mínima del visor), siguiendo el
-plan ya escrito en `docs/ThreeDViewerImplementationPlan.md`. Si el
-rendimiento del motor a gran escala (250+ instancias) sigue siendo
-prioritario en paralelo, ver `docs/OptimizerPerformance.md` para la
-alternativa pendiente (índice espacial dentro de `rules`/`geometry`,
-con ADR explícito).
+Fin de fase 6.1: visor 3D real e interactivo, implementado exactamente
+según el diseño de la fase 6.0 (ver `docs/ThreeDViewer.md` para el
+detalle completo de la implementación, y `docs/ThreeDViewerDesign.md`
+para las dos desviaciones puntuales frente al diseño original:
+`set_dark_theme(enabled: bool)` en vez de `apply_theme(theme: str)`, y
+`focus_placement` implementado en 6.1 en vez de aplazado a 6.2).
+`pyvista`, `pyvistaqt` y `vtk` ya son dependencias instaladas del
+proyecto. `presentation/desktop/viewer/` existe con sus seis módulos;
+`viewport_3d_placeholder.py` se eliminó, sustituido por
+`Packing3DViewer` (con fallback propio integrado). `MainWindow` integra
+el visor y un nuevo panel de detalles de selección sin alterar el
+`QThread`/progreso/cancelación/temas/`QSettings` ya existentes de la
+fase 5.1. Hallazgo técnico documentado: `pyvistaqt.QtInteractor`
+provoca un segmentation fault nativo de VTK en Windows bajo la
+plataforma Qt `offscreen` (no capturable con `try/except`); mitigado
+detectando la plataforma antes de construir el interactor. 443 pruebas
+en verde (61 nuevas de esta fase). `domain`/`geometry`/`rules`/
+`optimization` sin ningún cambio (verificado con `git diff` vacío en
+los cuatro paquetes antes del commit). La siguiente sesión de
+desarrollo debe abordar la **fase 6.2** (filtros, etiquetas, modos de
+color, vistas predefinidas, captura de imagen), siguiendo el plan ya
+escrito en `docs/ThreeDViewerImplementationPlan.md`. Si el rendimiento
+del motor a gran escala (250+ instancias) sigue siendo prioritario en
+paralelo, ver `docs/OptimizerPerformance.md` para la alternativa
+pendiente (índice espacial dentro de `rules`/`geometry`, con ADR
+explícito).

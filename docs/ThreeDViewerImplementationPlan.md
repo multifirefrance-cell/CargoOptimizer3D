@@ -1,10 +1,13 @@
 # Plan de implementación del visor 3D
 
 Desglose en tres entregas a partir del diseño de la fase 6.0
-(`docs/ThreeDViewerDesign.md`). Ninguna de las tres está implementada
-todavía — este documento es el plan, no el registro de lo hecho.
+(`docs/ThreeDViewerDesign.md`). **La fase 6.1 ya está implementada**
+— ver `docs/ThreeDViewer.md` para el registro de lo hecho realmente,
+incluidas las dos desviaciones frente a este plan (`set_dark_theme`
+en vez de `apply_theme`, `focus_placement` implementado en 6.1 en vez
+de aplazado). 6.2 y 6.3 siguen siendo plan, no implementación.
 
-## Fase 6.1 — Implementación mínima
+## Fase 6.1 — Implementación mínima (Completada)
 
 Objetivo: sustituir el placeholder por un visor real, funcional de
 principio a fin, con el conjunto más pequeño de funciones que sigue

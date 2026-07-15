@@ -8,6 +8,13 @@ vuelca el `PackingResult` en los paneles de resultados. Sigue sin tocar
 `domain`/`geometry`/`rules`/`optimization`: solo consume su API pública
 (`PackingEngine`, `PackingRequest`, `PackingProgress`,
 `CancellationToken`, vía `workers/optimization_worker.py`).
+
+Desde la fase 6.1, el mismo `PackingResult` que ya llega a los paneles
+de resultados se entrega también a `Packing3DViewer`
+(`viewer/widget.py`), junto con el mismo mapping `UUID -> LoadUnit`
+que ya se usaba para la tabla de no cargados — `MainWindow` sigue sin
+importar nada de `viewer/` más allá de ese widget y su modelo visual
+(`PlacementVisualModel`, solo para leerlo, nunca para construirlo).
 """
 
 from __future__ import annotations
@@ -49,13 +56,14 @@ from cargo_optimizer.presentation.desktop.panels.project_tree_panel import (
     ProjectTreePanel,
 )
 from cargo_optimizer.presentation.desktop.panels.results_panel import ResultsPanel
-from cargo_optimizer.presentation.desktop.panels.unpacked_table_panel import UnpackedTablePanel
-from cargo_optimizer.presentation.desktop.panels.viewport_3d_placeholder import (
-    Viewport3DPlaceholder,
+from cargo_optimizer.presentation.desktop.panels.selection_details_panel import (
+    SelectionDetailsPanel,
 )
+from cargo_optimizer.presentation.desktop.panels.unpacked_table_panel import UnpackedTablePanel
 from cargo_optimizer.presentation.desktop.panels.warnings_panel import WarningsPanel
 from cargo_optimizer.presentation.desktop.settings import AppSettings
 from cargo_optimizer.presentation.desktop.style import THEME_DARK, THEME_LIGHT, apply_theme
+from cargo_optimizer.presentation.desktop.viewer.widget import Packing3DViewer
 from cargo_optimizer.presentation.desktop.workers.optimization_worker import OptimizationWorker
 
 _NOT_IMPLEMENTED_MESSAGE_MS = 4000
@@ -98,6 +106,7 @@ class MainWindow(QMainWindow):
         self._build_status_bar()
 
         self._restore_ui_state()
+        self.viewer_widget.set_dark_theme(self._settings.theme() == THEME_DARK)
 
     # ------------------------------------------------------------------
     # Construcción de la interfaz
@@ -111,9 +120,11 @@ class MainWindow(QMainWindow):
         self.unpacked_table_panel = UnpackedTablePanel(self)
         self.warnings_panel = WarningsPanel(self)
         self.log_panel = LogPanel(self)
-        self.viewport_3d_placeholder = Viewport3DPlaceholder(self)
+        self.viewer_widget = Packing3DViewer(self)
+        self.selection_details_panel = SelectionDetailsPanel(self)
 
         self.project_tree_panel.section_activated.connect(self._on_project_section_activated)
+        self.viewer_widget.placement_selected.connect(self._on_placement_selected)
 
     def _build_dock_widgets(self) -> None:
         self.project_tree_dock = QDockWidget("Proyecto", self)
@@ -125,6 +136,15 @@ class MainWindow(QMainWindow):
         )
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_tree_dock)
 
+        self.selection_details_dock = QDockWidget("Detalles de selección", self)
+        self.selection_details_dock.setObjectName("selectionDetailsDock")
+        self.selection_details_dock.setWidget(self.selection_details_panel)
+        self.selection_details_dock.setFeatures(
+            QDockWidget.DockWidgetFeature.DockWidgetMovable
+            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
+        )
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.selection_details_dock)
+
     def _build_central_layout(self) -> None:
         self.left_work_splitter = QSplitter(Qt.Orientation.Vertical, self)
         self.left_work_splitter.setObjectName(_SPLITTER_LEFT_WORK)
@@ -135,7 +155,7 @@ class MainWindow(QMainWindow):
         self.work_area_splitter = QSplitter(Qt.Orientation.Horizontal, self)
         self.work_area_splitter.setObjectName(_SPLITTER_WORK_AREA)
         self.work_area_splitter.addWidget(self.left_work_splitter)
-        self.work_area_splitter.addWidget(self.viewport_3d_placeholder)
+        self.work_area_splitter.addWidget(self.viewer_widget)
         self.work_area_splitter.setStretchFactor(0, 1)
         self.work_area_splitter.setStretchFactor(1, 1)
 
@@ -212,10 +232,35 @@ class MainWindow(QMainWindow):
         self.action_toggle_project_dock = self.project_tree_dock.toggleViewAction()
         self.action_toggle_project_dock.setText("Panel de &proyecto")
 
+        self.action_toggle_selection_details_dock = self.selection_details_dock.toggleViewAction()
+        self.action_toggle_selection_details_dock.setText("Panel de &detalles")
+
         self.action_view_3d_focus = self._make_action(
             "view3d", "&Vista 3D", "Ctrl+3", self._on_toggle_3d_focus
         )
         self.action_view_3d_focus.setCheckable(True)
+
+        self.action_reset_camera = self._make_action(
+            "view3d", "&Restablecer cámara", "Ctrl+0", self._on_reset_camera
+        )
+        self.action_toggle_container_visible = self._make_action(
+            "view3d",
+            "Mostrar &espacio de carga",
+            None,
+            self._on_toggle_container_visible,
+        )
+        self.action_toggle_container_visible.setCheckable(True)
+        self.action_toggle_container_visible.setChecked(True)
+        self.action_toggle_boxes_visible = self._make_action(
+            "view3d", "Mostrar &cajas", None, self._on_toggle_boxes_visible
+        )
+        self.action_toggle_boxes_visible.setCheckable(True)
+        self.action_toggle_boxes_visible.setChecked(True)
+        self.action_toggle_axes_visible = self._make_action(
+            "view3d", "Mostrar &ejes", None, self._on_toggle_axes_visible
+        )
+        self.action_toggle_axes_visible.setCheckable(True)
+        self.action_toggle_axes_visible.setChecked(True)
 
         self.action_light_theme = self._make_action(
             "preferences", "Tema &claro", None, lambda: self._set_theme(THEME_LIGHT)
@@ -309,7 +354,13 @@ class MainWindow(QMainWindow):
 
         view_menu = menu_bar.addMenu("&Ver")
         view_menu.addAction(self.action_toggle_project_dock)
+        view_menu.addAction(self.action_toggle_selection_details_dock)
         view_menu.addAction(self.action_view_3d_focus)
+        view_menu.addSeparator()
+        view_menu.addAction(self.action_reset_camera)
+        view_menu.addAction(self.action_toggle_container_visible)
+        view_menu.addAction(self.action_toggle_boxes_visible)
+        view_menu.addAction(self.action_toggle_axes_visible)
         view_menu.addSeparator()
         view_menu.addAction(self.action_light_theme)
         view_menu.addAction(self.action_dark_theme)
@@ -379,6 +430,8 @@ class MainWindow(QMainWindow):
         model.remove_rows_at(list(range(model.rowCount())))
         self._project_name = "Proyecto sin guardar"
         self._project_status_label.setText(self._project_name)
+        self.viewer_widget.clear_scene()
+        self.selection_details_panel.clear()
         self.statusBar().showMessage("Nuevo proyecto creado.", _STATUS_MESSAGE_MS)
 
     def _on_open_project(self) -> None:
@@ -446,10 +499,33 @@ class MainWindow(QMainWindow):
         else:
             self.work_area_splitter.setSizes([total // 2, total - total // 2])
 
+    def _on_reset_camera(self) -> None:
+        self.viewer_widget.reset_camera()
+
+    def _on_toggle_container_visible(self, checked: bool) -> None:
+        self.viewer_widget.set_container_visible(checked)
+
+    def _on_toggle_boxes_visible(self, checked: bool) -> None:
+        self.viewer_widget.set_boxes_visible(checked)
+
+    def _on_toggle_axes_visible(self, checked: bool) -> None:
+        self.viewer_widget.set_axes_visible(checked)
+
+    def _on_placement_selected(self, sequence_number: object) -> None:
+        if not isinstance(sequence_number, int):
+            self.selection_details_panel.clear()
+            return
+        visual = self.viewer_widget.find_placement_visual(sequence_number)
+        if visual is None:
+            self.selection_details_panel.clear()
+            return
+        self.selection_details_panel.display_placement(visual)
+
     def _set_theme(self, theme: str) -> None:
         app = QApplication.instance()
         if isinstance(app, QApplication):
             apply_theme(app, theme)
+        self.viewer_widget.set_dark_theme(theme == THEME_DARK)
         self._settings.set_theme(theme)
 
     def _on_reset_layout(self) -> None:
@@ -524,6 +600,8 @@ class MainWindow(QMainWindow):
         self.results_panel.clear()
         self.unpacked_table_panel.model.clear()
         self.warnings_panel.clear()
+        self.viewer_widget.clear_scene()
+        self.selection_details_panel.clear()
         self._progress_bar.setRange(0, 1)
         self._progress_bar.setValue(0)
         self._progress_bar.setVisible(True)
@@ -563,6 +641,8 @@ class MainWindow(QMainWindow):
 
     def _on_optimization_finished(self, result: PackingResult) -> None:
         self._populate_results(result)
+        self.selection_details_panel.clear()
+        self.viewer_widget.display_result(result, self._last_load_units_by_id)
         self._set_state(STATE_FINISHED)
         message = (
             "Optimización cancelada." if self._cancel_requested else "Optimización finalizada."
@@ -664,4 +744,5 @@ class MainWindow(QMainWindow):
             worker.cancellation_token.cancel()
             worker.wait(5000)
         self._save_ui_state()
+        self.viewer_widget.shutdown()
         super().closeEvent(event)

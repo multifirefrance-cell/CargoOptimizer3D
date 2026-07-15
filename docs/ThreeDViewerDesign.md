@@ -1,12 +1,19 @@
 # Diseño del visor 3D (Fase 6.0)
 
-Este documento es exclusivamente de diseño. Nada de lo aquí descrito
-está implementado todavía: la implementación mínima es la fase 6.1
-(`docs/ThreeDViewerImplementationPlan.md`). No se ha instalado ninguna
-dependencia nueva, no se ha tocado `domain`/`geometry`/`rules`/
-`optimization`, y el placeholder actual
-(`presentation/desktop/panels/viewport_3d_placeholder.py`) sigue en su
-sitio sin cambios.
+Este documento es el diseño original de la fase 6.0. La implementación
+mínima (fase 6.1) ya existe — ver `docs/ThreeDViewer.md` para el estado
+real construido, incluyendo dos desviaciones deliberadas frente a este
+diseño, ambas pedidas explícitamente por el encargo de la fase 6.1 (no
+una reapertura de arquitectura):
+
+- El contrato de tema del widget (sección 4, sección 17) es
+  `set_dark_theme(enabled: bool)`, no `apply_theme(theme: str)`.
+- `focus_placement` (sección 4) se implementó en 6.1, no se aplazó a
+  6.2 como decía la sección 4 originalmente.
+
+El resto de este documento — tecnología, arquitectura, modelo de
+escena, coordenadas, colores, picking, integración con `MainWindow`,
+fallback — se implementó tal cual está descrito aquí.
 
 ## Índice
 
