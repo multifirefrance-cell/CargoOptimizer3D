@@ -1,0 +1,199 @@
+"""Pruebas de integración: `MainWindow` ejecutando `PackingEngine` de verdad.
+
+`QMessageBox.warning`/`.critical` son modales: en un entorno sin
+usuario (como esta suite, con la plataforma Qt `offscreen`) se quedan
+esperando un clic que nunca llega y la prueba se cuelga. Cada prueba
+que puede disparar uno los sustituye por `monkeypatch` con una función
+que solo registra la llamada y devuelve inmediatamente.
+"""
+
+from __future__ import annotations
+
+import time
+from typing import Any
+
+import pytest
+from PySide6.QtWidgets import QApplication, QMessageBox
+
+from cargo_optimizer.presentation.desktop.main_window import MainWindow
+from cargo_optimizer.presentation.desktop.panels.loading_space_form_panel import PROFILE_CUSTOM
+from cargo_optimizer.presentation.desktop.settings import AppSettings
+
+
+def _wait_until_worker_finishes(
+    app: QApplication, window: MainWindow, timeout_s: float = 15.0
+) -> None:
+    deadline = time.monotonic() + timeout_s
+    while window._optimization_worker is not None and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.005)
+    assert window._optimization_worker is None, "El worker no terminó dentro del tiempo esperado"
+
+
+def _silence_message_box(monkeypatch: pytest.MonkeyPatch, method: str) -> list[tuple[Any, ...]]:
+    calls: list[tuple[Any, ...]] = []
+
+    def _fake(*args: object, **_kwargs: object) -> QMessageBox.StandardButton:
+        calls.append(args)
+        return QMessageBox.StandardButton.Ok
+
+    monkeypatch.setattr(QMessageBox, method, staticmethod(_fake))
+    return calls
+
+
+def test_run_optimization_without_products_shows_warning_and_does_not_run(
+    qapp: QApplication, app_settings: AppSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    warnings = _silence_message_box(monkeypatch, "warning")
+    window = MainWindow(app_settings)
+
+    window.action_run_optimization.trigger()
+
+    assert window._optimization_worker is None
+    assert len(warnings) == 1
+    window.close()
+
+
+def test_run_optimization_with_invalid_custom_space_shows_warning(
+    qapp: QApplication, app_settings: AppSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    warnings = _silence_message_box(monkeypatch, "warning")
+    window = MainWindow(app_settings)
+    window.loading_space_form_panel.set_current_profile_name(PROFILE_CUSTOM)
+    window.loading_space_form_panel._name_edit.setText("   ")
+
+    window.action_run_optimization.trigger()
+
+    assert window._optimization_worker is None
+    assert len(warnings) == 1
+    window.close()
+
+
+def test_run_optimization_executes_and_populates_results(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    window = MainWindow(app_settings)
+    for _ in range(5):
+        window.product_table_panel.model.add_default_product()
+
+    window.action_run_optimization.trigger()
+    assert window._optimization_worker is not None
+    assert not window.action_run_optimization.isEnabled()
+    assert not window.product_table_panel.isEnabled()
+    assert not window.loading_space_form_panel.isEnabled()
+    assert window.action_cancel_optimization.isEnabled()
+
+    _wait_until_worker_finishes(qapp, window)
+
+    assert window.results_panel._requested_label.text() == "5"
+    assert window.results_panel._packed_label.text() == "5"
+    assert window.results_panel._pending_label.text() == "0"
+    assert window.action_run_optimization.isEnabled()
+    assert window.product_table_panel.isEnabled()
+    assert window.loading_space_form_panel.isEnabled()
+    assert not window.action_cancel_optimization.isEnabled()
+    assert not window._progress_bar.isVisible()
+    assert window._state_status_label.text() == "Estado: finalizado"
+    assert "finalizada" in window.log_panel.text().lower()
+    window.close()
+
+
+def test_cancel_optimization_leaves_interface_consistent(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    window = MainWindow(app_settings)
+    for _ in range(80):
+        window.product_table_panel.model.add_default_product()
+
+    window.action_run_optimization.trigger()
+    assert window._optimization_worker is not None
+
+    window.action_cancel_optimization.trigger()
+    assert window._cancel_requested is True
+    assert not window.action_cancel_optimization.isEnabled()
+
+    _wait_until_worker_finishes(qapp, window)
+
+    assert window.action_run_optimization.isEnabled()
+    assert not window.action_cancel_optimization.isEnabled()
+    assert window.product_table_panel.isEnabled()
+    assert window.loading_space_form_panel.isEnabled()
+    assert not window._progress_bar.isVisible()
+    assert "cancelaci" in window.log_panel.text().lower()
+    window.close()
+
+
+def test_cancel_optimization_without_running_worker_is_a_no_op(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    window = MainWindow(app_settings)
+    window.action_cancel_optimization.trigger()  # no debe lanzar excepción
+    assert window._optimization_worker is None
+    window.close()
+
+
+def test_optimization_failed_shows_critical_message_and_logs(
+    qapp: QApplication, app_settings: AppSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    errors = _silence_message_box(monkeypatch, "critical")
+    window = MainWindow(app_settings)
+
+    window._on_optimization_failed("fallo simulado")
+
+    assert len(errors) == 1
+    assert window._state_status_label.text() == "Estado: error"
+    assert "fallo simulado" in window.log_panel.text()
+    window.close()
+
+
+def test_unpacked_units_and_pending_count_populate_when_space_is_too_small(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    window = MainWindow(app_settings)
+    window.loading_space_form_panel.set_current_profile_name(PROFILE_CUSTOM)
+    window.loading_space_form_panel._name_edit.setText("Caja diminuta")
+    window.loading_space_form_panel._length_spin.setValue(40.0)
+    window.loading_space_form_panel._width_spin.setValue(30.0)
+    window.loading_space_form_panel._height_spin.setValue(20.0)
+    for _ in range(3):
+        window.product_table_panel.model.add_default_product()
+
+    window.action_run_optimization.trigger()
+    _wait_until_worker_finishes(qapp, window)
+
+    assert window.results_panel._pending_label.text() != "0"
+    assert window.unpacked_table_panel.model.rowCount() > 0
+    window.close()
+
+
+def test_populate_results_updates_warnings_panel_and_summary(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    from cargo_optimizer.domain.dimensions import Dimensions3D
+    from cargo_optimizer.domain.enums import LoadingSpaceCategory
+    from cargo_optimizer.domain.loading_space import LoadingSpace
+    from cargo_optimizer.domain.packing_result import PackingResult
+
+    window = MainWindow(app_settings)
+    space = LoadingSpace(
+        name="Espacio de prueba",
+        category=LoadingSpaceCategory.OTHER,
+        internal_dimensions=Dimensions3D(100.0, 100.0, 100.0),
+    )
+    result = PackingResult(
+        loading_space=space,
+        placements=(),
+        unpacked_units=(),
+        requested_count=0,
+        packed_count=0,
+        used_volume_cm3=0.0,
+        used_weight_kg=0.0,
+        execution_time_seconds=0.01,
+        algorithm_name="greedy_extreme_point_v1",
+        warnings=("Aviso de prueba A", "Aviso de prueba B"),
+    )
+
+    window._populate_results(result)
+
+    assert window.results_panel._warnings_label.text() == "2"
+    window.close()

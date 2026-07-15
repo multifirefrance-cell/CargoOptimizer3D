@@ -15,7 +15,7 @@ fase se adelanta a la anterior.
 | 4.1 | Primer optimizador funcional | `optimization` (hermano de `domain`) | **Completada** |
 | 4.2 | Optimización de rendimiento del motor de packing | `optimization` (mismos módulos, sin nuevo paquete) | **Completada** |
 | 5.0 | Base de la interfaz de escritorio | `presentation/desktop` (ventana principal, paneles, sin conectar el motor) | **Completada** |
-| 5.1 | Conectar el motor con la interfaz | `presentation/desktop` (invocar `PackingEngine` desde `MainWindow`) | Pendiente |
+| 5.1 | Conectar el motor con la interfaz | `presentation/desktop` (invocar `PackingEngine` desde `MainWindow`) | **Completada** |
 | 6 | Visualización 3D | `infrastructure` (adaptador VTK) | Pendiente |
 | 7 | Persistencia | `infrastructure` (adaptador SQLAlchemy/SQLite) | Pendiente |
 | 8 | Reportes | `infrastructure` (adaptadores openpyxl/ReportLab) | Pendiente |
@@ -75,28 +75,41 @@ que lo va a alojar.
 
 ## Estado actual
 
-Fin de fase 5.0: base profesional de la interfaz de escritorio.
-`presentation/desktop` tiene ahora una `MainWindow` real (menús con
-acciones reales u honestamente marcadas "disponible en una próxima
-versión", toolbar, paneles acoplables, formulario de Loading Space con
-perfiles predefinidos y modo personalizado, tabla de productos sobre
-`QAbstractTableModel`/`QTableView`, panel de resultados vacío, y un
-placeholder de vista 3D), con estilo industrial neutro claro/oscuro y
-persistencia de tamaños/posiciones/columnas/último directorio/último
-perfil vía `QSettings` (nunca SQLite). El motor
-(`domain`/`geometry`/`rules`/`optimization`) queda intacto y congelado:
-esta fase no lo modifica ni lo invoca — `PackingEngine` no se llama
-todavía desde la interfaz. Se corrigió de paso una inconsistencia
-objetiva preexistente (`cargo_optimizer.__version__` seguía en "0.6.0"
-mientras `pyproject.toml` ya declaraba "0.6.1" tras la fase 4.2); ambos
-quedan en "0.7.0". 370 pruebas en verde (334 previas + 36 nuevas de
-`tests/presentation/desktop/`, todas ejecutadas con la plataforma Qt
-`offscreen` para no depender de un entorno gráfico). No se ha escrito
-código de visualización 3D, persistencia, exportación/importación real
-ni API. La siguiente sesión de desarrollo debe abordar la **fase 5.1**
-(conectar `PackingEngine` con la acción "Ejecutar optimización" y el
-panel de resultados) antes de pasar a la fase 6 (visualización 3D). Si
-el rendimiento del motor a gran escala (250+ instancias) sigue siendo
+Fin de fase 5.1: la interfaz de escritorio ya ejecuta el motor real de
+principio a fin. `MainWindow._build_packing_request()` lee el
+`LoadingSpace` del formulario y los `LoadUnit` de la tabla de
+productos, construye una `PackingRequest` real (o explica con claridad,
+vía `QMessageBox`, por qué no puede si falta algo) y "Ejecutar
+optimización" la despacha a `OptimizationWorker`
+(`presentation/desktop/workers/`), un `QThread` dedicado que llama a
+`PackingEngine.optimize(...)` con su propio `CancellationToken` y
+reenvía `PackingProgress`/`PackingResult` a la interfaz por señales —
+la optimización nunca bloquea el hilo de la GUI. "Cancelar" activa el
+`CancellationToken`; la interfaz queda consistente (controles
+rehabilitados, barra de progreso oculta) en cuanto el hilo termina,
+sin bloquear esperando. Los resultados se reparten en cuatro pestañas
+del panel inferior: Resumen (`ResultsPanel`, ahora con cantidad
+pendiente y conteo de avisos), No cargados (`UnpackedTablePanel`:
+SKU/Instancia/Razón/Código sobre las `UnpackedUnit` reales), Avisos
+(`WarningsPanel`, sobre `PackingResult.warnings`) y Registro
+(`LogPanel`: inicio, fin, duración, cancelación y errores, con marca de
+tiempo). Todo error real (`PackingRequestValidationError`,
+`OptimizationInternalError` o cualquier excepción inesperada del hilo
+del motor) se muestra con `QMessageBox`, nunca solo por consola. El
+motor (`domain`/`geometry`/`rules`/`optimization`) sigue intacto: esta
+fase solo consume su API pública
+(`PackingEngine`/`PackingRequest`/`PackingProgress`/`CancellationToken`),
+verificado por `git diff` vacío en esos cuatro paquetes antes del
+commit. 386 pruebas en verde (370 previas + 16 nuevas: `OptimizationWorker`
+en hilo real y síncrono, `UnpackedUnitTableModel`, y la integración
+completa de `MainWindow` — construcción de solicitud, validaciones,
+ejecución, cancelación, error, resultados —, todas bajo la plataforma
+Qt `offscreen`). No se ha escrito código de visualización 3D,
+persistencia, exportación/importación real, ni Undo/Redo. La siguiente
+sesión de desarrollo debe abordar la **fase 6** (visualización 3D),
+reutilizando este mismo flujo de ejecución en segundo plano para
+alimentar el visor con los `Placement` del `PackingResult`. Si el
+rendimiento del motor a gran escala (250+ instancias) sigue siendo
 prioritario en paralelo, ver `docs/OptimizerPerformance.md` para la
 alternativa pendiente (índice espacial dentro de `rules`/`geometry`,
 con ADR explícito).

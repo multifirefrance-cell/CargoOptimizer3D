@@ -1,17 +1,21 @@
 """Ventana principal de la aplicación de escritorio.
 
-Base profesional de la fase 5.0: estructura, navegación, formularios y
-persistencia de interfaz. No ejecuta `PackingEngine` todavía (fase
-5.1) — toda acción de menú/toolbar que dependería del motor real
-muestra "Disponible en una próxima versión" en la barra de estado en
-vez de simular un resultado falso. Por el mismo motivo, esta ventana no
-importa nada de `cargo_optimizer.optimization`.
+Desde la fase 5.1, `MainWindow` conecta la base de interfaz de la fase
+5.0 con el motor real: "Ejecutar optimización" construye una
+`PackingRequest` a partir de los paneles, la ejecuta en
+`OptimizationWorker` (un `QThread` — nunca en el hilo de la interfaz) y
+vuelca el `PackingResult` en los paneles de resultados. Sigue sin tocar
+`domain`/`geometry`/`rules`/`optimization`: solo consume su API pública
+(`PackingEngine`, `PackingRequest`, `PackingProgress`,
+`CancellationToken`, vía `workers/optimization_worker.py`).
 """
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from pathlib import Path
+from uuid import UUID
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QAction, QCloseEvent
@@ -22,24 +26,37 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QProgressBar,
     QSplitter,
     QStatusBar,
+    QTabWidget,
     QToolBar,
 )
 
 from cargo_optimizer import __version__
+from cargo_optimizer.domain.load_unit import LoadUnit
+from cargo_optimizer.domain.packing_result import PackingResult
+from cargo_optimizer.optimization import GreedyExtremePointStrategy, PackingProgress, PackingRequest
+from cargo_optimizer.optimization.exceptions import PackingRequestValidationError
 from cargo_optimizer.presentation.desktop.icons import icon
 from cargo_optimizer.presentation.desktop.panels.loading_space_form_panel import (
     LoadingSpaceFormPanel,
 )
+from cargo_optimizer.presentation.desktop.panels.log_panel import LogPanel
 from cargo_optimizer.presentation.desktop.panels.product_table_panel import ProductTablePanel
-from cargo_optimizer.presentation.desktop.panels.project_tree_panel import ProjectTreePanel
+from cargo_optimizer.presentation.desktop.panels.project_tree_panel import (
+    SECTION_RESULTS,
+    ProjectTreePanel,
+)
 from cargo_optimizer.presentation.desktop.panels.results_panel import ResultsPanel
+from cargo_optimizer.presentation.desktop.panels.unpacked_table_panel import UnpackedTablePanel
 from cargo_optimizer.presentation.desktop.panels.viewport_3d_placeholder import (
     Viewport3DPlaceholder,
 )
+from cargo_optimizer.presentation.desktop.panels.warnings_panel import WarningsPanel
 from cargo_optimizer.presentation.desktop.settings import AppSettings
 from cargo_optimizer.presentation.desktop.style import THEME_DARK, THEME_LIGHT, apply_theme
+from cargo_optimizer.presentation.desktop.workers.optimization_worker import OptimizationWorker
 
 _NOT_IMPLEMENTED_MESSAGE_MS = 4000
 _STATUS_MESSAGE_MS = 4000
@@ -47,7 +64,14 @@ _SPLITTER_MAIN = "main"
 _SPLITTER_WORK_AREA = "workArea"
 _SPLITTER_LEFT_WORK = "leftWork"
 _HEADER_PRODUCT_TABLE = "productTable"
-_ENGINE_LABEL = "Motor: no conectado (fase 5.1)"
+_ENGINE_LABEL = f"Motor: {GreedyExtremePointStrategy.name}"
+
+STATE_READY = "listo"
+STATE_PREPARING = "preparando"
+STATE_OPTIMIZING = "optimizando"
+STATE_CANCELLING = "cancelando"
+STATE_FINISHED = "finalizado"
+STATE_ERROR = "error"
 
 
 class MainWindow(QMainWindow):
@@ -57,6 +81,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._settings = settings or AppSettings()
         self._project_name = "Proyecto sin guardar"
+        self._optimization_worker: OptimizationWorker | None = None
+        self._last_load_units_by_id: dict[UUID, LoadUnit] = {}
+        self._cancel_requested = False
+        self._run_start_time = 0.0
 
         self.setWindowTitle(f"CargoOptimizer3D v{__version__}")
         self.resize(1280, 800)
@@ -80,6 +108,9 @@ class MainWindow(QMainWindow):
         self.loading_space_form_panel = LoadingSpaceFormPanel(self)
         self.product_table_panel = ProductTablePanel(self)
         self.results_panel = ResultsPanel(self)
+        self.unpacked_table_panel = UnpackedTablePanel(self)
+        self.warnings_panel = WarningsPanel(self)
+        self.log_panel = LogPanel(self)
         self.viewport_3d_placeholder = Viewport3DPlaceholder(self)
 
         self.project_tree_panel.section_activated.connect(self._on_project_section_activated)
@@ -108,10 +139,17 @@ class MainWindow(QMainWindow):
         self.work_area_splitter.setStretchFactor(0, 1)
         self.work_area_splitter.setStretchFactor(1, 1)
 
+        self.results_tabs = QTabWidget(self)
+        self.results_tabs.setObjectName("resultsTabs")
+        self.results_tabs.addTab(self.results_panel, "Resumen")
+        self.results_tabs.addTab(self.unpacked_table_panel, "No cargados")
+        self.results_tabs.addTab(self.warnings_panel, "Avisos")
+        self.results_tabs.addTab(self.log_panel, "Registro")
+
         self.main_splitter = QSplitter(Qt.Orientation.Vertical, self)
         self.main_splitter.setObjectName(_SPLITTER_MAIN)
         self.main_splitter.addWidget(self.work_area_splitter)
-        self.main_splitter.addWidget(self.results_panel)
+        self.main_splitter.addWidget(self.results_tabs)
         self.main_splitter.setStretchFactor(0, 1)
 
         self.setCentralWidget(self.main_splitter)
@@ -158,10 +196,10 @@ class MainWindow(QMainWindow):
         )
 
         self.action_run_optimization = self._make_action(
-            "optimize", "&Ejecutar optimización", "F5", self._stub("Ejecutar optimización")
+            "optimize", "&Ejecutar optimización", "F5", self._on_run_optimization
         )
         self.action_cancel_optimization = self._make_action(
-            "cancel", "&Cancelar", None, self._stub("Cancelar optimización")
+            "cancel", "&Cancelar", None, self._on_cancel_optimization
         )
         self.action_cancel_optimization.setEnabled(False)
         self.action_configure_optimization = self._make_action(
@@ -313,10 +351,20 @@ class MainWindow(QMainWindow):
         bar = QStatusBar(self)
         self.setStatusBar(bar)
 
+        self._progress_bar = QProgressBar(self)
+        self._progress_bar.setObjectName("optimizationProgressBar")
+        self._progress_bar.setMaximumWidth(180)
+        self._progress_bar.setFormat("%v/%m")
+        self._progress_bar.setVisible(False)
+
+        self._progress_time_label = QLabel("", self)
         self._project_status_label = QLabel(self._project_name, self)
         self._engine_status_label = QLabel(_ENGINE_LABEL, self)
-        self._state_status_label = QLabel("Estado: inactivo", self)
+        self._state_status_label = QLabel("", self)
+        self._set_state(STATE_READY)
 
+        bar.addPermanentWidget(self._progress_time_label)
+        bar.addPermanentWidget(self._progress_bar)
         bar.addPermanentWidget(self._project_status_label)
         bar.addPermanentWidget(self._engine_status_label)
         bar.addPermanentWidget(self._state_status_label)
@@ -380,8 +428,11 @@ class MainWindow(QMainWindow):
 
     def _on_project_section_activated(self, section: str) -> None:
         self.statusBar().showMessage(f"Sección: {section}", _STATUS_MESSAGE_MS)
+        if section == SECTION_RESULTS:
+            self._on_show_results()
 
     def _on_show_results(self) -> None:
+        self.results_tabs.setCurrentWidget(self.results_panel)
         self.results_panel.setFocus()
         sizes = self.main_splitter.sizes()
         if len(sizes) == 2 and sizes[1] < 80:
@@ -422,6 +473,163 @@ class MainWindow(QMainWindow):
         )
 
     # ------------------------------------------------------------------
+    # Ejecución del motor de optimización
+    # ------------------------------------------------------------------
+
+    def _build_packing_request(self) -> PackingRequest | None:
+        """Lee espacio y productos de la interfaz; `None` si falta algo o son inválidos.
+
+        Nunca lanza una excepción hacia el llamador: cualquier problema
+        (espacio incompleto, sin productos, SKU duplicados tras editar la
+        tabla, etc.) se explica con un `QMessageBox` y devuelve `None`
+        para que `_on_run_optimization` simplemente no ejecute nada.
+        """
+        loading_space = self.loading_space_form_panel.build_loading_space()
+        if loading_space is None:
+            self._show_warning(
+                "Espacio de carga incompleto",
+                "Define un espacio de carga válido (nombre, dimensiones positivas y, si "
+                "aplica, un peso máximo positivo) antes de optimizar.",
+            )
+            return None
+
+        load_units = self.product_table_panel.model.load_units()
+        if not load_units:
+            self._show_warning(
+                "Sin productos",
+                "Agrega al menos un producto antes de ejecutar la optimización.",
+            )
+            return None
+
+        try:
+            return PackingRequest(loading_space=loading_space, load_units=load_units)
+        except PackingRequestValidationError as exc:
+            self._show_warning("Solicitud de optimización inválida", str(exc))
+            return None
+
+    def _on_run_optimization(self) -> None:
+        if self._optimization_worker is not None and self._optimization_worker.isRunning():
+            return
+
+        request = self._build_packing_request()
+        if request is None:
+            return
+
+        self._last_load_units_by_id = {unit.id: unit for unit in request.load_units}
+        self._cancel_requested = False
+        self._run_start_time = time.monotonic()
+
+        self._set_state(STATE_PREPARING)
+        self._set_running_controls_enabled(False)
+        self.results_panel.clear()
+        self.unpacked_table_panel.model.clear()
+        self.warnings_panel.clear()
+        self._progress_bar.setRange(0, 1)
+        self._progress_bar.setValue(0)
+        self._progress_bar.setVisible(True)
+        self._progress_time_label.setText("0.0 s")
+        self.log_panel.append_entry(
+            f"Optimización iniciada: {len(request.load_units)} SKU(s) sobre "
+            f"'{request.loading_space.name}'."
+        )
+        self.statusBar().showMessage("Optimizando…")
+
+        worker = OptimizationWorker(request, self)
+        worker.progress.connect(self._on_optimization_progress)
+        worker.optimization_finished.connect(self._on_optimization_finished)
+        worker.optimization_failed.connect(self._on_optimization_failed)
+        worker.finished.connect(self._on_worker_thread_finished)
+        self._optimization_worker = worker
+
+        self._set_state(STATE_OPTIMIZING)
+        worker.start()
+
+    def _on_cancel_optimization(self) -> None:
+        worker = self._optimization_worker
+        if worker is None or not worker.isRunning():
+            return
+        self._cancel_requested = True
+        worker.cancellation_token.cancel()
+        self._set_state(STATE_CANCELLING)
+        self.action_cancel_optimization.setEnabled(False)
+        self.log_panel.append_entry("Cancelación solicitada por el usuario.")
+        self.statusBar().showMessage("Cancelando…")
+
+    def _on_optimization_progress(self, progress: PackingProgress) -> None:
+        total = max(progress.total_instances, 1)
+        self._progress_bar.setRange(0, total)
+        self._progress_bar.setValue(min(progress.processed_instances, total))
+        self._progress_time_label.setText(f"{progress.elapsed_seconds:.1f} s")
+
+    def _on_optimization_finished(self, result: PackingResult) -> None:
+        self._populate_results(result)
+        self._set_state(STATE_FINISHED)
+        message = (
+            "Optimización cancelada." if self._cancel_requested else "Optimización finalizada."
+        )
+        self.log_panel.append_entry(
+            f"{message} {result.packed_count}/{result.requested_count} cargadas en "
+            f"{result.execution_time_seconds:.2f} s."
+        )
+        self.statusBar().showMessage(message, _STATUS_MESSAGE_MS)
+        self._on_show_results()
+
+    def _on_optimization_failed(self, message: str) -> None:
+        self._set_state(STATE_ERROR)
+        self.log_panel.append_entry(f"Error: {message}")
+        self.statusBar().showMessage("Error durante la optimización.", _STATUS_MESSAGE_MS)
+        self._show_error("Error de optimización", message)
+
+    def _on_worker_thread_finished(self) -> None:
+        self._progress_bar.setVisible(False)
+        self._set_running_controls_enabled(True)
+        worker = self._optimization_worker
+        self._optimization_worker = None
+        if worker is not None:
+            worker.deleteLater()
+
+    def _populate_results(self, result: PackingResult) -> None:
+        self.results_panel.set_results(
+            requested_count=result.requested_count,
+            packed_count=result.packed_count,
+            pending_count=result.unpacked_count,
+            weight_kg=result.used_weight_kg,
+            volume_m3=result.used_volume_cm3 / 1_000_000.0,
+            utilization_percent=result.volume_utilization_percent,
+            elapsed_seconds=result.execution_time_seconds,
+            status="Cancelado" if self._cancel_requested else "Finalizado",
+            warnings_count=len(result.warnings),
+        )
+        self.unpacked_table_panel.model.set_unpacked_units(
+            result.unpacked_units, self._last_load_units_by_id
+        )
+        self.warnings_panel.set_warnings(result.warnings)
+
+    def _set_running_controls_enabled(self, enabled: bool) -> None:
+        for action in (
+            self.action_run_optimization,
+            self.action_new,
+            self.action_open,
+            self.action_new_product,
+            self.action_delete_products,
+            self.action_import,
+            self.action_import_products,
+        ):
+            action.setEnabled(enabled)
+        self.action_cancel_optimization.setEnabled(not enabled)
+        self.product_table_panel.setEnabled(enabled)
+        self.loading_space_form_panel.setEnabled(enabled)
+
+    def _set_state(self, state: str) -> None:
+        self._state_status_label.setText(f"Estado: {state}")
+
+    def _show_warning(self, title: str, message: str) -> None:
+        QMessageBox.warning(self, title, message)
+
+    def _show_error(self, title: str, message: str) -> None:
+        QMessageBox.critical(self, title, message)
+
+    # ------------------------------------------------------------------
     # Persistencia de interfaz (QSettings)
     # ------------------------------------------------------------------
 
@@ -451,5 +659,9 @@ class MainWindow(QMainWindow):
         self._settings.sync()
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 (nombre impuesto por Qt)
+        worker = self._optimization_worker
+        if worker is not None and worker.isRunning():
+            worker.cancellation_token.cancel()
+            worker.wait(5000)
         self._save_ui_state()
         super().closeEvent(event)

@@ -145,17 +145,21 @@ Interfaz" a "5.0/5.1 = Interfaz, 6 = Visualización 3D" al construir la
 interfaz antes que VTK — ver `docs/Roadmap.md`, sección "Nota sobre la
 numeración de las fases 5 y 6".
 
-Estado actual: **base profesional de la interfaz de escritorio
-construida** (fin de fase 5.0). `presentation/desktop` tiene una
-`MainWindow` real (menús, toolbar, paneles acoplables, formulario de
-Loading Space, tabla de productos, panel de resultados vacío,
-placeholder de vista 3D, tema claro/oscuro, persistencia de interfaz
-vía `QSettings`) — ver `docs/Architecture.md`, sección `presentation`.
-El motor (`domain`/`geometry`/`rules`/`optimization`) queda intacto y
-sin conectar todavía: `PackingEngine` no se invoca desde la interfaz
-hasta la fase 5.1. No implementar todavía VTK, SQLite, Excel, PDF,
-importación/exportación real, animaciones, Undo/Redo, ni volver a
-tocar `domain`/`geometry`/`rules`/`optimization` salvo bug objetivo y
+Estado actual: **la interfaz ya ejecuta el motor real de principio a
+fin** (fin de fase 5.1). `presentation/desktop` construye una
+`PackingRequest` desde el formulario de Loading Space y la tabla de
+productos, la ejecuta en `OptimizationWorker` (un `QThread` dedicado,
+`presentation/desktop/workers/`) y vuelca el `PackingResult` en cuatro
+pestañas del panel inferior (Resumen, No cargados, Avisos, Registro) —
+ver `docs/Architecture.md`, sección `presentation`. La optimización
+nunca bloquea el hilo de la interfaz, y "Cancelar" usa el
+`CancellationToken` cooperativo del motor. El motor
+(`domain`/`geometry`/`rules`/`optimization`) sigue intacto: la fase 5.1
+solo consumió su API pública, sin modificar ninguno de esos cuatro
+paquetes (verificado con `git diff` vacío antes del commit). No
+implementar todavía VTK, SQLite, Excel, PDF, importación/exportación
+real, animaciones, Undo/Redo, ni volver a tocar
+`domain`/`geometry`/`rules`/`optimization` salvo bug objetivo y
 demostrable, hasta que se indique explícitamente. Ver `docs/Roadmap.md`
 para el detalle fase a fase.
 
@@ -320,12 +324,41 @@ conservado como historial).
 ## Invariantes de `presentation/desktop` (no romper sin ADR)
 
 Ver `docs/Architecture.md`, sección `presentation`, para el detalle
-completo de la estructura de `presentation/desktop/` construida en la
-fase 5.0.
+completo de la estructura de `presentation/desktop/` construida en las
+fases 5.0 y 5.1.
 
-- `presentation/desktop` no invoca `PackingEngine` todavía: ninguna
-  acción de menú/toolbar ejecuta el motor de optimización. Conectarlo
-  es exactamente el alcance de la fase 5.1, no antes.
+- `PackingEngine.optimize(...)` nunca se ejecuta en el hilo de la
+  interfaz: solo `OptimizationWorker` (`workers/optimization_worker.py`,
+  un `QThread`) lo invoca. No añadir una llamada directa a
+  `PackingEngine`/`RulesEngine`/ninguna función de `optimization` desde
+  `main_window.py` ni ningún panel — pasaría a bloquear la GUI durante
+  toda la ejecución (segundos a minutos, ver
+  `docs/OptimizerPerformance.md`).
+- El `progress_callback` que recibe `PackingEngine.optimize(...)` (la
+  función conectada a `OptimizationWorker.progress.emit`) se ejecuta
+  **dentro del hilo del worker**: no debe tocar ningún widget
+  directamente, solo emitir la señal `Signal(object)` — Qt entrega el
+  objeto al hilo de la GUI mediante una conexión en cola automática
+  porque emisor y receptor están en hilos distintos.
+- La limpieza tras una ejecución (rehabilitar controles, ocultar la
+  barra de progreso, liberar la referencia al worker) pasa siempre por
+  `MainWindow._on_worker_thread_finished`, conectado a la señal
+  `QThread.finished` nativa — nunca duplicar esa lógica en los
+  manejadores de éxito/cancelación/error, para que solo haya un punto
+  que decide "ya se puede volver a interactuar con la interfaz".
+- La cancelación es cooperativa y asíncrona
+  (`OptimizationWorker.cancellation_token.cancel()`): nunca se llama a
+  `QThread.wait()` desde el hilo de la GUI para esperar una
+  cancelación de usuario (bloquearía la interfaz, justo lo que se
+  quería evitar). La única excepción deliberada es `closeEvent`, donde
+  bloquear brevemente al cerrar la ventana sí es aceptable.
+- Todos los errores (validación de la solicitud, fallo del motor,
+  excepción inesperada del hilo del worker) se muestran con
+  `QMessageBox` (`MainWindow._show_warning`/`_show_error`); nunca solo
+  por consola ni silenciados. `OptimizationWorker.run()` captura
+  cualquier excepción de `engine.optimize(...)` y la reenvía por la
+  señal `optimization_failed`, precisamente para que nunca se pierda
+  en el hilo secundario.
 - Toda acción de menú o toolbar sin implementación real muestra
   "[acción]: disponible en una próxima versión." en la barra de
   estado (`MainWindow._stub`); nunca queda una acción sin `slot`

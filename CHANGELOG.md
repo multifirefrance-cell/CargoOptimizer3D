@@ -4,6 +4,74 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Este proyecto aún no ha alcanzado la versión 1.0; el versionado 0.x
 puede incluir cambios estructurales entre versiones menores.
 
+## [0.8.0] - 2026-07-15
+
+Fase 5.1: conecta la interfaz de escritorio de la fase 5.0 con el
+motor real. Trabajo exclusivamente dentro de `presentation/desktop`;
+`domain`, `geometry`, `rules` y `optimization` quedan sin ningún
+cambio (verificado con `git diff` vacío en los cuatro paquetes antes
+del commit) — esta fase solo consume la API pública del motor.
+
+### Added
+
+- `presentation/desktop/workers/optimization_worker.py`:
+  `OptimizationWorker(QThread)`, el único módulo de la interfaz que
+  importa `PackingEngine`/`CancellationToken`. Ejecuta
+  `PackingEngine.optimize(...)` en un hilo dedicado (nunca en el hilo
+  de la GUI), con señales `progress`/`optimization_finished`/
+  `optimization_failed` que entregan `PackingProgress`/`PackingResult`/
+  el mensaje de error al hilo principal vía conexión en cola.
+- `MainWindow._build_packing_request()`: lee `LoadingSpace` del
+  formulario y `LoadUnit` de la tabla de productos, construye una
+  `PackingRequest` real y explica con `QMessageBox.warning` — sin
+  ejecutar nada — si falta un espacio válido, no hay productos, o la
+  solicitud es inválida (p. ej. SKU duplicados tras editar la tabla).
+- "Ejecutar optimización" ahora deshabilita los controles relevantes
+  (tabla de productos, formulario de espacio, nuevo/abrir/importar),
+  lanza `OptimizationWorker`, y los rehabilita automáticamente al
+  terminar (éxito, cancelación o error), vía la señal `QThread.finished`
+  como único punto de limpieza.
+- "Cancelar" activa el `CancellationToken` cooperativo del worker en
+  curso; la interfaz espera su finalización limpia de forma asíncrona
+  (nunca bloqueando la GUI con `QThread.wait()`, salvo al cerrar la
+  ventana) y queda consistente en cuanto el hilo termina.
+- Barra de progreso y tiempo transcurrido en la `StatusBar`, alimentados
+  por `PackingProgress`; `StatusBar` ahora también refleja el estado
+  real de la ejecución (listo/preparando/optimizando/cancelando/
+  finalizado/error).
+- El panel inferior pasa a ser un `QTabWidget` con cuatro pestañas:
+  - **Resumen** (`ResultsPanel`, ampliado): cantidad solicitada/
+    cargada/pendiente, peso, volumen, utilización, tiempo, estado y
+    conteo de avisos — poblado automáticamente desde `PackingResult`.
+  - **No cargados** (`UnpackedTablePanel` + `UnpackedUnitTableModel`,
+    nuevos): SKU, instancia, razón y código de cada `UnpackedUnit` real.
+  - **Avisos** (`WarningsPanel`, nuevo): `PackingResult.warnings` tal
+    cual, sin reinterpretarlos por origen (el propio motor ya los
+    agrega en un único conjunto — ver `docs/OptimizationEngine.md`).
+  - **Registro** (`LogPanel`, nuevo): inicio, fin, duración,
+    cancelación y errores de cada ejecución, con marca de tiempo.
+- `tests/presentation/desktop/`: 16 pruebas nuevas —
+  `test_optimization_worker.py` (ejecución síncrona determinista,
+  cancelación pre-armada sin condición de carrera, fallo del motor,
+  y una prueba con `.start()` real que verifica que no bloquea al
+  llamador), `test_unpacked_table_model.py`, y
+  `test_main_window_optimization.py` (construcción de solicitud,
+  validaciones, ejecución de punta a punta, cancelación, error vía
+  `QMessageBox`, resultados/avisos/pendientes). 386 pruebas en total.
+
+### Changed
+
+- `docs/Architecture.md`, `docs/Roadmap.md`: fase 5.1 marcada
+  completada, fase 6 (visualización 3D) como siguiente paso.
+- `CLAUDE.md`: nuevas invariantes de `presentation/desktop` para el
+  ciclo de vida del worker y la regla de "todo error por QMessageBox,
+  nunca solo por consola".
+
+### Fixed
+
+- Ninguna corrección de comportamiento del motor: esta fase es
+  exclusivamente de integración de interfaz.
+
 ## [0.7.0] - 2026-07-15
 
 Fase 5.0: base profesional de la interfaz de escritorio. Trabajo
