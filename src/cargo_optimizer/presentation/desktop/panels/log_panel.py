@@ -1,11 +1,15 @@
 """Panel de registro: inicio, fin, duración, errores y cancelación de cada ejecución.
 
-Registro puramente informativo de esta sesión de la interfaz (no
-persiste a disco — eso pertenece a una fase de persistencia futura, no
-a "recordar qué pasó en esta ventana abierta"). Usa la fuente de ancho
-fijo del sistema (`QFontDatabase.SystemFont.FixedFont`) para que las
-marcas de tiempo alineen, sin fijar un nombre de fuente concreto que
-pueda no estar instalado.
+Registro puramente informativo de esta sesión de la interfaz: se
+descarta deliberadamente al cerrar la ventana. No es un descuido — ni
+`.cargo3d` (fase 7.0) ni `project_history`/`packing_run_history`
+(catálogo SQLite, fase 7.1) guardan esta bitácora entrada por entrada,
+solo metadatos agregados (ver `docs/Database.md`); "qué pasó en esta
+ventana abierta" es un registro efímero, no un historial de proyecto.
+Usa la fuente de ancho fijo del sistema
+(`QFontDatabase.SystemFont.FixedFont`) para que las marcas de tiempo
+alineen, sin fijar un nombre de fuente concreto que pueda no estar
+instalado.
 """
 
 from __future__ import annotations

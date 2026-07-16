@@ -1,8 +1,74 @@
 # Changelog
 
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
-Este proyecto aún no ha alcanzado la versión 1.0; el versionado 0.x
-puede incluir cambios estructurales entre versiones menores.
+Desde `1.0.0b1` el proyecto sigue [PEP 440](https://peps.python.org/pep-0440/)
+para pre-releases (`bN` = "beta N"); antes de esta versión el
+versionado 0.x podía incluir cambios estructurales entre versiones
+menores sin aviso adicional.
+
+## [1.0.0b1] - 2026-07-16
+
+Primera Beta distribuible: cierre de la auditoría de estabilización
+("Beta 1.0"). Sin funcionalidades nuevas, sin cambios de arquitectura,
+sin optimización adicional del motor — solo bugs, textos, estados
+inconsistentes y sincronización de versión. Ver el informe de auditoría
+completo entregado junto a este commit para el detalle de qué se
+revisó, qué se corrigió y qué queda abierto a propósito.
+
+### Fixed
+
+- `MainWindow.closeEvent` solo esperaba a `_optimization_worker`; una
+  optimización multi-espacio en curso podía dejar el hilo de
+  `MultiSpaceOptimizationWorker` corriendo mientras la ventana (y sus
+  widgets) ya se habían destruido.
+- Un resultado multi-espacio de una ejecución anterior quedaba visible
+  y seleccionable (pestaña "Multi-espacio") después de ejecutar una
+  optimización normal o de abrir un proyecto distinto, permitiendo que
+  el selector de espacio sobrescribiera en silencio el visor 3D con
+  datos obsoletos.
+- `LoadingSpaceProfileRepository.archive()` no comprobaba
+  `is_builtin`, al contrario que `update()`: un perfil integrado
+  (p. ej. "Contenedor 20 pies") podía archivarse sin aviso desde
+  "Perfiles de espacio…", violando la protección ya documentada en
+  `CLAUDE.md`. Ahora lanza `RepositoryError`, igual que `update()`.
+- `LoadingSpaceProfileRepository.search()` devolvía `LoadingSpace`
+  desnudos y el diálogo fabricaba `is_builtin=False` para todos los
+  resultados; buscar un perfil integrado por nombre lo dejaba parecer
+  editable/archivable. `search()` ahora devuelve
+  `LoadingSpaceProfileEntry` con el `is_builtin`/`is_active` reales,
+  igual que `list_all()`.
+- `BulkImportDialog._on_import_all`: un archivo que fallaba con
+  `ExcelError` se registraba con `error_count == 0` en el resumen y en
+  el informe exportado, indistinguible de un archivo vacío pero
+  válido. Ahora el fallo queda como un `RowError` real en el informe.
+- `BulkImportDialog`: el botón "Cerrar" estaba conectado tres veces
+  (`rejected`, `accepted` y `clicked` del propio botón), dos de ellas
+  contradictorias entre sí (`accept()` tras un botón de rol
+  "Rechazar"); un único clic llamaba a `done()` dos veces. Ahora solo
+  queda `rejected.connect(self.reject)`.
+- `pyproject.toml` tenía `version = "0.14.0"`, dos versiones menores
+  por detrás de `src/cargo_optimizer/__init__.py` (`0.16.0`).
+  Sincronizados ambos a `1.0.0b1`.
+
+### Changed
+
+- Docstrings desactualizados que describían el estado del proyecto
+  *antes* de fases ya implementadas: `panels/project_tree_panel.py`
+  (afirmaba que no existía un modelo de proyecto persistente, ni
+  navegación real desde el árbol — ambos existen desde las fases 7.0 y
+  5.1), `panels/product_table_panel.py` y `panels/log_panel.py`
+  (redactados como si la persistencia de proyecto fuera un trabajo
+  futuro, cuando ya existe desde la fase 7.0; el registro de esta
+  sesión de interfaz sigue siendo efímero **a propósito**, no por
+  ausencia de esa fase).
+
+### Added
+
+- Pruebas de regresión para cada corrección anterior (cierre de
+  ventana con worker multi-espacio activo, estado multi-espacio
+  obsoleto tras optimización normal, protección de perfiles integrados
+  frente a archivado y a búsqueda, informe de importación masiva con
+  error real, doble conexión del botón "Cerrar").
 
 ## [0.16.0] - 2026-07-16
 

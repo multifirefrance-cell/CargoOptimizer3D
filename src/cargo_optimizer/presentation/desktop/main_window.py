@@ -1608,7 +1608,7 @@ class MainWindow(QMainWindow):
         QMessageBox.about(
             self,
             "Acerca de CargoOptimizer3D",
-            f"<b>CargoOptimizer3D</b> v{__version__}<br>"
+            f"<b>CargoOptimizer3D</b> v{__version__} (Beta 1.0)<br>"
             "Software de optimización de carga 3D para espacios de carga universales.",
         )
 

@@ -104,13 +104,7 @@ class LoadingSpaceProfilesDialog(QDialog):
 
     def _refresh(self) -> None:
         text = self._search_edit.text().strip()
-        if text:
-            entries = tuple(
-                LoadingSpaceProfileEntry(loading_space=space, is_active=True, is_builtin=False)
-                for space in self._repository.search(text)
-            )
-        else:
-            entries = self._repository.list_all()
+        entries = self._repository.search(text) if text else self._repository.list_all()
         self.model.set_entries(entries)
 
     def _selected_entry(self) -> LoadingSpaceProfileEntry | None:
@@ -177,6 +171,14 @@ class LoadingSpaceProfilesDialog(QDialog):
     def _on_archive(self) -> None:
         entry = self._selected_entry()
         if entry is None:
+            return
+        if entry.is_builtin:
+            QMessageBox.information(
+                self,
+                "Perfil integrado",
+                "Los perfiles integrados no se pueden archivar directamente. "
+                "Usa 'Duplicar…' para crear una copia personalizada archivable.",
+            )
             return
         try:
             self._repository.archive(entry.loading_space.id)

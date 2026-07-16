@@ -15,7 +15,7 @@ from cargo_optimizer import LoadingSpace, LoadUnit, PackingEngine, PackingReques
 
 
 def test_version_is_defined() -> None:
-    assert cargo_optimizer.__version__ == "0.16.0"
+    assert cargo_optimizer.__version__ == "1.0.0b1"
 
 
 def test_all_layers_import() -> None:

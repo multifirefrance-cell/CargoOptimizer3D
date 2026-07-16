@@ -145,6 +145,40 @@ def test_on_duplicate_prompts_for_new_name(
     assert repo.get_by_name("Copia") is not None
 
 
+def test_on_archive_builtin_profile_shows_information_and_does_not_archive(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repository(tmp_path)
+    repo.ensure_builtin_profiles()
+    builtin_id = repo.list_all()[0].loading_space.id
+    dialog = LoadingSpaceProfilesDialog(None, repository=repo)
+    dialog.table_view.selectRow(0)
+    infos: list[tuple[object, ...]] = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: infos.append(a)))
+
+    dialog._on_archive()
+
+    assert len(infos) == 1
+    assert repo.get_by_id(builtin_id) is not None
+
+
+def test_search_results_still_protect_builtin_profiles_from_edit(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repository(tmp_path)
+    repo.ensure_builtin_profiles()
+    builtin_name = repo.list_all()[0].loading_space.name
+    dialog = LoadingSpaceProfilesDialog(None, repository=repo)
+    dialog._search_edit.setText(builtin_name)
+    dialog.table_view.selectRow(0)
+    infos: list[tuple[object, ...]] = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: infos.append(a)))
+
+    dialog._on_edit()
+
+    assert len(infos) == 1
+
+
 def test_on_archive_then_restore(qapp: QApplication, tmp_path: Path) -> None:
     repo = _repository(tmp_path)
     added = repo.add(_space(name="Perfil"))

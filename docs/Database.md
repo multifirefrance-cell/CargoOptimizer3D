@@ -210,8 +210,12 @@ mapeo automático.
   `ensure_builtin_profiles()` (crea los tres perfiles integrados —
   contenedor 20', 40' y 40' HQ — solo si faltan, idempotente) y la
   protección explícita de que un perfil `is_builtin=True` no se puede
-  `update()` directamente (`RepositoryError`): hay que duplicarlo como
-  personalizado primero.
+  `update()` ni `archive()` directamente (ambos lanzan
+  `RepositoryError`): hay que duplicarlo como personalizado primero.
+  `search(text)` devuelve `LoadingSpaceProfileEntry` (mismo tipo que
+  `list_all()`), con el `is_builtin`/`is_active` reales de cada fila —
+  nunca `LoadingSpace` desnudos con un `is_builtin` inventado por quien
+  llama.
 - **`ProjectHistoryRepository`**: `record_open`/`record_save` hacen
   *upsert* por `file_path` (una fila por proyecto, no una por evento);
   `list_recent(limit)` ordena por `coalesce(last_saved_at,

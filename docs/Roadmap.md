@@ -211,3 +211,11 @@ explícitamente antes de empezar. Si el rendimiento del motor a gran
 escala (250+ instancias) sigue siendo prioritario en paralelo, ver
 `docs/OptimizerPerformance.md` para la alternativa pendiente (índice
 espacial dentro de `rules`/`geometry`, con ADR explícito).
+
+Tras `OPT-01`/`OPT-02` y su integración en la interfaz, se ejecutó una
+auditoría transversal de estabilización ("Beta 1.0", versión
+`1.0.0b1`): no es una fase ni un ítem nuevo del Product Backlog, sino
+un cierre de calidad sobre todo lo ya construido (bugs reales de
+interfaz/threading/persistencia encontrados y corregidos, sin
+funcionalidades nuevas ni cambios de arquitectura) — ver `CHANGELOG.md`
+para el detalle completo de qué se corrigió.

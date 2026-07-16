@@ -33,6 +33,7 @@ from cargo_optimizer.infrastructure.excel.import_report import (
     ImportReport,
     export_import_report,
 )
+from cargo_optimizer.infrastructure.excel.results import RowError
 
 _SUMMARY_COLUMNS = (
     "Archivo",
@@ -76,8 +77,6 @@ class BulkImportDialog(QDialog):
 
         close_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
         close_box.rejected.connect(self.reject)
-        close_box.accepted.connect(self.accept)
-        close_box.button(QDialogButtonBox.StandardButton.Close).clicked.connect(self.accept)
 
         top_row = QHBoxLayout()
         top_row.addWidget(self._choose_button)
@@ -116,7 +115,7 @@ class BulkImportDialog(QDialog):
                     updated_count=0,
                     duplicate_count=0,
                     ignored_count=0,
-                    errors=(),
+                    errors=(RowError(row_number=0, message=str(exc)),),
                     elapsed_seconds=0.0,
                 )
                 QMessageBox.warning(self, "No se pudo importar", f"'{path.name}': {exc}")

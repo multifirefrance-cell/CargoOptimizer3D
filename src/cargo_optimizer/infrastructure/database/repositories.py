@@ -424,7 +424,7 @@ class LoadingSpaceProfileRepository:
             ).all()
             return tuple(_orm_to_loading_space(row) for row in rows)
 
-    def search(self, text: str) -> tuple[LoadingSpace, ...]:
+    def search(self, text: str) -> tuple[LoadingSpaceProfileEntry, ...]:
         pattern = f"%{text.lower()}%"
         with self._db.session_scope() as session:
             rows = session.scalars(
@@ -435,9 +435,24 @@ class LoadingSpaceProfileRepository:
                 )
                 .order_by(func.lower(LoadingSpaceProfileORM.name))
             ).all()
-            return tuple(_orm_to_loading_space(row) for row in rows)
+            return tuple(
+                LoadingSpaceProfileEntry(
+                    loading_space=_orm_to_loading_space(row),
+                    is_active=row.is_active,
+                    is_builtin=row.is_builtin,
+                )
+                for row in rows
+            )
 
     def archive(self, id: UUID) -> None:
+        with self._db.session_scope() as session:
+            orm = session.get(LoadingSpaceProfileORM, str(id))
+            if orm is None:
+                raise RecordNotFoundError(f"No existe un perfil de espacio con id={id}.")
+            if orm.is_builtin:
+                raise RepositoryError(
+                    "No se puede archivar un perfil integrado directamente; duplícalo primero."
+                )
         self._set_active(id, active=False)
 
     def restore(self, id: UUID) -> None:

@@ -3,7 +3,9 @@
 `QTableView` + `QAbstractTableModel`, nunca `QTableWidget` (ver
 `models/product_table_model.py`). Incluye una barra local mínima
 ("Nuevo producto" / "Eliminar seleccionados") que solo manipula el
-modelo Qt en memoria — no hay persistencia todavía.
+modelo Qt en memoria; el panel en sí no persiste nada — es
+`MainWindow` quien vuelca el modelo a `.cargo3d` (fase 7.0, ver
+`docs/ProjectFiles.md`) cuando el usuario guarda el proyecto.
 """
 
 from __future__ import annotations

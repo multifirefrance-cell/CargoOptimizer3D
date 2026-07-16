@@ -1,12 +1,12 @@
 """Panel izquierdo: árbol de navegación del proyecto.
 
-Puramente estructural en esta fase: no hay todavía un `CargoProject`
-cargado, así que el árbol muestra las secciones fijas del proyecto
-(Espacios, Productos, Resultados, Configuración) sin contenido dinámico
-debajo. Seleccionar una sección emite `section_activated` para que
-`MainWindow` pueda reaccionar (p. ej. mostrar un mensaje en la barra de
-estado); no navega a ningún panel real todavía porque esta fase no
-tiene un modelo de proyecto persistente.
+Muestra las secciones fijas del proyecto (Espacios, Productos,
+Resultados, Configuración) sin contenido dinámico debajo — el árbol es
+puramente de navegación, no un reflejo en vivo del `CargoProject`
+cargado. Seleccionar una sección emite `section_activated` para que
+`MainWindow` reaccione: siempre muestra un mensaje en la barra de
+estado y, para "Resultados", además navega al panel real
+(`MainWindow._on_project_section_activated`).
 """
 
 from __future__ import annotations

@@ -74,8 +74,19 @@ def test_search_matches_name_case_insensitive(db_manager: DatabaseManager) -> No
     repo = LoadingSpaceProfileRepository(db_manager)
     repo.add(_space(name="Camión rígido"))
     repo.add(_space(name="Semirremolque"))
-    assert [s.name for s in repo.search("camión")] == ["Camión rígido"]
+    matches = repo.search("camión")
+    assert [entry.loading_space.name for entry in matches] == ["Camión rígido"]
     assert repo.search("inexistente") == ()
+
+
+def test_search_reports_real_is_builtin_flag(db_manager: DatabaseManager) -> None:
+    repo = LoadingSpaceProfileRepository(db_manager)
+    repo.ensure_builtin_profiles()
+    builtin_name = repo.list_all()[0].loading_space.name
+    matches = repo.search(builtin_name)
+    assert len(matches) == 1
+    assert matches[0].is_builtin is True
+    assert matches[0].is_active is True
 
 
 def test_update_changes_fields(db_manager: DatabaseManager) -> None:
@@ -114,6 +125,15 @@ def test_add_duplicate_name_raises(db_manager: DatabaseManager) -> None:
     repo.add(_space(name="Bodega X"))
     with pytest.raises(DuplicateLoadingSpaceProfileError):
         repo.add(_space(name="bodega x"))
+
+
+def test_builtin_profile_cannot_be_archived_directly(db_manager: DatabaseManager) -> None:
+    repo = LoadingSpaceProfileRepository(db_manager)
+    repo.ensure_builtin_profiles()
+    builtin_entry = repo.list_all()[0]
+    with pytest.raises(RepositoryError):
+        repo.archive(builtin_entry.loading_space.id)
+    assert repo.get_by_id(builtin_entry.loading_space.id) is not None
 
 
 def test_archive_then_restore(db_manager: DatabaseManager) -> None:

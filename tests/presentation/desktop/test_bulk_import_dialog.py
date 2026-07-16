@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from openpyxl import load_workbook
-from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QDialogButtonBox, QFileDialog, QMessageBox
 
 from cargo_optimizer.infrastructure.excel.exceptions import ExcelError
 from cargo_optimizer.infrastructure.excel.import_report import ImportReport
@@ -72,8 +72,29 @@ def test_import_all_continues_after_one_file_fails(
     assert len(dialog.reports()) == 2
     assert dialog.reports()[0].source_name == "bad.xlsx"
     assert dialog.reports()[0].imported_count == 0
+    # El fallo debe quedar reflejado en el informe (no solo en el
+    # QMessageBox del momento): un archivo que no se pudo leer nunca
+    # puede reportar error_count == 0, igual que uno vacío pero válido.
+    assert dialog.reports()[0].error_count == 1
     assert dialog.reports()[1].source_name == "good.xlsx"
     assert dialog.reports()[1].imported_count == 1
+
+
+def test_close_button_only_rejects_once(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dialog = BulkImportDialog(None, import_one=lambda path: _report(path.name))
+    accept_calls = []
+    reject_calls = []
+    monkeypatch.setattr(dialog, "accept", lambda: accept_calls.append(1))
+    monkeypatch.setattr(dialog, "reject", lambda: reject_calls.append(1))
+
+    close_box = dialog.findChild(QDialogButtonBox)
+    assert close_box is not None
+    close_box.button(QDialogButtonBox.StandardButton.Close).click()
+
+    assert reject_calls == [1]
+    assert accept_calls == []
 
 
 def test_save_report_writes_a_summary_workbook(
