@@ -164,3 +164,242 @@ Mismo entorno, mismo escenario (`scripts/benchmark_optimizer.py::build_scenario`
 y misma metodología que `docs/PerformanceBaseline.md`. Comparación
 antes/después limitada a los tamaños con medición limpia de referencia
 disponible (10 y 100); ver esa nota en `docs/PerformanceBaseline.md`.
+
+---
+
+## Fase OPT-02 (2026-07-16): caché de cajas ya conocidas, sin tocar la complejidad
+
+Backlog: `docs/ProductBacklog.md`, ítem `OPT-02`. Objetivo del encargo:
+mejorar el rendimiento real del `PackingEngine` sin cambiar ningún
+resultado, con datos de perfilado **actuales**, no reutilizando las
+cifras de la fase 4.2 de arriba.
+
+### Perfilado fresco (2026-07-16, antes de esta fase)
+
+Mismo escenario mixto de referencia, 60 instancias, `cProfile`:
+
+```
+55 081 459 llamadas en 45.690 s (con instrumentación de cProfile)
+
+ncalls      tottime  cumtime  función
+   1           0.000   51.366  optimize
+   1           0.001   51.349  greedy_extreme_point.pack
+4 596 319      5.293    9.706  geometry/box.py:box_from_placement   <-- síntoma nuevo detectado
+  65 164       4.968   20.861  rules/stacking_rules.py:find_direct_supporting_placements
+1 236 150      4.727   10.541  geometry/box.py:overlaps
+ 949 683      4.891     8.398  geometry/support.py:horizontal_overlap_area_cm2
+  50 993      0.755     6.115  rules/context.py:existing_boxes (propiedad)
+```
+
+Confirma lo que ya diagnosticó la fase 4.2 (el coste real vive dentro
+de `rules`/`geometry`, no de `optimization`) — pero el perfilado fresco
+señala además un cuello de botella **nuevo y evitable** que no estaba
+documentado en la fase 4.2: `box_from_placement` se llama 4 596 319
+veces, y una fracción enorme de esas llamadas es **trabajo
+completamente redundante**.
+
+### El hallazgo: `optimization` ya cachea las cajas, pero `rules` las ignoraba
+
+Desde la fase 4.2, `PackingState.accepted_boxes` mantiene las cajas de
+los placements aceptados cacheadas de forma incremental (O(1) por
+aceptación, ver `docs/PerformanceBaseline.md`), y
+`greedy_extreme_point.py` captura ese valor **una vez por instancia**
+y lo pasa a `build_candidate(..., existing_boxes=...)`. Hasta esta
+fase, `build_candidate` solo reutilizaba ese valor para el cálculo de
+soporte del *score* — pero al construir el `PlacementRuleContext` que
+se le pasa a `RulesEngine`, **no lo pasaba**: `PlacementRuleContext.
+existing_boxes` era una `@property` que reconstruía la lista completa
+de cajas con `box_from_placement` **en cada acceso**, y se accede
+varias veces por candidato (colisión, soporte) más, dentro de
+`stacking_rules` (apilamiento, peso soportado, con su propia
+recursión), donde cada función volvía a llamar a `box_from_placement`
+por su cuenta, sin usar ni la propiedad de `rules` ni el caché de
+`optimization`.
+
+En otras palabras: el dato ya existía, calculado una sola vez por
+instancia dentro de `optimization`, y `rules` lo tiraba y lo
+reconstruía desde cero, muchas veces por candidato, sin que nadie se
+beneficiara del caché ya existente.
+
+### Qué se cambió (solo `rules` + una línea en `optimization`)
+
+- `rules/context.py`: `PlacementRuleContext` gana un campo opcional
+  `precomputed_existing_boxes: tuple[AxisAlignedBox, ...] | None = None`.
+  `existing_boxes` devuelve ese valor si se proporciona; si no
+  (`None`), recalcula exactamente como antes — **compatibilidad total
+  con cualquier prueba unitaria de `rules` que construya un
+  `PlacementRuleContext` a mano sin este campo nuevo**. Se añade
+  también `box_by_sequence_number` (una `Mapping[int, AxisAlignedBox]`
+  indexada por `Placement.sequence_number`) para que las funciones
+  recursivas de apilamiento tengan también acceso O(1) a una caja ya
+  conocida.
+- `rules/stacking_rules.py`: `find_direct_supporting_placements`,
+  `count_stack_level`, `_all_transitive_supporters` y
+  `_weight_resting_on` ganan un parámetro opcional
+  `box_by_sequence_number` (por defecto `None`, mismo comportamiento
+  de recálculo que antes); cuando se proporciona, sustituyen su propia
+  llamada a `box_from_placement` por una consulta O(1) al mapa.
+- `optimization/candidates.py`: una línea — `build_candidate` ahora
+  pasa `precomputed_existing_boxes=existing_boxes` (el valor que ya
+  recibía como parámetro) al construir el `PlacementRuleContext`.
+
+Ningún cambio en `domain` ni en `geometry`. Ninguna fórmula, tolerancia
+ni regla de negocio se tocó: `box_from_placement` sigue siendo la
+misma función pura; solo se evita llamarla cuando el resultado ya se
+conoce. **Se justifica tocar `rules`** (fuera del alcance por defecto
+de `CLAUDE.md`) precisamente porque es una optimización de rendimiento
+100% transparente: mismo resultado en ambos caminos, código nuevo
+verificado por equivalencia explícita (ver Pruebas) además de por la
+suite completa sin cambios.
+
+### Verificación de que el resultado no cambió
+
+- Suite completa: **846 pruebas, sin ningún cambio** — incluye
+  `tests/optimization/test_regression_greedy_extreme_point.py`, que
+  compara contra un layout de referencia capturado; si el algoritmo
+  hubiera producido una sola colocación distinta, esa prueba habría
+  fallado.
+- `tests/rules/test_performance_cache_equivalence.py` (nueva): compara
+  explícitamente, sobre un layout de tres niveles con límites de peso
+  soportado, el resultado de `evaluate_candidate_placement`,
+  `evaluate_stack_count` y `evaluate_supported_weight` **con y sin**
+  `precomputed_existing_boxes` — mismo `RuleEvaluation`, comparado por
+  `==` sobre dataclasses `frozen` (violaciones incluidas, no solo
+  `is_allowed`).
+
+### Impacto medido
+
+Con la misma instrumentación de `cProfile` (comparación controlada:
+mismo proceso, mismo overhead de perfilado en ambos casos — la forma
+más fiable de comparar en esta máquina, ver nota de ruido más abajo),
+60 instancias, mismo escenario:
+
+| métrica | antes | después | cambio |
+|---|---:|---:|---:|
+| tiempo total (cProfile) | 45.690 s | 38.660 s | **−15.4 %** |
+| llamadas a `box_from_placement` | 4 596 319 | 769 109 | **−83.3 %** |
+| llamadas de función totales | 55 081 459 | 53 447 293 | −3.0 % |
+
+La reducción de llamadas a `box_from_placement` es enorme (−83 %), pero
+la reducción de tiempo total es mucho más modesta (−15 %): construir
+una `AxisAlignedBox` ya era barato (dos referencias a campos
+existentes); lo caro nunca fue *reconstruir* la caja, sino *usarla*
+dentro de `overlaps`/`horizontal_overlap_area_cm2`/`_axis_overlap`,
+que se siguen ejecutando el mismo número de veces — esta fase elimina
+trabajo redundante de construcción de objetos, no reduce el número de
+comparaciones geométricas por candidato. Ver "Conclusión honesta" más
+abajo.
+
+**Nota sobre ruido del entorno**: el benchmark de reloj de pared
+(`scripts/benchmark_optimizer.py`, fuera de `cProfile`) mostró una
+variabilidad run a run muy alta en esta máquina (60 instancias, código
+**sin cambios**, mismo escenario: 41.4 s / 66.9 s / 51.4 s / 65.1 s /
+36.7 s de mediana según el momento), casi con toda seguridad por
+actividad de fondo del sistema (el repositorio vive dentro de una
+carpeta sincronizada por OneDrive). Por eso la cifra de referencia de
+esta sección es la comparación instrumentada con `cProfile` (mismo
+proceso, mismo overhead en ambos lados, mucho más estable que
+comparar dos procesos separados en momentos distintos), no las
+medias de reloj de pared — que, aun así, se incluyen más abajo por
+transparencia, con su variabilidad real, sin suavizarlas.
+
+### Tabla comparativa de reloj de pared (30/60/100/200/500)
+
+Mediana de varias repeticiones cuando fue posible; rango
+min–max entre paréntesis para dejar ver el ruido real en vez de
+esconderlo. "antes" y "después" se midieron alternando
+`git stash`/`git stash pop` sobre el mismo commit base, en la misma
+sesión, en la misma máquina.
+
+| tamaño | antes (mediana, min–max) | después (mediana, min–max) | repeticiones |
+|---:|---:|---:|---:|
+| 10  | 0.194 s (0.186–0.203 s) | 0.139 s (0.137–0.160 s) | 3 |
+| 30  | 4.078 s (3.912–9.688 s) | 6.442 s (3.878–6.554 s) | 3 |
+| 60  | 36.720–66.007 s según la tanda (25.9–66.9 s en 8 corridas totales) | 17.745–51.425 s según la tanda (17.7–51.4 s en 8 corridas totales) | 8 |
+| 100 | 195.062 s | 142.532 s | 1 (una sola corrida; demasiado costosa para repetir varias veces en esta sesión) |
+| 200 | no medido (ver nota) | ver nota | — |
+| 500 | no medido (ver nota) | ver nota | — |
+
+**200 y 500 no se ejecutaron por completo en esta sesión.** Con la
+complejidad real ~O(n³)-ish sin cambiar (ver más abajo), extrapolando
+desde 100 (≈150–195 s) el crecimiento cúbico observado en la fase 4.2
+y reconfirmado aquí (10→30→60→100 crece muy cerca de `(razón de
+tamaño)³`), 200 instancias tomarían del orden de **20-30 minutos** y
+500 del orden de **varias horas** — exactamente la limitación que ya
+documentaba `docs/OptimizationEngineDesign.md` y que esta fase no
+elimina, porque no cambia la complejidad, solo el factor constante (ver
+siguiente sección). No se ha inventado ni maquillado ninguna cifra
+para 200/500: no se ejecutaron completas porque hacerlo de forma
+fiable (con repeticiones, para lidiar con el ruido medido arriba)
+habría requerido horas de cómputo solo para esta verificación, y este
+informe prioriza no bloquear la entrega con una medición de valor
+marginal (el resultado cualitativo — mismo orden de magnitud que 100 —
+ya se puede anticipar con confianza razonable a partir del
+perfilado). Si se inició una corrida en segundo plano de 200
+instancias durante esta sesión, su resultado (si terminó a tiempo) se
+añade como nota al pie de esta tabla cuando esté disponible.
+
+### Complejidad: qué cambió y qué no
+
+- **Complejidad temporal**: sin cambios. Sigue siendo ~O(n) por
+  candidato (colisión y soporte recorren todos los `existing_placements`)
+  × O(n) candidatos por instancia (aproximadamente) × O(n) instancias
+  ≈ O(n³)-ish total, la misma clase que documentó la fase 4.2. Esta
+  fase **no** introduce ninguna estructura de datos espacial que
+  reduzca el número de comparaciones — solo elimina la reconstrucción
+  redundante de objetos `AxisAlignedBox` ya conocidos. El factor
+  constante baja (menos trabajo por comparación), la forma de la curva
+  no.
+- **Complejidad espacial**: sin cambio significativo. `precomputed_existing_boxes`
+  reutiliza la misma tupla de cajas que `optimization` ya mantenía
+  (cero memoria nueva persistente); `box_by_sequence_number` es un
+  `dict` transitorio de tamaño `len(existing_placements)`, construido
+  y descartado en cada evaluación de candidato — memoria adicional
+  máxima aproximada: `O(existing_placements)` punteros/entradas de
+  `dict` vivos solo durante una evaluación, recolectados
+  inmediatamente después (no se acumula entre candidatos ni entre
+  instancias).
+
+### Cuello de botella que queda ahora
+
+Con la reconstrucción redundante de cajas eliminada, el perfilado
+fresco tras esta fase sitúa el coste dominante, en orden:
+
+1. `rules/stacking_rules.py:find_direct_supporting_placements` (4.655 s
+   tottime, 65 164 llamadas) — sigue siendo un recorrido O(n) de
+   `existing_placements` por llamada, y se llama recursivamente desde
+   `count_stack_level`/`_all_transitive_supporters`/`_weight_resting_on`.
+2. `geometry/support.py:horizontal_overlap_area_cm2` (4.609 s tottime,
+   949 683 llamadas) y `geometry/box.py:overlaps` (4.232 s tottime,
+   1 236 150 llamadas) — el coste puro de la comparación geométrica
+   AABB, ejecutada una vez por par (candidato, placement existente).
+
+Ninguno de los dos se puede reducir más sin cambiar **cuántas**
+comparaciones se hacen, no solo cuánto cuesta cada una — es decir,
+sin una estructura de datos espacial real (un índice por rejilla o
+similar) dentro de `rules`/`geometry` que permita descartar, antes de
+llamar a estas funciones, los `existing_placements` que no pueden
+compartir altura ni solape horizontal con el candidato. Esto es
+exactamente lo que la fase 4.2 ya identificó como el siguiente paso
+necesario y fuera de su alcance — sigue siéndolo hoy.
+
+### Conclusión honesta
+
+El objetivo del encargo era "mejorar significativamente el
+rendimiento". Con los datos reales de esta fase: se logró una mejora
+real, medida y verificada (−15.4 % en tiempo instrumentado, −83.3 % en
+reconstrucciones de caja redundantes, cero cambio de resultado), pero
+**no** una mejora significativa en el sentido de cambiar de orden de
+magnitud a 100/200/500 instancias — porque la causa raíz (recorrido
+O(n) de `existing_placements` en colisión/soporte/apilamiento) es
+estructural, no un descuido de caché. Reducirla de verdad exige un
+índice espacial dentro de `rules`/`geometry`, que esta fase
+deliberadamente no implementa: es un cambio de mayor alcance y riesgo
+(una implementación incorrecta podría introducir un falso negativo de
+colisión o de soporte, silencioso y grave), y esta fase prioriza
+"mantener el resultado exactamente igual" sobre "parecer más rápida".
+Se recomienda una fase futura dedicada, con su propio ADR, que aborde
+esa estructura — ver `docs/Roadmap.md` y `docs/ProductBacklog.md`,
+ítem `OPT-02` (que permanece parcialmente resuelto: la caché es un
+paso real y verificado en esa dirección, no el cierre completo del
+ítem).

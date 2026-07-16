@@ -48,14 +48,30 @@ __all__ = [
 ]
 
 
+def _box_of(
+    placement: Placement, box_by_sequence_number: Mapping[int, AxisAlignedBox] | None
+) -> AxisAlignedBox:
+    """Caja de `placement`: O(1) si se conoce el mapa precalculado, si no recalcula igual que antes.
+
+    Optimización de rendimiento pura (fase OPT-02): mismo resultado en
+    ambos casos, `box_from_placement` es una función determinista de un
+    `Placement` inmutable — ver `rules/context.py` y
+    `docs/OptimizerPerformance.md`.
+    """
+    if box_by_sequence_number is not None:
+        return box_by_sequence_number[placement.sequence_number]
+    return box_from_placement(placement)
+
+
 def find_direct_supporting_placements(
     candidate_box: AxisAlignedBox,
     existing_placements: Sequence[Placement],
+    box_by_sequence_number: Mapping[int, AxisAlignedBox] | None = None,
 ) -> tuple[Placement, ...]:
     """Placements cuya cara superior toca la base de `candidate_box` con solape positivo."""
     result: list[Placement] = []
     for placement in existing_placements:
-        box = box_from_placement(placement)
+        box = _box_of(placement, box_by_sequence_number)
         if abs(box.max_z - candidate_box.min_z) > GEOMETRY_EPSILON_CM:
             continue
         if horizontal_overlap_area_cm2(candidate_box, box) <= GEOMETRY_EPSILON_CM:
@@ -67,6 +83,7 @@ def find_direct_supporting_placements(
 def count_stack_level(
     candidate_box: AxisAlignedBox,
     existing_placements: Sequence[Placement],
+    box_by_sequence_number: Mapping[int, AxisAlignedBox] | None = None,
 ) -> int:
     """Nivel de apilamiento de `candidate_box` sobre `existing_placements`.
 
@@ -79,12 +96,18 @@ def count_stack_level(
     if candidate_box.min_z <= GEOMETRY_EPSILON_CM:
         return 1
 
-    supporters = find_direct_supporting_placements(candidate_box, existing_placements)
+    supporters = find_direct_supporting_placements(
+        candidate_box, existing_placements, box_by_sequence_number
+    )
     if not supporters:
         return 1
 
     levels = [
-        count_stack_level(box_from_placement(supporter), existing_placements)
+        count_stack_level(
+            _box_of(supporter, box_by_sequence_number),
+            existing_placements,
+            box_by_sequence_number,
+        )
         for supporter in supporters
     ]
     return 1 + max(levels)
@@ -93,7 +116,9 @@ def count_stack_level(
 def evaluate_stack_count(context: PlacementRuleContext) -> RuleEvaluation:
     """Rechaza la candidata si su nivel de apilamiento supera el máximo efectivo."""
     max_allowed = effective_max_stack_count(context.load_unit)
-    level = count_stack_level(context.candidate_box, context.existing_placements)
+    level = count_stack_level(
+        context.candidate_box, context.existing_placements, context.box_by_sequence_number
+    )
     if level <= max_allowed:
         return RuleEvaluation.allowed()
     return RuleEvaluation.rejected(
@@ -115,6 +140,7 @@ def _weight_resting_on(
     placement: Placement,
     existing_placements: Sequence[Placement],
     load_units_by_id: Mapping[UUID, LoadUnit],
+    box_by_sequence_number: Mapping[int, AxisAlignedBox] | None = None,
 ) -> float:
     """Peso total (recursivo) que actualmente descansa encima de `placement`.
 
@@ -128,18 +154,23 @@ def _weight_resting_on(
     for other in existing_placements:
         if other is placement:
             continue
-        other_box = box_from_placement(other)
-        supporters = find_direct_supporting_placements(other_box, existing_placements)
+        other_box = _box_of(other, box_by_sequence_number)
+        supporters = find_direct_supporting_placements(
+            other_box, existing_placements, box_by_sequence_number
+        )
         if placement in supporters:
             other_unit = load_units_by_id.get(other.load_unit_id)
             other_weight = other_unit.weight_kg if other_unit is not None else 0.0
-            total += other_weight + _weight_resting_on(other, existing_placements, load_units_by_id)
+            total += other_weight + _weight_resting_on(
+                other, existing_placements, load_units_by_id, box_by_sequence_number
+            )
     return total
 
 
 def _all_transitive_supporters(
     candidate_box: AxisAlignedBox,
     existing_placements: Sequence[Placement],
+    box_by_sequence_number: Mapping[int, AxisAlignedBox] | None = None,
 ) -> list[Placement]:
     """Todos los Placements que soportan, directa o transitivamente, a `candidate_box`.
 
@@ -150,7 +181,11 @@ def _all_transitive_supporters(
     """
     supporters: list[Placement] = []
     seen_sequence_numbers: set[int] = set()
-    pending = list(find_direct_supporting_placements(candidate_box, existing_placements))
+    pending = list(
+        find_direct_supporting_placements(
+            candidate_box, existing_placements, box_by_sequence_number
+        )
+    )
     while pending:
         supporter = pending.pop()
         if supporter.sequence_number in seen_sequence_numbers:
@@ -158,21 +193,28 @@ def _all_transitive_supporters(
         seen_sequence_numbers.add(supporter.sequence_number)
         supporters.append(supporter)
         pending.extend(
-            find_direct_supporting_placements(box_from_placement(supporter), existing_placements)
+            find_direct_supporting_placements(
+                _box_of(supporter, box_by_sequence_number),
+                existing_placements,
+                box_by_sequence_number,
+            )
         )
     return supporters
 
 
 def evaluate_supported_weight(context: PlacementRuleContext) -> RuleEvaluation:
     """Rechaza si algún soporte, directo o transitivo, excedería su `max_supported_weight_kg`."""
-    supporters = _all_transitive_supporters(context.candidate_box, context.existing_placements)
+    box_by_sequence_number = context.box_by_sequence_number
+    supporters = _all_transitive_supporters(
+        context.candidate_box, context.existing_placements, box_by_sequence_number
+    )
     violations: list[RuleViolation] = []
     for supporter in supporters:
         supporter_unit = context.load_units_by_id.get(supporter.load_unit_id)
         if supporter_unit is None or supporter_unit.max_supported_weight_kg is None:
             continue
         existing_weight = _weight_resting_on(
-            supporter, context.existing_placements, context.load_units_by_id
+            supporter, context.existing_placements, context.load_units_by_id, box_by_sequence_number
         )
         total_weight = existing_weight + context.load_unit.weight_kg
         if total_weight > supporter_unit.max_supported_weight_kg + WEIGHT_TOLERANCE_KG:

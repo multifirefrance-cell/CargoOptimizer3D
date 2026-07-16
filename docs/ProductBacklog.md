@@ -149,7 +149,7 @@ Cada ítem lleva: descripción funcional, problema, beneficios, ficha de gestió
 
 | Prioridad | Valor usuario | Impacto comercial | Esfuerzo | Riesgo técnico | Dependencias | Versión | Estado |
 |---|---|---|---|---|---|---|---|
-| Crítico | Muy alto | Muy alto | Alto | Medio-alto — ya se identificó la solución (índice espacial), el riesgo es de tiempo, no de incertidumbre técnica | Habilita OPT-01 a escala real | 1.0 | No iniciado |
+| Crítico | Muy alto | Muy alto | Alto | Medio-alto — ya se identificó la solución (índice espacial), el riesgo es de tiempo, no de incertidumbre técnica | Habilita OPT-01 a escala real | 1.0 | **Parcial**: caché de cajas ya conocidas entre `optimization`/`rules` implementada (~15% más rápido, cero cambio de resultado — ver `docs/OptimizerPerformance.md`, sección "Fase OPT-02"); el índice espacial real (el que cambiaría la complejidad, no solo el factor constante) sigue pendiente |
 
 **Criterios de aceptación:**
 - El sistema debe optimizar un envío de 500+ bultos en menos de 10 segundos en hardware estándar.

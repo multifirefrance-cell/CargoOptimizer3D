@@ -410,6 +410,22 @@ conservado como historial).
   alcance de la fase 4.2. No prometer rendimiento distinto al
   documentado en `docs/OptimizerPerformance.md` sin haber implementado
   esa estructura, con ADR explícito.
+- **Fase OPT-02 (rendimiento, backlog)**: `PlacementRuleContext`
+  (`rules/context.py`) acepta un `precomputed_existing_boxes` opcional
+  (y expone `box_by_sequence_number`) para que `optimization` le pase
+  las cajas que ya mantiene cacheadas incrementalmente
+  (`PackingState.accepted_boxes`) en vez de que `rules` las
+  reconstruya con `box_from_placement` en cada acceso — antes lo
+  hacía, de forma completamente redundante, varias veces por
+  candidato. Es una optimización de constante, no de complejidad: el
+  recorrido O(n) de `existing_placements` en colisión/soporte/
+  apilamiento sigue intacto, medido y documentado en
+  `docs/OptimizerPerformance.md` (sección "Fase OPT-02"). Cuando se
+  proporciona `precomputed_existing_boxes=None` (el valor por
+  defecto, usado por las pruebas unitarias de `rules` que construyen
+  un `PlacementRuleContext` a mano), el comportamiento es idéntico al
+  de antes de esta fase — no romper esa compatibilidad al tocar
+  `rules/context.py` o `rules/stacking_rules.py`.
 
 ## Invariantes de `application` (implementado desde la fase 10.1, no romper sin ADR)
 

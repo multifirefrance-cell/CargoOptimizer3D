@@ -3,6 +3,19 @@
 `PlacementRuleContext` solo agrupa la información necesaria para
 evaluar una colocación candidata; no decide ninguna regla por sí
 mismo.
+
+`precomputed_existing_boxes` (fase OPT-02, optimización de rendimiento
+pura — ver `docs/OptimizerPerformance.md`) es un campo opcional para
+que el llamador (siempre `optimization`, que ya mantiene
+`PackingState.accepted_boxes` cacheado de forma incremental desde la
+fase 4.2) evite que `existing_boxes` reconstruya la lista completa de
+cajas con `box_from_placement` en cada acceso — antes se recalculaba
+desde cero varias veces por candidato, sin usar el caché que
+`optimization` ya calculaba y pasaba a `build_candidate` sin
+aprovecharlo. Cuando no se proporciona (p. ej. en pruebas unitarias que
+construyen un `PlacementRuleContext` directamente), el comportamiento
+es exactamente el de antes: recalcular con `box_from_placement`. Mismo
+resultado en ambos casos, nunca una aproximación.
 """
 
 from __future__ import annotations
@@ -31,6 +44,7 @@ class PlacementRuleContext:
     candidate_orientation: Orientation
     existing_placements: tuple[Placement, ...]
     load_units_by_id: Mapping[UUID, LoadUnit]
+    precomputed_existing_boxes: tuple[AxisAlignedBox, ...] | None = None
 
     @property
     def candidate_box(self) -> AxisAlignedBox:
@@ -40,7 +54,28 @@ class PlacementRuleContext:
 
     @property
     def existing_boxes(self) -> tuple[AxisAlignedBox, ...]:
+        if self.precomputed_existing_boxes is not None:
+            return self.precomputed_existing_boxes
         return tuple(box_from_placement(p) for p in self.existing_placements)
+
+    @property
+    def box_by_sequence_number(self) -> Mapping[int, AxisAlignedBox]:
+        """Cajas existentes indexadas por `Placement.sequence_number`, para búsqueda O(1).
+
+        Usado por `rules.stacking_rules` (soporte directo/transitivo,
+        peso soportado) para no reconstruir la misma caja repetidas
+        veces durante su propia recursión. Se construye una vez por
+        evaluación de candidato (no por sub-llamada recursiva), a
+        partir de `existing_boxes` — que ya es O(1) cuando el llamador
+        proporciona `precomputed_existing_boxes`.
+        """
+        return dict(
+            zip(
+                (p.sequence_number for p in self.existing_placements),
+                self.existing_boxes,
+                strict=True,
+            )
+        )
 
     def load_unit_for_placement(self, placement: Placement) -> LoadUnit | None:
         return self.load_units_by_id.get(placement.load_unit_id)

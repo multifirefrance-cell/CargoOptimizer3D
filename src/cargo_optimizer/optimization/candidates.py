@@ -80,6 +80,13 @@ def build_candidate(
     `PackingState`, no una vez por candidato) para no reconstruirlos en
     cada llamada — el recálculo por candidato fue el cuello de botella
     nº 1 medido por perfilado real (ver `docs/PerformanceBaseline.md`).
+    Desde la fase OPT-02, `existing_boxes` se pasa también a
+    `PlacementRuleContext` (`precomputed_existing_boxes`): antes se
+    calculaba aquí pero `rules` lo ignoraba por completo y volvía a
+    reconstruir la lista completa de cajas desde cero en cada acceso a
+    `context.existing_boxes` — varias veces por candidato, y de nuevo
+    dentro de las reglas de apilamiento/peso soportado. Ver
+    `docs/OptimizerPerformance.md`.
 
     El *score* (soporte, incremento de bounding volume, espacio
     residual) solo se calcula si la colocación resulta permitida: un
@@ -95,6 +102,7 @@ def build_candidate(
         candidate_orientation=orientation,
         existing_placements=existing_placements,
         load_units_by_id=load_units_by_id,
+        precomputed_existing_boxes=existing_boxes,
     )
     evaluation = rules_engine.evaluate_placement(
         context, minimum_support_ratio=minimum_support_ratio

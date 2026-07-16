@@ -252,9 +252,14 @@ for unpacked in result.unpacked_units:
 ## Limitaciones actuales
 
 - Rendimiento O(n³)-ish real (medido más arriba), incluso tras la
-  optimización de la fase 4.2; no apto para cientos de instancias en
-  tiempo interactivo con esta primera versión. Reducirlo de raíz
-  requeriría tocar `rules`/`geometry` (ver `docs/OptimizerPerformance.md`).
+  optimización de la fase 4.2 y tras la fase OPT-02 (caché de cajas ya
+  conocidas entre `optimization` y `rules`, ~15% más rápido en el
+  escenario de referencia, cero cambio de resultado — ver
+  `docs/OptimizerPerformance.md`, sección "Fase OPT-02"); no apto para
+  cientos de instancias en tiempo interactivo con esta primera
+  versión. Reducirlo de raíz (cambiar la complejidad, no solo el
+  factor constante) requeriría un índice espacial real dentro de
+  `rules`/`geometry` (ver `docs/OptimizerPerformance.md`).
 - Una sola estrategia (`greedy_extreme_point_v1`); sin registro
   dinámico ni plugins.
 - Un único `LoadingSpace` por ejecución.

@@ -4,6 +4,57 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Este proyecto aún no ha alcanzado la versión 1.0; el versionado 0.x
 puede incluir cambios estructurales entre versiones menores.
 
+## [0.15.1] - 2026-07-16
+
+`OPT-02` (rendimiento del `PackingEngine`), parcial: caché de cajas ya
+conocidas entre `optimization` y `rules`. Optimización de rendimiento
+pura verificada con datos de perfilado actuales — cero cambio de
+resultado, cero cambio de complejidad. Ver `docs/OptimizerPerformance.md`,
+sección "Fase OPT-02", para el análisis completo (antes/después,
+costo, limitaciones restantes).
+
+### Changed
+
+- `rules/context.py`: `PlacementRuleContext` gana
+  `precomputed_existing_boxes: tuple[AxisAlignedBox, ...] | None = None`
+  (por defecto `None`, mismo comportamiento de recálculo que antes —
+  compatibilidad total con las pruebas unitarias existentes de
+  `rules`) y una nueva propiedad `box_by_sequence_number` para
+  búsqueda O(1) de la caja de un placement ya conocido.
+- `rules/stacking_rules.py`: `find_direct_supporting_placements`,
+  `count_stack_level`, `_all_transitive_supporters` y
+  `_weight_resting_on` ganan un parámetro opcional
+  `box_by_sequence_number` (por defecto `None`) para evitar
+  reconstruir con `box_from_placement` una caja que el llamador ya
+  conoce.
+- `optimization/candidates.py`: `build_candidate` pasa
+  `precomputed_existing_boxes=existing_boxes` (valor que ya recibía
+  como parámetro, calculado incrementalmente por `PackingState` desde
+  la fase 4.2) al construir el `PlacementRuleContext` — antes lo
+  calculaba y lo tiraba sin usarlo para este propósito.
+
+### Added
+
+- `tests/rules/test_performance_cache_equivalence.py`: prueba
+  explícita de que `evaluate_candidate_placement`,
+  `evaluate_stack_count` y `evaluate_supported_weight` producen el
+  mismo `RuleEvaluation` con y sin `precomputed_existing_boxes`, sobre
+  un layout de tres niveles con límites de peso soportado.
+
+### Performance
+
+- Escenario mixto de referencia (60 instancias), mismo proceso,
+  instrumentado con `cProfile`: 45.690 s → 38.660 s (−15.4 %).
+  Llamadas a `box_from_placement`: 4 596 319 → 769 109 (−83.3 %).
+  Suite completa (846 pruebas) sin ningún cambio de resultado.
+- **No se alcanza una mejora de orden de magnitud**: la causa raíz
+  restante (recorrido O(n) de `existing_placements` en
+  colisión/soporte/apilamiento) es estructural, no de caché — reducir
+  la complejidad exigiría un índice espacial real dentro de
+  `rules`/`geometry`, deliberadamente fuera de esta fase por su riesgo
+  de correctness. Ver la conclusión honesta en
+  `docs/OptimizerPerformance.md`.
+
 ## [0.15.0] - 2026-07-16
 
 Implementación de `OPT-01` (asignación automática multi-espacio),
