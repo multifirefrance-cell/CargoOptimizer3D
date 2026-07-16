@@ -4,7 +4,9 @@ Implementa el ítem **OPT-01** de `docs/ProductBacklog.md`: dado un
 pedido completo (no un único espacio ya elegido), calcular
 automáticamente cuántos `LoadingSpace` hacen falta y qué va en cada
 uno. Primer caso de uso real de la capa `application` — ver
-`docs/Architecture.md`, sección `application`, y ADR-0001.
+`docs/Architecture.md`, sección `application`, y ADR-0001. Desde el
+cierre hacia beta, también integrado en `presentation/desktop` — ver
+§9.
 
 ## 1. Qué resuelve y qué no
 
@@ -31,12 +33,10 @@ criterios de aceptación no cubiertos y dependencias):
 - Secuenciación multi-parada / LIFO por ruta de reparto (`LOG-03`,
   depende de esta fase pero es un ítem propio).
 - Sugerencia automática del tipo de espacio más adecuado (`LOG-05`).
-- Wiring en `presentation/desktop` (`MainWindow`): esta fase entrega el
-  motor de `application`, probado de forma independiente; conectarlo a
-  un flujo de UI (menú, diálogo de selección de candidatos, worker en
-  segundo plano) es un encargo posterior explícito, mismo criterio que
-  ya separó `optimization` (fase 4.1) de su conexión a la interfaz
-  (fase 5.1).
+- Guardar el resultado multi-espacio dentro de `.cargo3d` (ver §9):
+  la interfaz avisa explícitamente que todavía no se persiste.
+- Informes PDF/Excel específicos de multi-espacio: se usan los
+  exportadores existentes, sin ningún formato nuevo.
 
 ## 2. Diseño: por qué vive en `application`, no en `optimization`
 
@@ -234,3 +234,55 @@ y (b) la calidad del resultado (menos espacios usados en total, ver el
 ejemplo de §3) generalmente compensa con creces el costo de `N`
 ejecuciones extra por ronda frente a arrastrar un resultado subóptimo
 durante todas las rondas siguientes.
+
+## 9. Integración en `presentation/desktop`
+
+Cierre hacia beta: `MultiSpaceAssignmentEngine` ya es utilizable desde
+la interfaz de escritorio, no solo desde código. Mismo patrón que la
+optimización de un solo espacio (fase 5.1): un `QThread` dedicado,
+cancelación cooperativa vía `CancellationToken`, nunca se ejecuta en el
+hilo de la interfaz.
+
+- **`workers/multi_space_optimization_worker.py`** —
+  `MultiSpaceOptimizationWorker`: calca `OptimizationWorker` (mismas
+  señales, mismo patrón de un hilo por ejecución), envolviendo
+  `MultiSpaceAssignmentEngine.assign(...)` en vez de
+  `PackingEngine.optimize(...)`. No es un segundo sistema de
+  threading — es el mismo, aplicado al caso de uso de `application`.
+- **`dialogs/multi_space_setup_dialog.py`** — `MultiSpaceSetupDialog`:
+  el usuario elige uno o varios candidatos (el espacio actual del
+  formulario, más los perfiles activos del catálogo si hay uno
+  disponible), los ordena con "Subir"/"Bajar" — ese orden es
+  exactamente el orden de preferencia que usa el algoritmo (ver §3) —
+  y fija `max_spaces` de forma opcional.
+- **`panels/multi_space_results_panel.py`** — `MultiSpaceResultsPanel`:
+  nueva pestaña "Multi-espacio" junto a "Resumen"/"No cargados"/
+  "Avisos"/"Registro". Muestra el resumen global completo
+  (`spaces_used_count`, `spaces_used_by_candidate_name`,
+  `total_requested_count`/`total_packed_count`/`pending_count`,
+  volumen disponible/utilizado, `overall_volume_utilization_percent`,
+  `total_used_weight_kg`, `min`/`average`/`max_volume_utilization_percent`,
+  `stop_reason`, `execution_time_seconds` — todo lo que expone
+  `MultiSpaceAssignmentResult`, sin duplicar nada) y un selector
+  "Espacio 1"…"Espacio N" con el resumen, avisos y no-cargados de ese
+  `PackingResult` individual. El panel no toca el visor 3D: emite
+  `space_selected(int)` y `MainWindow` decide cómo actualizarlo, mismo
+  desacoplo que ya usa `viewer_widget.placement_selected`.
+- **`MainWindow`** — acción "Optimización &multi-espacio…" (`F6`) en el
+  menú Optimización. Mutuamente excluyente con "Ejecutar optimización"
+  (un solo worker de cualquiera de los dos tipos a la vez —
+  `_is_any_optimization_running()`); "Cancelar" cancela el que esté
+  corriendo. Al terminar, se muestra el espacio 1 en el visor 3D y la
+  pestaña "Multi-espacio" pasa a primer plano.
+
+### Persistencia: explícitamente fuera de esta fase
+
+`.cargo3d` no cambia: `CargoProject`/`ProjectFileRepository` siguen
+guardando únicamente el último resultado de un solo espacio
+(`latest_result`). Si el usuario guarda el proyecto mientras hay un
+resultado multi-espacio activo, `MainWindow` muestra un aviso
+explícito ("Los resultados multi-espacio todavía no se guardan dentro
+del proyecto.") y continúa guardando el resto del proyecto con
+normalidad — no bloquea el guardado, solo informa. Persistir el
+resultado multi-espacio dentro de `.cargo3d` (o exportarlo a PDF/Excel
+con un formato propio) queda para un encargo posterior explícito.

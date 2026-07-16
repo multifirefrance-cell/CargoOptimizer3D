@@ -47,8 +47,15 @@ from PySide6.QtWidgets import (
 )
 
 from cargo_optimizer import __version__
+from cargo_optimizer.application.exceptions import MultiSpaceAssignmentValidationError
+from cargo_optimizer.application.models import (
+    MultiSpaceAssignmentRequest,
+    MultiSpaceAssignmentResult,
+    MultiSpaceProgress,
+)
 from cargo_optimizer.domain.exceptions import DomainValidationError, DuplicateSkuError
 from cargo_optimizer.domain.load_unit import LoadUnit
+from cargo_optimizer.domain.loading_space import LoadingSpace
 from cargo_optimizer.domain.packing_result import PackingResult
 from cargo_optimizer.domain.project import CargoProject
 from cargo_optimizer.infrastructure.database import CatalogService, DatabaseError, RepositoryError
@@ -93,6 +100,9 @@ from cargo_optimizer.presentation.desktop.dialogs.import_preview_dialog import I
 from cargo_optimizer.presentation.desktop.dialogs.loading_space_profiles_dialog import (
     LoadingSpaceProfilesDialog,
 )
+from cargo_optimizer.presentation.desktop.dialogs.multi_space_setup_dialog import (
+    MultiSpaceSetupDialog,
+)
 from cargo_optimizer.presentation.desktop.dialogs.product_catalog_dialog import (
     ProductCatalogDialog,
 )
@@ -102,6 +112,9 @@ from cargo_optimizer.presentation.desktop.panels.loading_space_form_panel import
     LoadingSpaceFormPanel,
 )
 from cargo_optimizer.presentation.desktop.panels.log_panel import LogPanel
+from cargo_optimizer.presentation.desktop.panels.multi_space_results_panel import (
+    MultiSpaceResultsPanel,
+)
 from cargo_optimizer.presentation.desktop.panels.product_table_panel import ProductTablePanel
 from cargo_optimizer.presentation.desktop.panels.project_tree_panel import (
     SECTION_RESULTS,
@@ -116,6 +129,9 @@ from cargo_optimizer.presentation.desktop.panels.warnings_panel import WarningsP
 from cargo_optimizer.presentation.desktop.settings import AppSettings
 from cargo_optimizer.presentation.desktop.style import THEME_DARK, THEME_LIGHT, apply_theme
 from cargo_optimizer.presentation.desktop.viewer.widget import Packing3DViewer
+from cargo_optimizer.presentation.desktop.workers.multi_space_optimization_worker import (
+    MultiSpaceOptimizationWorker,
+)
 from cargo_optimizer.presentation.desktop.workers.optimization_worker import OptimizationWorker
 
 _NOT_IMPLEMENTED_MESSAGE_MS = 4000
@@ -130,6 +146,9 @@ _PROJECT_FILE_FILTER = "Proyectos CargoOptimizer3D (*.cargo3d)"
 _PROJECT_FILE_EXTENSION = ".cargo3d"
 _UNTITLED_PROJECT_NAME = "Proyecto sin guardar"
 _RESULT_INVALIDATED_MESSAGE = "El resultado anterior fue invalidado porque el proyecto cambió."
+_MULTI_SPACE_NOT_SAVED_MESSAGE = (
+    "Los resultados multi-espacio todavía no se guardan dentro del proyecto."
+)
 
 STATE_READY = "listo"
 STATE_PREPARING = "preparando"
@@ -154,7 +173,10 @@ class MainWindow(QMainWindow):
         self._project_repository = ProjectFileRepository()
         self._catalog_service = catalog_service
         self._optimization_worker: OptimizationWorker | None = None
+        self._multi_space_worker: MultiSpaceOptimizationWorker | None = None
         self._last_load_units_by_id: dict[UUID, LoadUnit] = {}
+        self._last_multi_space_result: MultiSpaceAssignmentResult | None = None
+        self._last_multi_space_load_units_by_id: dict[UUID, LoadUnit] = {}
         self._cancel_requested = False
         self._run_start_time = 0.0
 
@@ -210,11 +232,13 @@ class MainWindow(QMainWindow):
         self.unpacked_table_panel = UnpackedTablePanel(self)
         self.warnings_panel = WarningsPanel(self)
         self.log_panel = LogPanel(self)
+        self.multi_space_results_panel = MultiSpaceResultsPanel(self)
         self.viewer_widget = Packing3DViewer(self)
         self.selection_details_panel = SelectionDetailsPanel(self)
 
         self.project_tree_panel.section_activated.connect(self._on_project_section_activated)
         self.viewer_widget.placement_selected.connect(self._on_placement_selected)
+        self.multi_space_results_panel.space_selected.connect(self._on_multi_space_space_selected)
 
         self.loading_space_form_panel.changed.connect(self._on_project_data_changed)
         product_model = self.product_table_panel.model
@@ -262,6 +286,7 @@ class MainWindow(QMainWindow):
         self.results_tabs.addTab(self.unpacked_table_panel, "No cargados")
         self.results_tabs.addTab(self.warnings_panel, "Avisos")
         self.results_tabs.addTab(self.log_panel, "Registro")
+        self.results_tabs.addTab(self.multi_space_results_panel, "Multi-espacio")
 
         self.main_splitter = QSplitter(Qt.Orientation.Vertical, self)
         self.main_splitter.setObjectName(_SPLITTER_MAIN)
@@ -365,6 +390,12 @@ class MainWindow(QMainWindow):
 
         self.action_run_optimization = self._make_action(
             "optimize", "&Ejecutar optimización", "F5", self._on_run_optimization
+        )
+        self.action_run_multi_space_optimization = self._make_action(
+            "optimize",
+            "Optimización &multi-espacio…",
+            "F6",
+            self._on_run_multi_space_optimization,
         )
         self.action_cancel_optimization = self._make_action(
             "cancel", "&Cancelar", None, self._on_cancel_optimization
@@ -514,6 +545,7 @@ class MainWindow(QMainWindow):
 
         optimization_menu = menu_bar.addMenu("&Optimización")
         optimization_menu.addAction(self.action_run_optimization)
+        optimization_menu.addAction(self.action_run_multi_space_optimization)
         optimization_menu.addAction(self.action_cancel_optimization)
         optimization_menu.addSeparator()
         optimization_menu.addAction(self.action_configure_optimization)
@@ -612,6 +644,7 @@ class MainWindow(QMainWindow):
             self.results_panel.clear()
             self.unpacked_table_panel.model.clear()
             self.warnings_panel.clear()
+            self.multi_space_results_panel.clear()
             self.viewer_widget.clear_scene()
             self.selection_details_panel.clear()
         finally:
@@ -623,6 +656,8 @@ class MainWindow(QMainWindow):
         self._project_notes = ""
         self._last_result = None
         self._last_load_units_by_id = {}
+        self._last_multi_space_result = None
+        self._last_multi_space_load_units_by_id = {}
         self._result_stale = False
         self._mark_clean()
 
@@ -699,6 +734,9 @@ class MainWindow(QMainWindow):
         return self._save_to_path(path)
 
     def _save_to_path(self, path: Path) -> bool:
+        if self._last_multi_space_result is not None:
+            QMessageBox.information(self, "Resultado multi-espacio", _MULTI_SPACE_NOT_SAVED_MESSAGE)
+
         loading_space = self.loading_space_form_panel.build_loading_space()
         if loading_space is None:
             self._show_warning(
@@ -1599,8 +1637,13 @@ class MainWindow(QMainWindow):
             self._show_warning("Solicitud de optimización inválida", str(exc))
             return None
 
+    def _is_any_optimization_running(self) -> bool:
+        return (
+            self._optimization_worker is not None and self._optimization_worker.isRunning()
+        ) or (self._multi_space_worker is not None and self._multi_space_worker.isRunning())
+
     def _on_run_optimization(self) -> None:
-        if self._optimization_worker is not None and self._optimization_worker.isRunning():
+        if self._is_any_optimization_running():
             return
 
         request = self._build_packing_request()
@@ -1640,8 +1683,12 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def _on_cancel_optimization(self) -> None:
-        worker = self._optimization_worker
-        if worker is None or not worker.isRunning():
+        worker: OptimizationWorker | MultiSpaceOptimizationWorker | None = None
+        if self._optimization_worker is not None and self._optimization_worker.isRunning():
+            worker = self._optimization_worker
+        elif self._multi_space_worker is not None and self._multi_space_worker.isRunning():
+            worker = self._multi_space_worker
+        if worker is None:
             return
         self._cancel_requested = True
         worker.cancellation_token.cancel()
@@ -1682,13 +1729,134 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Error durante la optimización.", _STATUS_MESSAGE_MS)
         self._show_error("Error de optimización", message)
 
+    # ------------------------------------------------------------------
+    # Optimización multi-espacio (OPT-01, integración de interfaz)
+    # ------------------------------------------------------------------
+
+    def _on_run_multi_space_optimization(self) -> None:
+        if self._is_any_optimization_running():
+            return
+
+        current_space = self.loading_space_form_panel.build_loading_space()
+        catalog_profiles: tuple[LoadingSpace, ...] = ()
+        if self._catalog_service is not None:
+            catalog_profiles = self._catalog_service.profiles.list_active()
+        if current_space is None and not catalog_profiles:
+            self._show_warning(
+                "Sin espacios candidatos",
+                "Define un espacio de carga válido en el formulario, o ten al menos un "
+                "perfil guardado en el catálogo, antes de ejecutar una optimización "
+                "multi-espacio.",
+            )
+            return
+
+        dialog = MultiSpaceSetupDialog(
+            self, current_space=current_space, catalog_profiles=catalog_profiles
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        candidates = dialog.result_candidates()
+        if not candidates:
+            return
+
+        load_units = self.product_table_panel.model.load_units()
+        if not load_units:
+            self._show_warning(
+                "Sin productos",
+                "Agrega al menos un producto antes de ejecutar la optimización multi-espacio.",
+            )
+            return
+
+        try:
+            request = MultiSpaceAssignmentRequest(
+                loading_space_candidates=candidates,
+                load_units=load_units,
+                max_spaces=dialog.result_max_spaces(),
+            )
+        except MultiSpaceAssignmentValidationError as exc:
+            self._show_warning("Solicitud multi-espacio inválida", str(exc))
+            return
+
+        self._last_multi_space_load_units_by_id = {unit.id: unit for unit in load_units}
+        self._cancel_requested = False
+        self._run_start_time = time.monotonic()
+
+        self._set_state(STATE_PREPARING)
+        self._set_running_controls_enabled(False)
+        self.multi_space_results_panel.clear()
+        self.viewer_widget.clear_scene()
+        self.selection_details_panel.clear()
+        self._progress_bar.setRange(0, 1)
+        self._progress_bar.setValue(0)
+        self._progress_bar.setVisible(True)
+        self._progress_time_label.setText("0.0 s")
+        self.log_panel.append_entry(
+            f"Optimización multi-espacio iniciada: {len(load_units)} SKU(s) sobre "
+            f"{len(candidates)} candidato(s)."
+        )
+        self.statusBar().showMessage("Optimizando (multi-espacio)…")
+
+        worker = MultiSpaceOptimizationWorker(request, self)
+        worker.progress.connect(self._on_multi_space_progress)
+        worker.optimization_finished.connect(self._on_multi_space_finished)
+        worker.optimization_failed.connect(self._on_optimization_failed)
+        worker.finished.connect(self._on_worker_thread_finished)
+        self._multi_space_worker = worker
+
+        self._set_state(STATE_OPTIMIZING)
+        worker.start()
+
+    def _on_multi_space_progress(self, progress: MultiSpaceProgress) -> None:
+        total = max(progress.total_requested, 1)
+        self._progress_bar.setRange(0, total)
+        self._progress_bar.setValue(min(progress.total_packed_so_far, total))
+        self._progress_time_label.setText(f"{progress.elapsed_seconds:.1f} s")
+
+    def _on_multi_space_finished(self, result: MultiSpaceAssignmentResult) -> None:
+        self._last_multi_space_result = result
+        self.multi_space_results_panel.set_result(result, self._last_multi_space_load_units_by_id)
+        if result.space_results:
+            self.viewer_widget.display_result(
+                result.space_results[0], self._last_multi_space_load_units_by_id
+            )
+        else:
+            self.viewer_widget.clear_scene()
+        self.selection_details_panel.clear()
+        self._set_state(STATE_FINISHED)
+        message = (
+            "Optimización multi-espacio cancelada."
+            if self._cancel_requested
+            else "Optimización multi-espacio finalizada."
+        )
+        self.log_panel.append_entry(
+            f"{message} {result.total_packed_count}/{result.total_requested_count} cargadas en "
+            f"{result.spaces_used_count} espacio(s), {result.execution_time_seconds:.2f} s."
+        )
+        self.statusBar().showMessage(message, _STATUS_MESSAGE_MS)
+        self.results_tabs.setCurrentWidget(self.multi_space_results_panel)
+
+    def _on_multi_space_space_selected(self, index: int) -> None:
+        if self._last_multi_space_result is None:
+            return
+        if not 0 <= index < len(self._last_multi_space_result.space_results):
+            return
+        self.viewer_widget.display_result(
+            self._last_multi_space_result.space_results[index],
+            self._last_multi_space_load_units_by_id,
+        )
+        self.selection_details_panel.clear()
+
     def _on_worker_thread_finished(self) -> None:
         self._progress_bar.setVisible(False)
         self._set_running_controls_enabled(True)
-        worker = self._optimization_worker
+        single_worker = self._optimization_worker
         self._optimization_worker = None
-        if worker is not None:
-            worker.deleteLater()
+        if single_worker is not None:
+            single_worker.deleteLater()
+        multi_worker = self._multi_space_worker
+        self._multi_space_worker = None
+        if multi_worker is not None:
+            multi_worker.deleteLater()
 
     def _populate_results(self, result: PackingResult) -> None:
         self.results_panel.set_results(
@@ -1711,6 +1879,7 @@ class MainWindow(QMainWindow):
     def _set_running_controls_enabled(self, enabled: bool) -> None:
         for action in (
             self.action_run_optimization,
+            self.action_run_multi_space_optimization,
             self.action_new,
             self.action_open,
             self.action_new_product,

@@ -94,9 +94,12 @@ informes PDF (`infrastructure/pdf/`, ReportLab).
 Desde la fase 10.1, el trabajo posterior se rige por
 [docs/ProductBacklog.md](docs/ProductBacklog.md) (backlog comercial
 priorizado por valor, organizado en EPICs con un ID estable por ítem),
-no por la numeración secuencial de fases. Primer ítem implementado:
-`OPT-01`, asignación automática multi-espacio
-(`application.MultiSpaceAssignmentEngine` — ver
-[docs/MultiSpaceAssignment.md](docs/MultiSpaceAssignment.md)); la
-integración con la interfaz de escritorio queda para un encargo
-posterior. La integración ERP se implementará en una fase posterior.
+no por la numeración secuencial de fases. `OPT-01` (asignación
+automática multi-espacio, `application.MultiSpaceAssignmentEngine`) ya
+está integrado en la interfaz de escritorio ("Optimización
+multi-espacio…", `F6`) — ver
+[docs/MultiSpaceAssignment.md](docs/MultiSpaceAssignment.md). `OPT-02`
+(rendimiento) se abordó de forma acotada (caché de cajas ya conocidas
+entre `optimization` y `rules`, sin cambiar la complejidad) — ver
+[docs/OptimizerPerformance.md](docs/OptimizerPerformance.md). La
+integración ERP se implementará en una fase posterior.

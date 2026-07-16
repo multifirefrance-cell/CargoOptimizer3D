@@ -28,7 +28,7 @@ fase se adelanta a la anterior.
 | 9.1 | Informes PDF — implementación | `infrastructure/pdf` (nuevo) | **Completada** |
 | 10 | Integración ERP | `presentation` (nuevo adaptador, p. ej. `presentation/api`) | Pendiente |
 | 10.1 | Product Backlog comercial (`docs/ProductBacklog.md`, sin código) | Ninguno (solo documentación) | **Completada** |
-| 10.1+ | Ejecución del Product Backlog, ítem por ítem (empezando por `OPT-01`) | Variable según el ítem — ver `docs/ProductBacklog.md` | En curso |
+| 10.1+ | Ejecución del Product Backlog, ítem por ítem (`OPT-01` motor + integración de interfaz, `OPT-02` caché de rendimiento) | Variable según el ítem — ver `docs/ProductBacklog.md` | En curso |
 | 11 | Versión comercial | — | Pendiente |
 
 ## `optimization` (`geometry`, `rules` y `optimization` ya existen)
@@ -172,15 +172,13 @@ esta tabla.
 
 El primer ítem ejecutado tras el backlog es `OPT-01` (asignación
 automática multi-espacio): implementado como primer caso de uso real
-de `application` — ver `docs/MultiSpaceAssignment.md`. Alcance de esta
-entrega: el motor de orquestación (`MultiSpaceAssignmentEngine`),
-probado de forma independiente. La integración con
-`presentation/desktop` (menú, diálogo de candidatos, worker) queda
-explícitamente para un encargo posterior, mismo criterio que ya separó
-`optimization` (fase 4.1) de su conexión a la interfaz (fase 5.1) — ver
-`docs/ProductBacklog.md`, ítem `OPT-01`, para el criterio de aceptación
-todavía pendiente ("el usuario puede pedir 'optimiza este pedido'"
-desde la interfaz).
+de `application` — ver `docs/MultiSpaceAssignment.md`. Integrado
+después en `presentation/desktop` (acción "Optimización multi-espacio…",
+`F6`, mismo patrón de `QThread`/`CancellationToken` que la optimización
+de un solo espacio) — ver `docs/MultiSpaceAssignment.md`, §9. `OPT-02`
+(rendimiento) se abordó de forma acotada: caché de cajas ya conocidas
+entre `optimization` y `rules`, sin cambiar la complejidad — ver
+`docs/OptimizerPerformance.md`, sección "Fase OPT-02".
 
 ## Estado actual
 

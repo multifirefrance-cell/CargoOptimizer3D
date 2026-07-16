@@ -4,6 +4,52 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Este proyecto aún no ha alcanzado la versión 1.0; el versionado 0.x
 puede incluir cambios estructurales entre versiones menores.
 
+## [0.16.0] - 2026-07-16
+
+Integración de `OPT-01` (asignación automática multi-espacio) en la
+interfaz de escritorio — cierre hacia una versión beta utilizable. La
+optimización de un solo espacio queda intacta; no se toca `.cargo3d`,
+PDF, Excel ni SQLite salvo el aviso de guardado descrito abajo.
+
+### Added
+
+- `presentation/desktop/workers/multi_space_optimization_worker.py`:
+  `MultiSpaceOptimizationWorker`, mismo patrón que `OptimizationWorker`
+  (un `QThread` por ejecución, `CancellationToken` cooperativo) sobre
+  `MultiSpaceAssignmentEngine.assign(...)`.
+- `presentation/desktop/dialogs/multi_space_setup_dialog.py`:
+  `MultiSpaceSetupDialog` — elegir y ordenar candidatos (espacio actual
+  del formulario + perfiles activos del catálogo) y fijar `max_spaces`
+  opcional.
+- `presentation/desktop/panels/multi_space_results_panel.py`:
+  `MultiSpaceResultsPanel` — nueva pestaña "Multi-espacio": resumen
+  global completo de `MultiSpaceAssignmentResult` (espacios usados,
+  cantidad por tipo/nombre, unidades solicitadas/cargadas/pendientes,
+  volumen disponible/utilizado, ocupación global/mínima/media/máxima,
+  peso, razón de parada, tiempo total) más un selector "Espacio
+  1"…"N" con el resumen/avisos/no-cargados de ese espacio individual.
+- `MainWindow`: acción "Optimización &multi-espacio…" (`F6`) en el menú
+  Optimización; mutuamente excluyente con la optimización de un solo
+  espacio (`_is_any_optimization_running()`); al terminar, muestra el
+  primer espacio en el visor 3D y activa la pestaña "Multi-espacio";
+  cambiar de espacio en el selector actualiza el visor.
+- Aviso explícito al guardar el proyecto con un resultado multi-espacio
+  activo: "Los resultados multi-espacio todavía no se guardan dentro
+  del proyecto." — no bloquea el guardado del resto del proyecto.
+- `tests/presentation/desktop/test_multi_space_optimization_worker.py`
+  y `test_main_window_multi_space.py`: 13 pruebas nuevas (construcción
+  de la solicitud desde la interfaz, worker, cancelación, resumen
+  global, selección de espacio, actualización del visor, error del
+  motor, aviso de guardado).
+
+### Not in scope
+
+- Persistir el resultado multi-espacio dentro de `.cargo3d`.
+- Informes PDF/Excel específicos de multi-espacio (se reutilizan los
+  exportadores existentes sobre el espacio individual elegido).
+- Cualquier cambio al motor de optimización, a `rules` o a `geometry`
+  — ver `docs/MultiSpaceAssignment.md`, §9, para el alcance exacto.
+
 ## [0.15.1] - 2026-07-16
 
 `OPT-02` (rendimiento del `PackingEngine`), parcial: caché de cajas ya

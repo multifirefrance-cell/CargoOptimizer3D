@@ -214,7 +214,13 @@ fase. Ver `docs/Roadmap.md`, sección "Nota sobre la transición al
 Product Backlog". Un sexto encargo, inmediatamente posterior,
 implementó el primer ítem del backlog, `OPT-01` (asignación automática
 multi-espacio), como primer caso de uso real de `application` — ver
-`docs/MultiSpaceAssignment.md`.
+`docs/MultiSpaceAssignment.md`. Un séptimo encargo acotó `OPT-02`
+(rendimiento) a una caché de cajas ya conocidas entre `optimization` y
+`rules`, sin cambiar la complejidad — ver `docs/OptimizerPerformance.md`,
+sección "Fase OPT-02". Un octavo encargo, de cierre hacia beta,
+integró `OPT-01` en `presentation/desktop` (acción "Optimización
+multi-espacio…", mismo patrón de worker que la optimización de un solo
+espacio) — ver `docs/MultiSpaceAssignment.md`, §9.
 
 Estado actual: **sistema de informes PDF completamente implementado**
 (fin de fase 9.1), exactamente según el diseño de la fase 9.0 sin
@@ -545,6 +551,20 @@ fases 5.0 y 5.1.
   ventanas reales durante la suite. Solo puede existir un
   `QApplication` por proceso: el fixture `qapp` es de ámbito de
   sesión, nunca crear uno nuevo por prueba.
+- **Optimización multi-espacio (OPT-01, integrada en la interfaz)**:
+  `MultiSpaceOptimizationWorker` (`workers/`) calca el patrón de
+  `OptimizationWorker` — un `QThread` por ejecución, mismo
+  `CancellationToken` cooperativo; no es un segundo sistema de
+  threading. Solo un worker (de cualquiera de los dos tipos) corre a
+  la vez — `MainWindow._is_any_optimization_running()` es el único
+  punto que decide si ya hay una ejecución en curso, y
+  `_on_cancel_optimization` cancela el que esté corriendo. `.cargo3d`
+  no guarda el resultado multi-espacio: `MainWindow._save_to_path`
+  muestra un aviso explícito cuando `_last_multi_space_result` no es
+  `None`, pero nunca bloquea el guardado del resto del proyecto. No
+  crear nuevos exportadores PDF/Excel para multi-espacio sin encargo
+  explícito — se reutilizan los existentes, sobre el resultado de un
+  espacio individual elegido por el usuario.
 
 ## Invariantes del visor 3D (`presentation/desktop/viewer/`, implementado en la fase 6.1, no romper sin ADR)
 
