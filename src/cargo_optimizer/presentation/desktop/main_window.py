@@ -73,6 +73,14 @@ from cargo_optimizer.infrastructure.excel import (
     import_packing_list,
     read_source_headers,
 )
+from cargo_optimizer.infrastructure.pdf import (
+    BUILTIN_TEMPLATES,
+    CompanyProfile,
+    PdfError,
+    ReportConfig,
+    build_report_content,
+    generate_report,
+)
 from cargo_optimizer.infrastructure.persistence import ProjectFileError, ProjectFileRepository
 from cargo_optimizer.optimization import GreedyExtremePointStrategy, PackingProgress, PackingRequest
 from cargo_optimizer.optimization.exceptions import PackingRequestValidationError
@@ -285,6 +293,9 @@ class MainWindow(QMainWindow):
         self.action_export = self._make_action(
             "import", "Exportar &Excel…", None, self._on_export_excel_menu
         )
+        self.action_export_pdf = self._make_action(
+            "import", "Exportar &PDF…", None, self._on_export_pdf
+        )
         self.action_preferences = self._make_action(
             "preferences", "&Preferencias…", "Ctrl+,", self._stub("Preferencias")
         )
@@ -462,6 +473,7 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self.action_import)
         file_menu.addAction(self.action_export)
+        file_menu.addAction(self.action_export_pdf)
         file_menu.addSeparator()
         file_menu.addAction(self.action_preferences)
         file_menu.addSeparator()
@@ -763,6 +775,21 @@ class MainWindow(QMainWindow):
         path = Path(path_str)
         if path.suffix.casefold() != ".xlsx":
             path = path.with_suffix(".xlsx")
+        return path
+
+    def _prompt_save_pdf_path(self, title: str, default_name: str) -> Path | None:
+        path_str, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            title,
+            str(Path(self._settings.last_directory()) / default_name),
+            "Archivos PDF (*.pdf)",
+        )
+        if not path_str:
+            return None
+        self._remember_directory_of(path_str)
+        path = Path(path_str)
+        if path.suffix.casefold() != ".pdf":
+            path = path.with_suffix(".pdf")
         return path
 
     def _on_import_excel_auto(self) -> None:
@@ -1101,6 +1128,48 @@ class MainWindow(QMainWindow):
             self._show_error("No se pudo exportar el resultado", str(exc))
             return
         self.statusBar().showMessage(f"Resultado exportado a '{path.name}'.", _STATUS_MESSAGE_MS)
+
+    def _on_export_pdf(self) -> None:
+        """Genera uno de los cinco informes PDF oficiales (fase 9.1, `docs/PdfReports.md`).
+
+        La captura del visor 3D es siempre opcional: si no está
+        disponible (`export_screenshot_png()` devuelve `None`), el
+        informe se genera igual, sin esa sección — nunca es un motivo
+        de error.
+        """
+        if self._last_result is None:
+            self._show_warning(
+                "Sin resultado", "Ejecuta una optimización antes de exportar un informe PDF."
+            )
+            return
+
+        options = [template.display_name for template in BUILTIN_TEMPLATES]
+        choice, accepted = QInputDialog.getItem(
+            self, "Exportar PDF", "Tipo de informe:", options, 0, False
+        )
+        if not accepted:
+            return
+        template = next(t for t in BUILTIN_TEMPLATES if t.display_name == choice)
+
+        default_name = f"{self._project_display_name()}_{template.key}.pdf"
+        path = self._prompt_save_pdf_path("Exportar PDF", default_name)
+        if path is None:
+            return
+
+        content = build_report_content(
+            self._last_result,
+            self._last_load_units_by_id,
+            project_name=self._project_display_name(),
+            application_version=__version__,
+            viewer_screenshot_png=self.viewer_widget.export_screenshot_png(),
+        )
+        config = ReportConfig(company=CompanyProfile(name="CargoOptimizer3D"))
+        try:
+            generate_report(content, template, config, path)
+        except PdfError as exc:
+            self._show_error("No se pudo generar el informe PDF", str(exc))
+            return
+        self.statusBar().showMessage(f"Informe PDF exportado a '{path.name}'.", _STATUS_MESSAGE_MS)
 
     def _import_loading_spaces_from_path(self, path: Path) -> None:
         try:
@@ -1649,6 +1718,7 @@ class MainWindow(QMainWindow):
             self.action_import,
             self.action_import_products,
             self.action_export,
+            self.action_export_pdf,
             self.action_export_result_excel,
             self.action_import_loading_space_excel,
         ):

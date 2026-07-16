@@ -73,10 +73,10 @@ presentation  →  infrastructure  →  application  →  optimization  →  rul
   de `.xlsx` con openpyxl — ver `docs/Excel.md`), ampliado en la fase
   8.1 con mapeo de columnas, vista previa, importación parcial,
   duplicados, informes y exportación avanzada, sin ningún formato
-  nuevo — ver `docs/ExcelAutomation.md`. `infrastructure/pdf/`
-  (informes PDF, ReportLab) se diseñó por completo en la fase 9.0 sin
-  crear código todavía — ver `docs/PdfReportDesign.md` y ADR-0012; su
-  implementación llega en la fase 9.1.
+  nuevo — ver `docs/ExcelAutomation.md`. Desde la fase 9.1 incluye
+  `infrastructure/pdf/` (informes PDF con ReportLab, diseñado en la
+  fase 9.0 — `docs/PdfReportDesign.md`, ADR-0012 — e implementado
+  exactamente según ese diseño en la fase 9.1) — ver `docs/PdfReports.md`.
 - **`presentation`**: mecanismos de entrega (`presentation/desktop`
   hoy con PySide6 y, dentro de él, `presentation/desktop/viewer/` con
   PyVista/PyVistaQt para el visor 3D — ver `docs/ThreeDViewer.md`;
@@ -113,10 +113,9 @@ ninguna dependencia de UI instalada (ADR-0003).
   de columnas, perfiles, vista previa, duplicados, drag&drop,
   importación masiva, informes, exportación avanzada— en la fase 8.1,
   implementada — ver `docs/ExcelAutomation.md`); nunca `pandas`,
-  `xlrd` ni CSV como sustituto. ReportLab para informes PDF: diseño
-  completo en la fase 9.0 (`docs/PdfReportDesign.md`, ADR-0012),
-  **todavía sin instalar ni implementar** — la dependencia se añade
-  recién en la fase 9.1.
+  `xlrd` ni CSV como sustituto. ReportLab (`reportlab>=4.2,<5`) para
+  informes PDF: diseñado en la fase 9.0 (`docs/PdfReportDesign.md`,
+  ADR-0012) e implementado en la fase 9.1 — ver `docs/PdfReports.md`.
 - Ruff para lint (incluye orden de imports). Black para formateo. No
   usar el formateador de Ruff para evitar conflictos con Black.
 - Mypy en modo estricto (`strict = true`).
@@ -135,7 +134,7 @@ src/cargo_optimizer/
 ├── infrastructure/  # Adaptadores concretos: persistence/ (proyectos .cargo3d, JSON, fase 7.0),
 │                    #   database/ (catálogo SQLite/SQLAlchemy, fase 7.1 + perfiles de mapeo, fase 8.1),
 │                    #   excel/ (import/export .xlsx, fase 8.0 + automatización, fase 8.1),
-│                    #   pdf/ (diseñado en fase 9.0, docs/PdfReportDesign.md; sin implementar).
+│                    #   pdf/ (informes PDF con ReportLab, fase 9.0 diseño + 9.1 implementación).
 └── presentation/
     └── desktop/     # Aplicación de escritorio PySide6. Incluye viewer/ (visor 3D, PyVista/PyVistaQt).
 tests/               # Pruebas, en espejo de la estructura de src/, + tests/integration/
@@ -196,48 +195,48 @@ flujo (mapeo de columnas, perfiles, vista previa, importación parcial,
 duplicados, drag&drop, importación masiva, informes, exportación
 avanzada). Un tercer encargo, ya con 8.1 completada, renombró y
 subdividió lo que era 8.2 como **fase 9**: **9.0** (diseño puro de los
-informes PDF, esta entrega) y **9.1** (implementación, pendiente);
+informes PDF, `docs/PdfReportDesign.md`, ADR-0012) y **9.1**
+(implementación real, un cuarto encargo inmediatamente posterior);
 "Integración ERP" pasó de 9 a **10**, y "Versión comercial" de 10 a
 **11** — ver `docs/Roadmap.md`, secciones "Nota sobre la numeración de
 la fase 8" y "Nota sobre la numeración de la fase 9".
 
-Estado actual: **diseño completo del sistema de informes PDF** (fin de
-fase 9.0). `docs/PdfReportDesign.md` fija la arquitectura de
-`infrastructure/pdf/` (ocho módulos: `exceptions.py`, `styles.py`,
-`layout.py`, `report_config.py`, `report_content.py`, `sections.py`,
-`templates.py`, `report_builder.py`, ninguno implementado todavía),
-los cinco tipos de informe oficiales (resumen ejecutivo, informe
-técnico completo, packing list optimizado, informe interno de
-diagnóstico, informe para cliente) con su contenido exacto, la
-configuración (empresa, cliente, idioma, colores, cabecera/pie,
-numeración, marca de agua), el sistema de plantillas
-(`ReportTemplate` como datos, nunca una jerarquía de clases por
-informe — ADR-0012) y la integración diseñada — no implementada — con
-el visor 3D (`ReportContent.viewer_screenshot_png: bytes | None`,
-inyectado desde `presentation/desktop`, nunca calculado dentro de
-`infrastructure/pdf`). **Esta fase no creó ningún código funcional de
-PDF ni añadió `reportlab` como dependencia** — es exclusivamente de
-documentación, tal como exigía el encargo.
-`domain`/`geometry`/`rules`/`optimization`/`presentation`/
+Estado actual: **sistema de informes PDF completamente implementado**
+(fin de fase 9.1), exactamente según el diseño de la fase 9.0 sin
+reabrir ninguna decisión de arquitectura — ver `docs/PdfReports.md`.
+`infrastructure/pdf/` tiene sus ocho módulos (`exceptions.py`,
+`styles.py`, `layout.py`, `report_config.py`, `report_content.py`,
+`sections.py`, `templates.py`, `report_builder.py`), los cinco tipos
+de informe oficiales (resumen ejecutivo, informe técnico completo,
+packing list optimizado, informe interno de diagnóstico, informe para
+cliente) como instancias de `ReportTemplate` (datos, nunca una
+jerarquía de clases — ADR-0012), y la integración con el visor 3D vía
+`ReportContent.viewer_screenshot_png: bytes | None`, rellenado por
+`MainWindow` con la nueva `Packing3DViewer.export_screenshot_png()`
+(`None` si el visor no está disponible o si falla — nunca un error).
+`reportlab>=4.2,<5` se añade como dependencia de producción; `pypdf`
+como dependencia de desarrollo, solo para validar los PDF generados en
+las pruebas. `MainWindow` gana "Archivo > Exportar PDF…"
+(`_on_export_pdf`). `domain`/`geometry`/`rules`/`optimization`/
 `infrastructure/database`/`infrastructure/excel` siguen intactos.
 
-El visor 3D (fase 6.1) sigue disponible y sin cambios en esta fase —
-ver `docs/ThreeDViewer.md` para su implementación completa
-(arquitectura, selección, cámara, temas, fallback, el hallazgo del
-segmentation fault de VTK bajo `offscreen`, etc.). La interfaz ejecuta
-el motor real de principio a fin desde la fase 5.1: construye una
+El visor 3D (fase 6.1) sigue disponible; esta fase solo le añade la
+captura de imagen (`SceneController.export_screenshot_png()`,
+`Packing3DViewer.export_screenshot_png()`), no el resto de la fase 6.2
+(filtros/etiquetas/vistas predefinidas) — ver `docs/ThreeDViewer.md`
+para la implementación completa del visor y `docs/PdfReports.md`,
+sección 6, para el detalle de la captura. La interfaz ejecuta el motor
+real de principio a fin desde la fase 5.1: construye una
 `PackingRequest` desde el formulario de Loading Space y la tabla de
 productos, la ejecuta en `OptimizationWorker` (`QThread` dedicado),
 vuelca el `PackingResult` en cuatro pestañas del panel inferior y en el
 visor 3D, sin bloquear nunca el hilo de la interfaz. No implementar
-todavía filtros/etiquetas/modos de color/vistas predefinidas/captura de
-imagen del visor (fase 6.2 — un prerrequisito útil, no bloqueante, para
-que los informes PDF de 9.1 incluyan la captura del visor),
-animación/capas/cortes/escala del visor (fase 6.3), ningún código real
-de `infrastructure/pdf` (fase 9.1), integración ERP (fase 10),
-Undo/Redo, ni volver a tocar `domain`/`geometry`/`rules`/`optimization`
-salvo bug objetivo y demostrable, hasta que se indique explícitamente.
-Ver `docs/Roadmap.md` para el detalle fase a fase.
+todavía filtros/etiquetas/modos de color/vistas predefinidas del visor
+(resto de la fase 6.2), animación/capas/cortes/escala del visor (fase
+6.3), integración ERP (fase 10), Undo/Redo, ni volver a tocar
+`domain`/`geometry`/`rules`/`optimization` salvo bug objetivo y
+demostrable, hasta que se indique explícitamente. Ver
+`docs/Roadmap.md` para el detalle fase a fase.
 
 ## Invariantes del modelo de dominio (no romper sin ADR)
 

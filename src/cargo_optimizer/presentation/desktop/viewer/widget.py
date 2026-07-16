@@ -205,6 +205,18 @@ class Packing3DViewer(QWidget):
         if self._controller is not None:
             self._controller.apply_theme(self._theme)
 
+    def export_screenshot_png(self) -> bytes | None:
+        """PNG en memoria de la vista 3D actual, o `None` si el visor no está disponible.
+
+        Uso previsto: `infrastructure/pdf` (fase 9.1) recibe estos bytes
+        ya capturados desde `MainWindow` — el visor nunca sabe nada de
+        PDF ni de `reportlab`, mismo desacoplo que ya protege a
+        `viewer/` frente a `optimization` (ADR-0011).
+        """
+        if self._controller is None:
+            return None
+        return self._controller.export_screenshot_png()
+
     # ------------------------------------------------------------------
     # Ciclo de vida
     # ------------------------------------------------------------------

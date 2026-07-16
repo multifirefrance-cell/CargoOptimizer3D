@@ -25,7 +25,7 @@ fase se adelanta a la anterior.
 | 8.0 | Importación y exportación profesional de Excel (`.xlsx`) | `infrastructure/excel` (nuevo) | **Completada** |
 | 8.1 | Automatización profesional del flujo Excel (mapeo de columnas, perfiles, vista previa, importación parcial, duplicados, drag&drop, importación masiva, informe, exportación avanzada) | `infrastructure/excel` (mismo paquete), `infrastructure/database` (perfiles de mapeo), `presentation/desktop` (4 diálogos nuevos + drag&drop) | **Completada** |
 | 9.0 | Diseño del sistema profesional de informes PDF | Ninguno (solo documentación: `docs/PdfReportDesign.md`, ADR-0012) | **Completada** |
-| 9.1 | Informes PDF — implementación | `infrastructure/pdf` (nuevo) | Pendiente |
+| 9.1 | Informes PDF — implementación | `infrastructure/pdf` (nuevo) | **Completada** |
 | 10 | Integración ERP | `presentation` (nuevo adaptador, p. ej. `presentation/api`) | Pendiente |
 | 11 | Versión comercial | — | Pendiente |
 
@@ -143,40 +143,43 @@ y "reportes PDF", no una fase posterior a ambas.
 Un tercer encargo, ya con la fase 8.1 completada, pidió explícitamente
 "FASE 9.0 — Diseño del sistema profesional de informes PDF". Lo que
 hasta entonces era la fila **8.2** ("Reportes PDF") se renombra y
-subdivide como **fase 9**: **9.0** (diseño puro, esta entrega,
-`docs/PdfReportDesign.md` y ADR-0012) y **9.1** (implementación,
-pendiente) — mismo criterio de separar diseño de implementación que ya
-se aplicó a las fases 4, 6 y ahora esta. La antigua fila 9
-("Integración ERP") pasa a **10**, y "Versión comercial" pasa de 10 a
-**11**. Ninguna fase completada cambia de número; solo se renumeran las
-que todavía estaban pendientes, mismo principio que ya guio las notas
-de las fases 2, 5, 6, 7 y 8.
+subdivide como **fase 9**: **9.0** (diseño puro, `docs/PdfReportDesign.md`
+y ADR-0012) y **9.1** (implementación real, un cuarto encargo
+inmediatamente posterior) — mismo criterio de separar diseño de
+implementación que ya se aplicó a las fases 4, 6 y ahora esta. La
+antigua fila 9 ("Integración ERP") pasa a **10**, y "Versión comercial"
+pasa de 10 a **11**. Ninguna fase completada cambia de número; solo se
+renumeran las que todavía estaban pendientes, mismo principio que ya
+guio las notas de las fases 2, 5, 6, 7 y 8.
 
 ## Estado actual
 
-Fin de fase 9.0: diseño completo del sistema de informes PDF — ver
-`docs/PdfReportDesign.md` (arquitectura de `infrastructure/pdf/`, los
-cinco tipos de informe y su contenido exacto, configuración de
-empresa/cliente/idioma/colores/cabecera/pie/numeración/marca de agua,
-integración diseñada — no implementada — con el visor 3D, sistema de
-plantillas, personalización futura, revisión crítica) y ADR-0012
-(`ReportTemplate` como datos en vez de una jerarquía de clases por
-informe, aislamiento de `reportlab` respecto a `domain`, captura del
-visor 3D inyectada como `bytes | None`). **No se ha creado ningún
-código funcional de PDF ni se ha añadido `reportlab` como
-dependencia** — esta fase es exclusivamente de documentación, tal como
-exigía el encargo. `domain`/`geometry`/`rules`/`optimization`/
-`presentation`/`infrastructure/database`/`infrastructure/excel` sin
-ningún cambio.
+Fin de fase 9.1: sistema de informes PDF completamente implementado —
+ver `docs/PdfReports.md` (implementación real: los ocho módulos de
+`infrastructure/pdf/`, los cinco tipos de informe con su contenido
+exacto, configuración de empresa/cliente/idioma/colores/cabecera/pie/
+numeración/marca de agua, integración con la captura del visor 3D,
+sistema de plantillas, la acción "Archivo > Exportar PDF…" en
+`MainWindow`, pruebas y smoke test). El diseño previo
+(`docs/PdfReportDesign.md`, fase 9.0) y ADR-0012 se implementaron
+exactamente como se diseñaron, sin reabrir ninguna decisión de
+arquitectura: `ReportTemplate` como datos (cinco constantes, no cinco
+clases), `reportlab` aislado de `domain` en
+`report_content.py`/`report_config.py`, y la captura del visor 3D
+recibida como `bytes | None` ya calculada (`Packing3DViewer.
+export_screenshot_png()`, nueva capacidad mínima añadida a
+`presentation/desktop/viewer/` en esta fase — no toda la fase 6.2,
+solo la captura). `reportlab>=4.2,<5` se añade como dependencia de
+producción; `pypdf` como dependencia de desarrollo, usada únicamente
+para validar los PDF generados en las pruebas (nunca para generarlos).
+`domain`/`geometry`/`rules`/`optimization`/`infrastructure/database`/
+`infrastructure/excel` sin ningún cambio.
 
 La siguiente sesión de desarrollo puede abordar la **fase 6.2**
-(filtros, etiquetas, modos de color, vistas predefinidas, captura de
-imagen del visor 3D — de hecho un prerrequisito útil, aunque no
-bloqueante, para que los informes PDF de la fase 9.1 puedan incluir la
-captura del visor) o la **fase 9.1** (implementación real de
-`infrastructure/pdf`, con `reportlab` como dependencia nueva), según
-prioridad — a decidir explícitamente antes de empezar. Si el
-rendimiento del motor a gran escala (250+ instancias) sigue siendo
-prioritario en paralelo, ver `docs/OptimizerPerformance.md` para la
-alternativa pendiente (índice espacial dentro de `rules`/`geometry`,
-con ADR explícito).
+(filtros, etiquetas, modos de color, vistas predefinidas del visor 3D
+— la captura de imagen en sí ya se resolvió en la fase 9.1) o la
+**fase 10** (integración ERP), según prioridad — a decidir
+explícitamente antes de empezar. Si el rendimiento del motor a gran
+escala (250+ instancias) sigue siendo prioritario en paralelo, ver
+`docs/OptimizerPerformance.md` para la alternativa pendiente (índice
+espacial dentro de `rules`/`geometry`, con ADR explícito).

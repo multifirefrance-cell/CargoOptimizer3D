@@ -18,7 +18,10 @@ diseño sobre cuándo sí haría falta.
 
 from __future__ import annotations
 
+import os
+import tempfile
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Protocol
 
 import pyvista as pv
@@ -60,6 +63,7 @@ class PyVistaPlotterLike(Protocol):
     def enable_mesh_picking(self, **kwargs: Any) -> Any: ...
     def disable_picking(self) -> None: ...
     def close(self) -> None: ...
+    def screenshot(self, filename: Any = None, **kwargs: Any) -> Any: ...
 
     @property
     def camera(self) -> Any: ...
@@ -147,6 +151,28 @@ class SceneController:
         """Libera el `Plotter` (fin del ciclo de vida — ver `widget.py::closeEvent`)."""
         self.clear_scene()
         self._plotter.close()
+
+    def export_screenshot_png(self) -> bytes | None:
+        """PNG en memoria de la vista actual, o `None` si la captura falla por cualquier motivo.
+
+        Escribe a un archivo temporal (mismo mecanismo que
+        `Plotter.screenshot(filename)`, que ya sabe codificar PNG) y lee
+        los bytes de vuelta — evita que `viewer/` tenga que depender
+        directamente de Pillow/imageio para codificar la imagen él
+        mismo. Uso previsto: `infrastructure/pdf` (fase 9.1, ver
+        `docs/PdfReportDesign.md`, sección 6) recibe estos bytes ya
+        capturados, nunca genera la imagen por su cuenta.
+        """
+        fd, tmp_name = tempfile.mkstemp(suffix=".png")
+        os.close(fd)
+        tmp_path = Path(tmp_name)
+        try:
+            self._plotter.screenshot(str(tmp_path))
+            return tmp_path.read_bytes()
+        except Exception:  # noqa: BLE001 - un fallo de captura nunca debe propagarse
+            return None
+        finally:
+            tmp_path.unlink(missing_ok=True)
 
     # ------------------------------------------------------------------
     # Construcción

@@ -18,7 +18,7 @@ entrega o cualquier detalle técnico externo.
 ┌─────────────────────────────────────────────────────────┐
 │ presentation   (desktop hoy; api / web en el futuro)     │
 ├─────────────────────────────────────────────────────────┤
-│ infrastructure (JSON — 7.0; SQLite — 7.1; Excel — 8.0/8.1; PDF — diseñado en 9.0, pendiente 9.1) │
+│ infrastructure (JSON — 7.0; SQLite — 7.1; Excel — 8.0/8.1; PDF — 9.0/9.1) │
 ├─────────────────────────────────────────────────────────┤
 │ application    (casos de uso, orquestación, puertos)     │
 ├─────────────────────────────────────────────────────────┤
@@ -67,9 +67,11 @@ profesional de `.xlsx` con `openpyxl` — ver `docs/Excel.md`; la fase
 8.1 añade mapeo de columnas, vista previa, importación parcial,
 duplicados, informes y exportación avanzada sobre ese mismo módulo,
 sin nuevos formatos — ver `docs/ExcelAutomation.md`). El sistema de
-informes PDF (`infrastructure/pdf/`, ReportLab) se diseñó por completo
-en la fase 9.0 sin implementarse todavía — ver `docs/PdfReportDesign.md`
-y ADR-0012; su implementación real llega en la fase 9.1.
+informes PDF (`infrastructure/pdf/`, ReportLab) se diseñó en la fase
+9.0 (`docs/PdfReportDesign.md`, ADR-0012) y se implementó en la fase
+9.1 exactamente según ese diseño — ver `docs/PdfReports.md` para la
+implementación real (cinco tipos de informe, integración con la
+captura del visor 3D, plantillas como datos).
 
 Depende de `domain` (y de `application`
 cuando existan casos de uso reales que orquestar; los tres subpaquetes
@@ -90,29 +92,34 @@ infrastructure/
 │   ├── repositories.py               # 5 repositorios: catálogo, perfiles de espacio, perfiles de
 │   │                                  #   mapeo de Excel (fase 8.1), 2 historiales
 │   └── catalog_service.py            # CatalogService: fachada única hacia presentation
-└── excel/
-    ├── exceptions.py                 # ExcelError y subclases tipadas
-    ├── row_parsing.py                 # Ayudas genéricas de parseo compartidas por los esquemas
-    ├── results.py                     # RowError, *ImportResult (nunca se importa una fila inválida en silencio)
-    ├── styles.py                      # Formato profesional compartido: cabeceras, bordes, tablas, autoajuste
-    ├── workbook_utils.py              # Apertura segura, cabeceras, iteración de filas, escritura atómica
-    ├── product_rows.py                # Esquema de columnas de LoadUnit (catálogo)
-    ├── loading_space_rows.py          # Esquema de columnas de LoadingSpace
-    ├── catalog_importer.py / catalog_exporter.py
-    ├── packing_list_importer.py       # Resuelve SKU vía un Callable inyectado, nunca importa SQLite directo
-    ├── loading_space_importer.py
-    ├── result_exporter.py             # PackingResult -> .xlsx con 5 hojas
-    ├── detection.py                   # detect_template_kind(): identifica la plantilla por cabeceras
-    ├── templates.py                   # Genera las 4 plantillas oficiales (examples/templates/)
-    ├── mapping.py                     # Fase 8.1: detección de alias, hoja remapeada en memoria
-    ├── import_preview.py              # Fase 8.1: clasificación nuevo/existente/duplicado/inválido
-    ├── import_plan.py                 # Fase 8.1: importación parcial + resolución de duplicados (función pura)
-    ├── import_report.py               # Fase 8.1: informe individual/masivo + exportación a .xlsx
-    └── advanced_export.py             # Fase 8.1: selección/orden/nombre de hojas, ocultar vacías
-
-# infrastructure/pdf/ — diseñado en la fase 9.0 (docs/PdfReportDesign.md, ADR-0012),
-#   NO existe todavía como código: exceptions.py, styles.py, layout.py, report_config.py,
-#   report_content.py, sections.py, templates.py, report_builder.py. Implementación en la fase 9.1.
+├── excel/
+│   ├── exceptions.py                 # ExcelError y subclases tipadas
+│   ├── row_parsing.py                 # Ayudas genéricas de parseo compartidas por los esquemas
+│   ├── results.py                     # RowError, *ImportResult (nunca se importa una fila inválida en silencio)
+│   ├── styles.py                      # Formato profesional compartido: cabeceras, bordes, tablas, autoajuste
+│   ├── workbook_utils.py              # Apertura segura, cabeceras, iteración de filas, escritura atómica
+│   ├── product_rows.py                # Esquema de columnas de LoadUnit (catálogo)
+│   ├── loading_space_rows.py          # Esquema de columnas de LoadingSpace
+│   ├── catalog_importer.py / catalog_exporter.py
+│   ├── packing_list_importer.py       # Resuelve SKU vía un Callable inyectado, nunca importa SQLite directo
+│   ├── loading_space_importer.py
+│   ├── result_exporter.py             # PackingResult -> .xlsx con 5 hojas
+│   ├── detection.py                   # detect_template_kind(): identifica la plantilla por cabeceras
+│   ├── templates.py                   # Genera las 4 plantillas oficiales (examples/templates/)
+│   ├── mapping.py                     # Fase 8.1: detección de alias, hoja remapeada en memoria
+│   ├── import_preview.py              # Fase 8.1: clasificación nuevo/existente/duplicado/inválido
+│   ├── import_plan.py                 # Fase 8.1: importación parcial + resolución de duplicados (función pura)
+│   ├── import_report.py               # Fase 8.1: informe individual/masivo + exportación a .xlsx
+│   └── advanced_export.py             # Fase 8.1: selección/orden/nombre de hojas, ocultar vacías
+└── pdf/                               # Fase 9.1 (diseño en 9.0: docs/PdfReportDesign.md, ADR-0012)
+    ├── exceptions.py                   # PdfError, PdfConfigError, PdfRenderError
+    ├── styles.py                       # Tipografía, colores, TableStyle compartidos
+    ├── layout.py                       # Cabecera/pie, numeración "Página X de Y", marca de agua
+    ├── report_config.py                # CompanyProfile, ClientInfo, ReportSection, ReportConfig
+    ├── report_content.py               # ReportContent + build_report_content() (único import de domain)
+    ├── sections.py                     # Un build_*_section() por ReportSection
+    ├── templates.py                    # ReportTemplate + los 5 informes oficiales, como datos
+    └── report_builder.py               # generate_report(): único módulo que importa reportlab.platypus
 ```
 
 ### `presentation`

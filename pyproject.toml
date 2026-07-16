@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cargo-optimizer3d"
-version = "0.13.1"
+version = "0.14.0"
 description = "Software profesional de optimización de carga 3D para espacios de carga universales (Loading Spaces)."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -22,6 +22,7 @@ dependencies = [
     "vtk>=9.6,<10",
     "SQLAlchemy>=2.0,<3",
     "openpyxl>=3.1,<4",
+    "reportlab>=4.2,<5",
 ]
 
 [project.scripts]
@@ -35,6 +36,8 @@ dev = [
     "pytest>=8.3",
     "import-linter>=2.1",
     "types-openpyxl>=3.1",
+    "types-reportlab>=4.2",
+    "pypdf>=5.0",
 ]
 
 [tool.hatch.build.targets.wheel]

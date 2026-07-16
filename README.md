@@ -26,7 +26,8 @@ src/cargo_optimizer/
 ├── domain/          # Entidades y reglas de negocio puras. Sin dependencias externas.
 ├── application/     # Casos de uso, orquestación, puertos hacia infraestructura.
 ├── infrastructure/  # Adaptadores concretos: persistence/ (proyectos .cargo3d, JSON),
-│                    #   database/ (catálogo SQLite/SQLAlchemy), excel/ (import/export .xlsx), PDF (fase posterior).
+│                    #   database/ (catálogo SQLite/SQLAlchemy), excel/ (import/export .xlsx),
+│                    #   pdf/ (informes PDF, ReportLab).
 └── presentation/
     └── desktop/     # Aplicación de escritorio (PySide6). Incluye viewer/ (visor 3D).
 ```
@@ -70,23 +71,22 @@ python -m venv .venv
 
 ## Estado del proyecto
 
-Fin de fase 9.0: motor de optimización, interfaz de escritorio, visor
+Fin de fase 9.1: motor de optimización, interfaz de escritorio, visor
 3D, persistencia de proyectos (`.cargo3d`, JSON versionado), catálogo
 reutilizable de productos/perfiles respaldado por SQLite,
-importación/exportación profesional de Excel (`.xlsx`) y
-automatización del flujo Excel (mapeo de columnas con perfiles
-reutilizables, vista previa, importación parcial, resolución de
-duplicados, arrastrar y soltar, importación masiva, informe de
-importación, exportación avanzada) ya implementados — ver
-`docs/Roadmap.md` para el detalle fase a fase, `docs/ProjectFiles.md`
-para el formato de archivo de proyecto, `docs/Database.md` para el
-catálogo SQLite (productos, perfiles de Loading Space, perfiles de
-mapeo de Excel e historial básico), `docs/Excel.md` para el
-importador/exportador de Excel (plantillas oficiales en
-`examples/templates/`) y `docs/ExcelAutomation.md` para la
-automatización del flujo. El sistema de informes PDF está **diseñado
-por completo pero todavía no implementado** — ver
-`docs/PdfReportDesign.md` (arquitectura, cinco tipos de informe,
-integración con el visor 3D, configuración y plantillas) y ADR-0012;
-su código real (`infrastructure/pdf/`) y la integración ERP se
-implementarán en fases posteriores.
+importación/exportación profesional de Excel (`.xlsx`), automatización
+del flujo Excel (mapeo de columnas con perfiles reutilizables, vista
+previa, importación parcial, resolución de duplicados, arrastrar y
+soltar, importación masiva, informe de importación, exportación
+avanzada) y generación de informes PDF profesionales (cinco tipos de
+informe, integración opcional con la captura del visor 3D,
+configuración de empresa/cliente/colores/marca de agua) ya
+implementados — ver `docs/Roadmap.md` para el detalle fase a fase,
+`docs/ProjectFiles.md` para el formato de archivo de proyecto,
+`docs/Database.md` para el catálogo SQLite (productos, perfiles de
+Loading Space, perfiles de mapeo de Excel e historial básico),
+`docs/Excel.md` para el importador/exportador de Excel (plantillas
+oficiales en `examples/templates/`), `docs/ExcelAutomation.md` para la
+automatización del flujo, y `docs/PdfReports.md` para el sistema de
+informes PDF (`infrastructure/pdf/`, ReportLab). La integración ERP se
+implementará en una fase posterior.

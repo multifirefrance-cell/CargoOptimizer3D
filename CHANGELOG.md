@@ -4,6 +4,63 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Este proyecto aún no ha alcanzado la versión 1.0; el versionado 0.x
 puede incluir cambios estructurales entre versiones menores.
 
+## [0.14.0] - 2026-07-16
+
+Implementación del sistema profesional de informes PDF (fase 9.1),
+exactamente según el diseño de la fase 9.0 (`docs/PdfReportDesign.md`,
+ADR-0012), sin reabrir ninguna decisión de arquitectura.
+
+### Added
+
+- `infrastructure/pdf/`: `exceptions.py` (`PdfError`/`PdfConfigError`/
+  `PdfRenderError`), `styles.py` (tipografía, colores, `TableStyle`
+  compartidos), `layout.py` (cabecera, pie, numeración "Página X de Y"
+  vía un `Canvas` de dos pasadas, marca de agua), `report_config.py`
+  (`CompanyProfile`, `ClientInfo`, `ReportSection`, `ReportConfig`,
+  datos puros sin ningún import de `reportlab`), `report_content.py`
+  (`ReportContent` + `build_report_content()`, único punto que importa
+  `domain`), `sections.py` (una función por `ReportSection`:
+  portada, resumen ejecutivo, imagen del visor, datos del espacio,
+  productos cargados, productos no cargados, avisos, apéndice técnico,
+  pie legal), `templates.py` (`ReportTemplate` + los cinco informes
+  oficiales como datos — `EXECUTIVE_SUMMARY`, `TECHNICAL_FULL`,
+  `PACKING_LIST`, `INTERNAL_DIAGNOSTIC`, `CLIENT_REPORT`) y
+  `report_builder.py` (`generate_report()`, escritura siempre atómica).
+- Los cinco tipos de informe PDF con su contenido completo (ver
+  `docs/PdfReports.md` para la matriz de secciones por informe);
+  el informe de cliente oculta columnas de posición, algoritmo/tiempo
+  de ejecución y detalle técnico de motivos de no-carga; el informe
+  interno de diagnóstico fuerza una marca de agua "USO INTERNO — NO
+  DISTRIBUIR".
+- `presentation/desktop/viewer`: `SceneController.export_screenshot_png()`
+  y `Packing3DViewer.export_screenshot_png()` — captura PNG en memoria
+  de la vista 3D actual, `None` si el visor no está disponible o si la
+  captura falla por cualquier motivo, nunca una excepción.
+- `MainWindow`: acción "Archivo > Exportar PDF…" (`_on_export_pdf`) —
+  elige tipo de informe, carpeta y nombre; construye `ReportContent`
+  con la captura del visor si está disponible; deshabilitada mientras
+  una optimización está en curso (mismo criterio que "Exportar Excel…
+  resultado").
+- `pyproject.toml`: nueva dependencia de producción `reportlab>=4.2,<5`;
+  nuevas dependencias de desarrollo `types-reportlab>=4.2` (Mypy
+  estricto) y `pypdf>=5.0` (validación de los PDF generados en las
+  pruebas — nunca usada para generarlos).
+- 51 pruebas nuevas: los cinco tipos de informe, con/sin imagen del
+  visor (incluida una imagen corrupta), con/sin logo, proyecto
+  vacío/completo, `config_overrides` de cada plantilla, numeración
+  multi-página, marca de agua, escritura atómica, error de
+  configuración (`tests/infrastructure/pdf/`), y la acción "Exportar
+  PDF…" completa en `MainWindow`
+  (`tests/presentation/desktop/test_main_window_pdf_export.py`).
+- `docs/PdfReports.md`: implementación real (los ocho módulos,
+  contenido exacto de los cinco informes, configuración, integración
+  con el visor 3D, integración en `MainWindow`, seguridad, pruebas,
+  smoke test y sus limitaciones de verificación en este entorno).
+- Smoke test real de extremo a extremo: un `CargoProject` real
+  optimizado con el motor real (`PackingEngine.optimize`, sin simular
+  nada), generación de los cinco informes oficiales, validados con
+  `pypdf` (parser independiente de `reportlab`).
+
 ## [0.13.1] - 2026-07-15
 
 Diseño del sistema profesional de informes PDF (fase 9.0). Fase
