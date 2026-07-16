@@ -129,3 +129,22 @@ def test_flags_mark_sku_editable_and_orientations_read_only(qapp: QApplication) 
 
     assert sku_flags & Qt.ItemFlag.ItemIsEditable
     assert not (orientations_flags & Qt.ItemFlag.ItemIsEditable)
+
+
+def test_set_unit_at_replaces_the_whole_row(qapp: QApplication) -> None:
+    model = ProductTableModel([_unit(sku="A"), _unit(sku="B")])
+    replacement = _unit(sku="B2", name="Reemplazo")
+
+    model.set_unit_at(1, replacement)
+
+    assert model.load_units()[0].sku == "A"
+    assert model.load_units()[1].sku == "B2"
+    assert model.load_units()[1].name == "Reemplazo"
+
+
+def test_set_unit_at_ignores_out_of_range_row(qapp: QApplication) -> None:
+    model = ProductTableModel([_unit(sku="A")])
+
+    model.set_unit_at(5, _unit(sku="Z"))
+
+    assert model.load_units()[0].sku == "A"

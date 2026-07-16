@@ -173,6 +173,18 @@ class Packing3DViewer(QWidget):
         if self._controller is not None:
             self._controller.reset_camera()
 
+    def view_front(self) -> None:
+        if self._controller is not None:
+            self._controller.view_front()
+
+    def view_top(self) -> None:
+        if self._controller is not None:
+            self._controller.view_top()
+
+    def view_side(self) -> None:
+        if self._controller is not None:
+            self._controller.view_side()
+
     def set_container_visible(self, visible: bool) -> None:
         if self._controller is not None:
             self._controller.set_container_visible(visible)

@@ -1,9 +1,13 @@
-"""`CatalogProductEditorDialog`: editor modal de un único `LoadUnit` de catálogo (fase 7.1).
+"""`CatalogProductEditorDialog`: editor modal de un único `LoadUnit` (fase 7.1).
 
 Construye y valida un `LoadUnit` real (nunca duplica las invariantes de
 dominio: los errores de `LoadUnit.__post_init__` se muestran tal
 cual). Se usa tanto para crear un producto de catálogo nuevo como para
 editar uno existente (pasando `load_unit=` con los valores actuales).
+También lo reutiliza `ProductTablePanel` (fase Beta 1.0) para dar de
+alta/editar un `LoadUnit` del proyecto actual con un formulario
+dedicado en vez de edición celda a celda en la tabla — mismo diálogo,
+título parametrizable con `title`/`title_when_editing`.
 """
 
 from __future__ import annotations
@@ -67,13 +71,19 @@ _DEFAULT_EXTINGUISHER_NOMINAL_KG = 1.0
 class CatalogProductEditorDialog(QDialog):
     """Formulario modal para crear o editar un producto del catálogo."""
 
-    def __init__(self, parent: QWidget | None = None, *, load_unit: LoadUnit | None = None) -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        load_unit: LoadUnit | None = None,
+        title: str = "Nuevo producto de catálogo",
+        title_when_editing: str = "Editar producto de catálogo",
+    ) -> None:
         super().__init__(parent)
         self._editing_id: UUID | None = load_unit.id if load_unit is not None else None
         self._result_load_unit: LoadUnit | None = None
-        self.setWindowTitle(
-            "Editar producto de catálogo" if load_unit is not None else "Nuevo producto de catálogo"
-        )
+        self.setWindowTitle(title_when_editing if load_unit is not None else title)
+        self.resize(520, 700)
 
         self._sku_edit = QLineEdit(self)
         self._name_edit = QLineEdit(self)

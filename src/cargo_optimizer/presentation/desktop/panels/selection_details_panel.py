@@ -7,11 +7,28 @@ desde una tabla futura, cuando se limpia la selección, o cuando se
 ejecuta una nueva optimización — todo eso lo decide `MainWindow`,
 llamando a `display_placement`/`clear`; este panel no escucha ninguna
 señal por sí mismo.
+
+Rediseño UX (auditoría "no mostrar información si no existe una caja
+seleccionada"): sin selección se muestra un mensaje centrado en vez de
+14 filas con "—"; con selección, la fila de peso nominal de extintor
+se oculta (`QFormLayout.setRowVisible`) cuando la caja no es un
+extintor — nunca un campo vacío que no aplica a la caja actual. Los
+`QLabel` internos (`_sku_label`, etc.) siguen existiendo y actualizando
+su texto exactamente igual que antes: solo cambia qué página del
+`QStackedWidget` se muestra.
 """
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QFormLayout, QLabel, QPlainTextEdit, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QFormLayout,
+    QLabel,
+    QPlainTextEdit,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from cargo_optimizer.presentation.desktop.viewer.models import PlacementVisualModel
 
@@ -19,6 +36,11 @@ _EMPTY = "—"
 
 _SI = "Sí"
 _NO = "No"
+
+_PLACEHOLDER_MESSAGE = "Selecciona una caja en el visor 3D\npara ver sus detalles."
+
+_PAGE_EMPTY = 0
+_PAGE_DETAILS = 1
 
 
 class SelectionDetailsPanel(QWidget):
@@ -46,23 +68,43 @@ class SelectionDetailsPanel(QWidget):
         self._notes_text.setReadOnly(True)
         self._notes_text.setFixedHeight(60)
 
-        layout = QFormLayout(self)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.addRow("SKU", self._sku_label)
-        layout.addRow("Nombre", self._name_label)
-        layout.addRow("Instancia", self._instance_label)
-        layout.addRow("Secuencia de carga", self._sequence_label)
-        layout.addRow("Posición X/Y/Z (cm)", self._position_label)
-        layout.addRow("Largo/Ancho/Alto (cm)", self._dimensions_label)
-        layout.addRow("Orientación", self._orientation_label)
-        layout.addRow("Peso bruto", self._weight_label)
-        layout.addRow("Tipo de empaque", self._package_type_label)
-        layout.addRow("Unidades por paquete", self._units_per_package_label)
-        layout.addRow("Extintor", self._extinguisher_label)
-        layout.addRow("Peso nominal", self._extinguisher_nominal_label)
-        layout.addRow("Frágil", self._fragile_label)
-        layout.addRow("Apilamiento máximo", self._max_stack_label)
-        layout.addRow("Notas", self._notes_text)
+        details_page = QWidget(self)
+        self._form = QFormLayout(details_page)
+        self._form.setContentsMargins(8, 4, 8, 4)
+        self._form.addRow("SKU", self._sku_label)
+        self._form.addRow("Nombre", self._name_label)
+        self._form.addRow("Instancia", self._instance_label)
+        self._form.addRow("Secuencia de carga", self._sequence_label)
+        self._form.addRow("Posición X/Y/Z (cm)", self._position_label)
+        self._form.addRow("Largo/Ancho/Alto (cm)", self._dimensions_label)
+        self._form.addRow("Orientación", self._orientation_label)
+        self._form.addRow("Peso bruto", self._weight_label)
+        self._form.addRow("Tipo de empaque", self._package_type_label)
+        self._form.addRow("Unidades por paquete", self._units_per_package_label)
+        self._form.addRow("Extintor", self._extinguisher_label)
+        self._form.addRow("Peso nominal", self._extinguisher_nominal_label)
+        self._form.addRow("Frágil", self._fragile_label)
+        self._form.addRow("Apilamiento máximo", self._max_stack_label)
+        self._form.addRow("Notas", self._notes_text)
+
+        placeholder_page = QWidget(self)
+        placeholder_label = QLabel(_PLACEHOLDER_MESSAGE, placeholder_page)
+        placeholder_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        placeholder_label.setWordWrap(True)
+        placeholder_label.setStyleSheet("color: gray; font-size: 10.5pt;")
+        placeholder_layout = QVBoxLayout(placeholder_page)
+        placeholder_layout.addStretch(1)
+        placeholder_layout.addWidget(placeholder_label)
+        placeholder_layout.addStretch(1)
+
+        self._stack = QStackedWidget(self)
+        self._stack.insertWidget(_PAGE_EMPTY, placeholder_page)
+        self._stack.insertWidget(_PAGE_DETAILS, details_page)
+        self._stack.setCurrentIndex(_PAGE_EMPTY)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._stack)
 
     def clear(self) -> None:
         for label in (
@@ -83,6 +125,7 @@ class SelectionDetailsPanel(QWidget):
         ):
             label.setText(_EMPTY)
         self._notes_text.setPlainText("")
+        self._stack.setCurrentIndex(_PAGE_EMPTY)
 
     def display_placement(self, model: PlacementVisualModel) -> None:
         self._sku_label.setText(model.sku)
@@ -107,6 +150,8 @@ class SelectionDetailsPanel(QWidget):
             if model.extinguisher_nominal_kg is not None
             else _EMPTY
         )
+        self._form.setRowVisible(self._extinguisher_nominal_label, model.is_extinguisher)
         self._fragile_label.setText(_SI if model.fragile else _NO)
         self._max_stack_label.setText(str(model.max_stack_count))
         self._notes_text.setPlainText(model.notes)
+        self._stack.setCurrentIndex(_PAGE_DETAILS)

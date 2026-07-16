@@ -26,6 +26,7 @@ class LoadingSpaceProfileEditorDialog(QDialog):
         self.setWindowTitle(
             "Editar perfil de espacio" if space is not None else "Nuevo perfil de espacio"
         )
+        self.resize(480, 560)
         self._result_space: LoadingSpace | None = None
 
         self.form_panel = LoadingSpaceFormPanel(self)

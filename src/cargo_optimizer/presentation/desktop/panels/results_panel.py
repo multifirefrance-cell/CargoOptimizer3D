@@ -1,21 +1,55 @@
 """Panel inferior: resumen de resultados de la última optimización.
 
-Desde la fase 5.1, `set_results` lo llama `MainWindow` al recibir un
-`PackingResult` real de `OptimizationWorker`. El propio texto de
-avisos vive en `WarningsPanel` (pestaña separada); aquí solo se
-muestra el conteo, como resumen numérico.
+Rediseño UX (auditoría "interfaz para usuarios, no para ingenieros"):
+en vez de una lista `QFormLayout` de 9 filas con el mismo peso
+tipográfico, los números clave (cargado/pendiente/%/volumen/peso/
+tiempo) se muestran como tarjetas KPI grandes, con color de éxito o
+advertencia según si quedaron unidades pendientes — para que el
+usuario entienda el resultado de un vistazo, sin tener que leer cada
+fila. Los nombres de los `QLabel` que ya usan las pruebas existentes
+(`_requested_label`, `_packed_label`, `_pending_label`,
+`_warnings_label`, `_stale_label`) se conservan sin cambios: solo
+cambia cómo se presentan, nunca el contrato con `MainWindow.set_results`.
 """
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QFormLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+
+from cargo_optimizer.presentation.desktop.style import (
+    ERROR_LIGHT,
+    SPACING_MD,
+    SPACING_SM,
+    SUCCESS_LIGHT,
+    WARNING_LIGHT,
+)
 
 _EMPTY = "—"
 _STALE_MESSAGE = "⚠ El resultado anterior fue invalidado porque el proyecto cambió."
 
+_VALUE_STYLE = "font-size: 20pt; font-weight: 700;"
+_TITLE_STYLE = "font-size: 9pt; font-weight: 600; text-transform: uppercase;"
+
+
+def _tile(title: str) -> tuple[QFrame, QLabel]:
+    """Una tarjeta KPI: título pequeño arriba, valor grande abajo. Devuelve `(tarjeta, valor)`."""
+    frame = QFrame()
+    frame.setFrameShape(QFrame.Shape.StyledPanel)
+    frame.setObjectName("kpiTile")
+    title_label = QLabel(title, frame)
+    title_label.setStyleSheet(_TITLE_STYLE)
+    value_label = QLabel(_EMPTY, frame)
+    value_label.setStyleSheet(_VALUE_STYLE)
+    layout = QVBoxLayout(frame)
+    layout.setContentsMargins(SPACING_MD, SPACING_SM, SPACING_MD, SPACING_SM)
+    layout.setSpacing(2)
+    layout.addWidget(title_label)
+    layout.addWidget(value_label)
+    return frame, value_label
+
 
 class ResultsPanel(QWidget):
-    """Resumen de la última ejecución del motor de optimización."""
+    """Resumen de la última ejecución del motor de optimización, como tarjetas KPI."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -24,34 +58,50 @@ class ResultsPanel(QWidget):
         self._stale_label = QLabel(_STALE_MESSAGE, self)
         self._stale_label.setObjectName("resultsStaleLabel")
         self._stale_label.setWordWrap(True)
+        self._stale_label.setStyleSheet(f"color: {WARNING_LIGHT.name()}; font-weight: 600;")
         self._stale_label.setVisible(False)
 
+        packed_tile, self._packed_label = _tile("Cantidad cargada")
+        pending_tile, self._pending_label = _tile("Cantidad pendiente")
+        utilization_tile, self._utilization_label = _tile("Utilización")
+        volume_tile, self._volume_label = _tile("Volumen")
+        weight_tile, self._weight_label = _tile("Peso")
+        time_tile, self._time_label = _tile("Tiempo")
+
+        grid = QGridLayout()
+        grid.setSpacing(SPACING_SM)
+        grid.addWidget(packed_tile, 0, 0)
+        grid.addWidget(pending_tile, 0, 1)
+        grid.addWidget(utilization_tile, 0, 2)
+        grid.addWidget(volume_tile, 1, 0)
+        grid.addWidget(weight_tile, 1, 1)
+        grid.addWidget(time_tile, 1, 2)
+
         self._requested_label = QLabel(_EMPTY, self)
-        self._packed_label = QLabel(_EMPTY, self)
-        self._pending_label = QLabel(_EMPTY, self)
-        self._weight_label = QLabel(_EMPTY, self)
-        self._volume_label = QLabel(_EMPTY, self)
-        self._utilization_label = QLabel(_EMPTY, self)
-        self._time_label = QLabel(_EMPTY, self)
         self._status_label = QLabel(_EMPTY, self)
         self._warnings_label = QLabel(_EMPTY, self)
 
-        form = QFormLayout()
-        form.setContentsMargins(0, 0, 0, 0)
-        form.addRow("Cantidad solicitada", self._requested_label)
-        form.addRow("Cantidad cargada", self._packed_label)
-        form.addRow("Cantidad pendiente", self._pending_label)
-        form.addRow("Peso", self._weight_label)
-        form.addRow("Volumen", self._volume_label)
-        form.addRow("Utilización", self._utilization_label)
-        form.addRow("Tiempo", self._time_label)
-        form.addRow("Estado", self._status_label)
-        form.addRow("Avisos", self._warnings_label)
+        detail_row = QHBoxLayout()
+        detail_row.setSpacing(SPACING_MD)
+        for caption, label in (
+            ("Solicitado:", self._requested_label),
+            ("Estado:", self._status_label),
+            ("Avisos:", self._warnings_label),
+        ):
+            caption_label = QLabel(caption, self)
+            caption_label.setStyleSheet("font-weight: 600;")
+            detail_row.addWidget(caption_label)
+            detail_row.addWidget(label)
+            detail_row.addSpacing(SPACING_MD)
+        detail_row.addStretch(1)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setContentsMargins(SPACING_MD, SPACING_SM, SPACING_MD, SPACING_SM)
+        layout.setSpacing(SPACING_SM)
         layout.addWidget(self._stale_label)
-        layout.addLayout(form)
+        layout.addLayout(grid)
+        layout.addLayout(detail_row)
+        layout.addStretch(1)
 
     def clear(self) -> None:
         for label in (
@@ -66,6 +116,9 @@ class ResultsPanel(QWidget):
             self._warnings_label,
         ):
             label.setText(_EMPTY)
+        self._packed_label.setStyleSheet(_VALUE_STYLE)
+        self._pending_label.setStyleSheet(_VALUE_STYLE)
+        self._utilization_label.setStyleSheet(_VALUE_STYLE)
         self.set_stale(False)
 
     def set_stale(self, stale: bool) -> None:
@@ -94,3 +147,17 @@ class ResultsPanel(QWidget):
         self._time_label.setText(f"{elapsed_seconds:.2f} s")
         self._status_label.setText(status)
         self._warnings_label.setText("Ninguno" if warnings_count == 0 else str(warnings_count))
+
+        # Color de estado: verde cuando todo se cargó, ámbar cuando quedaron
+        # unidades pendientes, rojo si además la ejecución se canceló — el
+        # usuario entiende el resultado sin leer cada tarjeta (rediseño UX).
+        if pending_count == 0 and status != "Cancelado":
+            emphasis_color = SUCCESS_LIGHT
+        elif status == "Cancelado":
+            emphasis_color = ERROR_LIGHT
+        else:
+            emphasis_color = WARNING_LIGHT
+        emphasis_style = f"{_VALUE_STYLE} color: {emphasis_color.name()};"
+        self._packed_label.setStyleSheet(emphasis_style)
+        self._pending_label.setStyleSheet(emphasis_style)
+        self._utilization_label.setStyleSheet(emphasis_style)

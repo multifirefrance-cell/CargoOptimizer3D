@@ -59,11 +59,15 @@ class PyVistaPlotterLike(Protocol):
     def remove_actor(self, actor: Any, render: bool = True) -> bool: ...
     def reset_camera(self, render: bool = True, bounds: Any = None) -> None: ...
     def view_isometric(self) -> None: ...
+    def view_xy(self) -> None: ...
+    def view_yz(self) -> None: ...
+    def view_xz(self) -> None: ...
     def render(self) -> None: ...
     def enable_mesh_picking(self, **kwargs: Any) -> Any: ...
     def disable_picking(self) -> None: ...
     def close(self) -> None: ...
     def screenshot(self, filename: Any = None, **kwargs: Any) -> Any: ...
+    def add_camera_orientation_widget(self, **kwargs: Any) -> Any: ...
 
     @property
     def camera(self) -> Any: ...
@@ -109,6 +113,11 @@ class SceneController:
         self._selected_sequence_number: int | None = None
         self._on_selection_changed: Callable[[int | None], None] | None = None
         self.apply_theme(theme)
+        # Cubo de orientación: infraestructura ya disponible de fábrica en
+        # PyVista (`add_camera_orientation_widget`), sin arquitectura
+        # nueva — orienta al usuario sobre qué cara mira la cámara en todo
+        # momento (rediseño UX, "nunca esconderse detrás de paneles").
+        self._plotter.add_camera_orientation_widget()
 
     def set_selection_changed_callback(self, callback: Callable[[int | None], None] | None) -> None:
         """Se invoca únicamente cuando la selección cambia por un clic del usuario (picking)."""
@@ -377,6 +386,24 @@ class SceneController:
     def reset_camera(self) -> None:
         self._plotter.view_isometric()
         self._plotter.camera.up = (0.0, 0.0, 1.0)
+        self._plotter.reset_camera()
+        self._plotter.render()
+
+    def view_front(self) -> None:
+        """Vista frontal: mirando a lo largo del eje X (ancho x alto, plano Y-Z)."""
+        self._plotter.view_yz()
+        self._plotter.reset_camera()
+        self._plotter.render()
+
+    def view_top(self) -> None:
+        """Vista superior: mirando hacia abajo por el eje Z (largo x ancho, plano X-Y)."""
+        self._plotter.view_xy()
+        self._plotter.reset_camera()
+        self._plotter.render()
+
+    def view_side(self) -> None:
+        """Vista lateral: mirando a lo largo del eje Y (largo x alto, plano X-Z)."""
+        self._plotter.view_xz()
         self._plotter.reset_camera()
         self._plotter.render()
 

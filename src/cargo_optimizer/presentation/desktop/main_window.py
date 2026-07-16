@@ -117,7 +117,14 @@ from cargo_optimizer.presentation.desktop.panels.multi_space_results_panel impor
 )
 from cargo_optimizer.presentation.desktop.panels.product_table_panel import ProductTablePanel
 from cargo_optimizer.presentation.desktop.panels.project_tree_panel import (
-    SECTION_RESULTS,
+    STEP_CURRENT,
+    STEP_DONE,
+    STEP_EXPORT,
+    STEP_OPTIMIZE,
+    STEP_PENDING,
+    STEP_PRODUCTS,
+    STEP_SPACE,
+    STEP_VIEW_3D,
     ProjectTreePanel,
 )
 from cargo_optimizer.presentation.desktop.panels.results_panel import ResultsPanel
@@ -139,6 +146,13 @@ _STATUS_MESSAGE_MS = 4000
 _SPLITTER_MAIN = "main"
 _SPLITTER_WORK_AREA = "workArea"
 _SPLITTER_LEFT_WORK = "leftWork"
+# El visor 3D ocupa ~70% del área de trabajo por defecto (rediseño UX:
+# "la vista 3D pasa a ser el protagonista absoluto").
+_WORK_AREA_LEFT_STRETCH = 3
+_WORK_AREA_VIEWER_STRETCH = 7
+_WORK_AREA_VIEWER_RATIO = _WORK_AREA_VIEWER_STRETCH / (
+    _WORK_AREA_LEFT_STRETCH + _WORK_AREA_VIEWER_STRETCH
+)
 _HEADER_PRODUCT_TABLE = "productTable"
 _ENGINE_LABEL = f"Motor: {GreedyExtremePointStrategy.name}"
 
@@ -188,6 +202,10 @@ class MainWindow(QMainWindow):
         self._last_result: PackingResult | None = None
         self._is_dirty: bool = False
         self._result_stale: bool = False
+        # Guía de pasos (rediseño UX): si el resultado actual ya se
+        # exportó al menos una vez (PDF o Excel). Se reinicia en cada
+        # optimización nueva y en apertura/cierre de proyecto.
+        self._exported_current_result: bool = False
         self._suspend_change_tracking: bool = False
 
         self.resize(1280, 800)
@@ -208,6 +226,7 @@ class MainWindow(QMainWindow):
             self._suspend_change_tracking = False
         self.viewer_widget.set_dark_theme(self._settings.theme() == THEME_DARK)
         self._update_window_title()
+        self._update_workflow_steps()
 
         self._apply_catalog_availability()
         if catalog_error is not None:
@@ -236,7 +255,7 @@ class MainWindow(QMainWindow):
         self.viewer_widget = Packing3DViewer(self)
         self.selection_details_panel = SelectionDetailsPanel(self)
 
-        self.project_tree_panel.section_activated.connect(self._on_project_section_activated)
+        self.project_tree_panel.step_activated.connect(self._on_workflow_step_activated)
         self.viewer_widget.placement_selected.connect(self._on_placement_selected)
         self.multi_space_results_panel.space_selected.connect(self._on_multi_space_space_selected)
 
@@ -248,7 +267,7 @@ class MainWindow(QMainWindow):
         product_model.modelReset.connect(self._on_project_data_changed)
 
     def _build_dock_widgets(self) -> None:
-        self.project_tree_dock = QDockWidget("Proyecto", self)
+        self.project_tree_dock = QDockWidget("Guía", self)
         self.project_tree_dock.setObjectName("projectTreeDock")
         self.project_tree_dock.setWidget(self.project_tree_panel)
         self.project_tree_dock.setFeatures(
@@ -277,8 +296,17 @@ class MainWindow(QMainWindow):
         self.work_area_splitter.setObjectName(_SPLITTER_WORK_AREA)
         self.work_area_splitter.addWidget(self.left_work_splitter)
         self.work_area_splitter.addWidget(self.viewer_widget)
-        self.work_area_splitter.setStretchFactor(0, 1)
-        self.work_area_splitter.setStretchFactor(1, 1)
+        # El visor 3D es el protagonista de la interfaz (rediseño UX): al
+        # redimensionar la ventana o al usar "Restaurar diseño de
+        # paneles" (`_on_reset_layout`), el visor recibe ~70% del espacio
+        # nuevo/recalculado, nunca 50/50. El reparto exacto en el primer
+        # arranque depende además del tamaño preferido de los paneles
+        # vecinos (`QSplitter` da prioridad al `sizeHint` de cada panel
+        # cuando hay espacio de sobra) — no es 100% determinista solo con
+        # el factor de stretch, pero queda documentado y verificado en
+        # `docs/Roadmap.md` como limitación conocida de esta fase.
+        self.work_area_splitter.setStretchFactor(0, _WORK_AREA_LEFT_STRETCH)
+        self.work_area_splitter.setStretchFactor(1, _WORK_AREA_VIEWER_STRETCH)
 
         self.results_tabs = QTabWidget(self)
         self.results_tabs.setObjectName("resultsTabs")
@@ -319,7 +347,7 @@ class MainWindow(QMainWindow):
             "import", "Exportar &Excel…", None, self._on_export_excel_menu
         )
         self.action_export_pdf = self._make_action(
-            "import", "Exportar &PDF…", None, self._on_export_pdf
+            "export_pdf", "Exportar &PDF…", "Ctrl+P", self._on_export_pdf
         )
         self.action_preferences = self._make_action(
             "preferences", "&Preferencias…", "Ctrl+,", self._stub("Preferencias")
@@ -409,7 +437,7 @@ class MainWindow(QMainWindow):
         )
 
         self.action_toggle_project_dock = self.project_tree_dock.toggleViewAction()
-        self.action_toggle_project_dock.setText("Panel de &proyecto")
+        self.action_toggle_project_dock.setText("&Guía de pasos")
 
         self.action_toggle_selection_details_dock = self.selection_details_dock.toggleViewAction()
         self.action_toggle_selection_details_dock.setText("Panel de &detalles")
@@ -421,6 +449,15 @@ class MainWindow(QMainWindow):
 
         self.action_reset_camera = self._make_action(
             "view3d", "&Restablecer cámara", "Ctrl+0", self._on_reset_camera
+        )
+        self.action_view_front = self._make_action(
+            "view_front", "Vista &frontal", "Ctrl+1", self._on_view_front
+        )
+        self.action_view_top = self._make_action(
+            "view_top", "Vista &superior", "Ctrl+2", self._on_view_top
+        )
+        self.action_view_side = self._make_action(
+            "view_side", "Vista &lateral", "Ctrl+4", self._on_view_side
         )
         self.action_toggle_container_visible = self._make_action(
             "view3d",
@@ -557,6 +594,10 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.action_view_3d_focus)
         view_menu.addSeparator()
         view_menu.addAction(self.action_reset_camera)
+        view_menu.addAction(self.action_view_front)
+        view_menu.addAction(self.action_view_top)
+        view_menu.addAction(self.action_view_side)
+        view_menu.addSeparator()
         view_menu.addAction(self.action_toggle_container_visible)
         view_menu.addAction(self.action_toggle_boxes_visible)
         view_menu.addAction(self.action_toggle_axes_visible)
@@ -577,9 +618,16 @@ class MainWindow(QMainWindow):
         help_menu.addAction(self.action_about)
 
     def _build_toolbar(self) -> None:
+        # Solo las acciones del flujo principal (crear proyecto -> importar
+        # -> optimizar -> exportar) quedan siempre visibles aquí — el resto
+        # (preferencias, foco 3D, temas, catálogo, etc.) ya vive en los
+        # menús y no necesita competir por espacio con lo esencial
+        # (rediseño UX: "las acciones principales deben verse
+        # inmediatamente, el resto puede permanecer en menús").
         toolbar = QToolBar("Principal", self)
         toolbar.setObjectName("mainToolBar")
-        toolbar.setIconSize(QSize(20, 20))
+        toolbar.setIconSize(QSize(28, 28))
+        toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
         toolbar.setMovable(False)
 
         toolbar.addAction(self.action_new)
@@ -591,9 +639,7 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.action_run_optimization)
         toolbar.addAction(self.action_cancel_optimization)
         toolbar.addSeparator()
-        toolbar.addAction(self.action_view_3d_focus)
-        toolbar.addSeparator()
-        toolbar.addAction(self.action_preferences)
+        toolbar.addAction(self.action_export_pdf)
 
         self.addToolBar(toolbar)
 
@@ -659,7 +705,9 @@ class MainWindow(QMainWindow):
         self._last_multi_space_result = None
         self._last_multi_space_load_units_by_id = {}
         self._result_stale = False
+        self._exported_current_result = False
         self._mark_clean()
+        self._update_workflow_steps()
 
     def _on_open_project(self) -> None:
         if not self._confirm_discard_unsaved_changes():
@@ -720,12 +768,14 @@ class MainWindow(QMainWindow):
             self._suspend_change_tracking = False
 
         self._current_project_path = path
+        self._exported_current_result = False
         self._mark_clean()
         self._remember_directory_of(str(path))
         self._settings.add_recent_project_file(str(path))
         self._record_project_open_history(path)
         self.log_panel.append_entry(f"Proyecto abierto: {path}")
         self.statusBar().showMessage(f"Proyecto abierto: {path.name}", _STATUS_MESSAGE_MS)
+        self._update_workflow_steps()
 
     def _on_save_project(self) -> bool:
         if self._current_project_path is None:
@@ -1176,6 +1226,8 @@ class MainWindow(QMainWindow):
             self._show_error("No se pudo exportar el resultado", str(exc))
             return
         self.statusBar().showMessage(f"Resultado exportado a '{path.name}'.", _STATUS_MESSAGE_MS)
+        self._exported_current_result = True
+        self._update_workflow_steps()
 
     def _on_export_pdf(self) -> None:
         """Genera uno de los cinco informes PDF oficiales (fase 9.1, `docs/PdfReports.md`).
@@ -1218,6 +1270,8 @@ class MainWindow(QMainWindow):
             self._show_error("No se pudo generar el informe PDF", str(exc))
             return
         self.statusBar().showMessage(f"Informe PDF exportado a '{path.name}'.", _STATUS_MESSAGE_MS)
+        self._exported_current_result = True
+        self._update_workflow_steps()
 
     def _import_loading_spaces_from_path(self, path: Path) -> None:
         try:
@@ -1543,10 +1597,81 @@ class MainWindow(QMainWindow):
     def _on_clear_recent_projects(self) -> None:
         self._settings.set_recent_project_files([])
 
-    def _on_project_section_activated(self, section: str) -> None:
-        self.statusBar().showMessage(f"Sección: {section}", _STATUS_MESSAGE_MS)
-        if section == SECTION_RESULTS:
+    def _on_workflow_step_activated(self, step_id: str) -> None:
+        """Clic en un paso de la guía: navega al panel/acción de ese paso y lo explica.
+
+        Nunca dispara la acción por sí solo (p. ej. no ejecuta la
+        optimización al hacer clic en "3. Optimizar") — solo lleva al
+        usuario al lugar correcto y le dice qué hacer, igual que el árbol
+        de secciones original solo mostraba un mensaje en la barra de
+        estado; aquí además navega de verdad cuando tiene un panel al
+        que ir.
+        """
+        if step_id == STEP_SPACE:
+            self.loading_space_form_panel.setFocus()
+            self.statusBar().showMessage(
+                "Paso 1: define el espacio de carga (o elige un perfil).", _STATUS_MESSAGE_MS
+            )
+        elif step_id == STEP_PRODUCTS:
+            self.product_table_panel.setFocus()
+            self.statusBar().showMessage(
+                "Paso 2: agrega productos o importa un Excel.", _STATUS_MESSAGE_MS
+            )
+        elif step_id == STEP_OPTIMIZE:
+            self.statusBar().showMessage(
+                'Paso 3: pulsa "Ejecutar optimización" en la barra de herramientas.',
+                _STATUS_MESSAGE_MS,
+            )
+        elif step_id == STEP_VIEW_3D:
             self._on_show_results()
+            self.statusBar().showMessage(
+                "Paso 4: revisa el resultado en el visor 3D.", _STATUS_MESSAGE_MS
+            )
+        elif step_id == STEP_EXPORT:
+            self.statusBar().showMessage(
+                "Paso 5: exporta el resultado a PDF o Excel.", _STATUS_MESSAGE_MS
+            )
+
+    def _update_workflow_steps(self) -> None:
+        """Recalcula el estado (pendiente/actual/hecho) de los 5 pasos de la guía.
+
+        Se llama tras cualquier cambio que pueda alterar en qué paso está
+        el usuario: cambios de espacio/productos (`_on_project_data_changed`),
+        fin de una optimización, y una exportación con éxito. Nunca decide
+        nada por sí sola — solo refleja el estado que ya existe en
+        `MainWindow`.
+        """
+        has_space = self.loading_space_form_panel.build_loading_space() is not None
+        has_products = self.product_table_panel.model.rowCount() > 0
+        has_result = (self._last_result is not None and not self._result_stale) or (
+            self._last_multi_space_result is not None
+        )
+
+        space_state = STEP_DONE if has_space else STEP_CURRENT
+        if has_space and not has_products:
+            products_state = STEP_CURRENT
+        elif has_products:
+            products_state = STEP_DONE
+        else:
+            products_state = STEP_PENDING
+        if has_result:
+            optimize_state = STEP_DONE
+            view_state = STEP_DONE if self._exported_current_result else STEP_CURRENT
+            export_state = STEP_DONE if self._exported_current_result else STEP_CURRENT
+        elif has_space and has_products:
+            optimize_state = STEP_CURRENT
+            view_state = STEP_PENDING
+            export_state = STEP_PENDING
+        else:
+            optimize_state = STEP_PENDING
+            view_state = STEP_PENDING
+            export_state = STEP_PENDING
+
+        self.project_tree_panel.set_step_state(STEP_SPACE, space_state)
+        self.project_tree_panel.set_step_state(STEP_PRODUCTS, products_state)
+        self.project_tree_panel.set_step_state(STEP_OPTIMIZE, optimize_state)
+        self.project_tree_panel.set_step_state(STEP_VIEW_3D, view_state)
+        self.project_tree_panel.set_step_state(STEP_EXPORT, export_state)
 
     def _on_show_results(self) -> None:
         self.results_tabs.setCurrentWidget(self.results_panel)
@@ -1565,6 +1690,15 @@ class MainWindow(QMainWindow):
 
     def _on_reset_camera(self) -> None:
         self.viewer_widget.reset_camera()
+
+    def _on_view_front(self) -> None:
+        self.viewer_widget.view_front()
+
+    def _on_view_top(self) -> None:
+        self.viewer_widget.view_top()
+
+    def _on_view_side(self) -> None:
+        self.viewer_widget.view_side()
 
     def _on_toggle_container_visible(self, checked: bool) -> None:
         self.viewer_widget.set_container_visible(checked)
@@ -1594,7 +1728,8 @@ class MainWindow(QMainWindow):
 
     def _on_reset_layout(self) -> None:
         total_width = self.work_area_splitter.width() or 1200
-        self.work_area_splitter.setSizes([total_width // 2, total_width - total_width // 2])
+        viewer_width = round(total_width * _WORK_AREA_VIEWER_RATIO)
+        self.work_area_splitter.setSizes([total_width - viewer_width, viewer_width])
         total_height = self.left_work_splitter.height() or 600
         self.left_work_splitter.setSizes([total_height // 3, total_height - total_height // 3])
         main_height = self.main_splitter.height() or 800
@@ -1724,11 +1859,13 @@ class MainWindow(QMainWindow):
     def _on_optimization_finished(self, result: PackingResult) -> None:
         self._last_result = result
         self._result_stale = False
+        self._exported_current_result = False
         self._populate_results(result)
         self.selection_details_panel.clear()
         self.viewer_widget.display_result(result, self._last_load_units_by_id)
         self._mark_dirty()
         self._set_state(STATE_FINISHED)
+        self._update_workflow_steps()
         if not self._cancel_requested:
             self._record_run_history(result)
         message = (
@@ -1837,6 +1974,7 @@ class MainWindow(QMainWindow):
 
     def _on_multi_space_finished(self, result: MultiSpaceAssignmentResult) -> None:
         self._last_multi_space_result = result
+        self._exported_current_result = False
         self.multi_space_results_panel.set_result(result, self._last_multi_space_load_units_by_id)
         if result.space_results:
             self.viewer_widget.display_result(
@@ -1857,6 +1995,7 @@ class MainWindow(QMainWindow):
         )
         self.statusBar().showMessage(message, _STATUS_MESSAGE_MS)
         self.results_tabs.setCurrentWidget(self.multi_space_results_panel)
+        self._update_workflow_steps()
 
     def _on_multi_space_space_selected(self, index: int) -> None:
         if self._last_multi_space_result is None:
@@ -2012,6 +2151,7 @@ class MainWindow(QMainWindow):
             self.results_panel.set_stale(True)
             self.log_panel.append_entry(_RESULT_INVALIDATED_MESSAGE)
             self.statusBar().showMessage(_RESULT_INVALIDATED_MESSAGE, _STATUS_MESSAGE_MS)
+        self._update_workflow_steps()
 
     def _confirm_discard_unsaved_changes(self) -> bool:
         """`True` si es seguro continuar (sin cambios, o el usuario ya decidió qué hacer)."""

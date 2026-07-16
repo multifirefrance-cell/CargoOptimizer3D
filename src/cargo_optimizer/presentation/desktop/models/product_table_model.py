@@ -275,6 +275,15 @@ class ProductTableModel(QAbstractTableModel):
         self._load_units.append(new_unit)
         self.endInsertRows()
 
+    def set_unit_at(self, row: int, unit: LoadUnit) -> None:
+        """Reemplaza el `LoadUnit` completo de una fila (edición vía formulario dedicado)."""
+        if not 0 <= row < len(self._load_units):
+            return
+        self._load_units[row] = unit
+        top_left = self.index(row, 0)
+        bottom_right = self.index(row, self.columnCount() - 1)
+        self.dataChanged.emit(top_left, bottom_right)
+
     def add_units(self, units: Sequence[LoadUnit]) -> None:
         """Añade varios `LoadUnit` de una vez (p. ej. desde el catálogo, fase 7.1)."""
         if not units:

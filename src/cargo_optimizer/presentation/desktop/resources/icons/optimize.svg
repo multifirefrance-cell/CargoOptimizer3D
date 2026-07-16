@@ -2,7 +2,7 @@
   <path d="M4 20V10M4 7V4"/>
   <path d="M12 20v-4M12 13V4"/>
   <path d="M20 20v-7M20 10V4"/>
-  <circle cx="4" cy="8.5" r="1.5" fill="#3D6E8C" stroke="none"/>
-  <circle cx="12" cy="11.5" r="1.5" fill="#3D6E8C" stroke="none"/>
-  <circle cx="20" cy="8.5" r="1.5" fill="#3D6E8C" stroke="none"/>
+  <circle cx="4" cy="8.5" r="1.5" fill="#2F6FED" stroke="none"/>
+  <circle cx="12" cy="11.5" r="1.5" fill="#2F6FED" stroke="none"/>
+  <circle cx="20" cy="8.5" r="1.5" fill="#2F6FED" stroke="none"/>
 </svg>
