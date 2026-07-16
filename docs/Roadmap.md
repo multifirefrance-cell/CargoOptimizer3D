@@ -219,3 +219,16 @@ un cierre de calidad sobre todo lo ya construido (bugs reales de
 interfaz/threading/persistencia encontrados y corregidos, sin
 funcionalidades nuevas ni cambios de arquitectura) — ver `CHANGELOG.md`
 para el detalle completo de qué se corrigió.
+
+Tras Beta 1.0, un encargo de UX ("workspace operativo", estilo
+EasyCargo sin copiar su diseño) reorganizó `presentation/desktop` en
+dos zonas: izquierda (espacio de carga compacto vía
+`LoadingSpaceSummaryPanel` + "Cambiar medidas…" en
+`LoadingSpaceEditorDialog`; alta rápida de producto vía
+`ProductQuickAddPanel`, buscador SKU/nombre + cantidad; "Lista de
+carga" simplificada en `ProductTablePanel`, solo SKU/Nombre/Cantidad/
+Peso total) y derecha (visor 3D protagonista). El panel "Guía"
+(`ProjectTreePanel`, de pasos 1-5) se elimina por completo: ya no hace
+falta explicar el flujo con un panel aparte. Solo toca
+`presentation/desktop`; `domain`/`geometry`/`rules`/`optimization`/
+`application`/`infrastructure` sin ningún cambio.

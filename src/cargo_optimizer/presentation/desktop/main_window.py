@@ -97,6 +97,9 @@ from cargo_optimizer.presentation.desktop.dialogs.duplicate_resolution_dialog im
     DuplicateResolutionDialog,
 )
 from cargo_optimizer.presentation.desktop.dialogs.import_preview_dialog import ImportPreviewDialog
+from cargo_optimizer.presentation.desktop.dialogs.loading_space_editor_dialog import (
+    LoadingSpaceEditorDialog,
+)
 from cargo_optimizer.presentation.desktop.dialogs.loading_space_profiles_dialog import (
     LoadingSpaceProfilesDialog,
 )
@@ -111,22 +114,14 @@ from cargo_optimizer.presentation.desktop.icons import icon
 from cargo_optimizer.presentation.desktop.panels.loading_space_form_panel import (
     LoadingSpaceFormPanel,
 )
+from cargo_optimizer.presentation.desktop.panels.loading_space_summary_panel import (
+    LoadingSpaceSummaryPanel,
+)
 from cargo_optimizer.presentation.desktop.panels.log_panel import LogPanel
 from cargo_optimizer.presentation.desktop.panels.multi_space_results_panel import (
     MultiSpaceResultsPanel,
 )
 from cargo_optimizer.presentation.desktop.panels.product_table_panel import ProductTablePanel
-from cargo_optimizer.presentation.desktop.panels.project_tree_panel import (
-    STEP_CURRENT,
-    STEP_DONE,
-    STEP_EXPORT,
-    STEP_OPTIMIZE,
-    STEP_PENDING,
-    STEP_PRODUCTS,
-    STEP_SPACE,
-    STEP_VIEW_3D,
-    ProjectTreePanel,
-)
 from cargo_optimizer.presentation.desktop.panels.results_panel import ResultsPanel
 from cargo_optimizer.presentation.desktop.panels.selection_details_panel import (
     SelectionDetailsPanel,
@@ -202,10 +197,6 @@ class MainWindow(QMainWindow):
         self._last_result: PackingResult | None = None
         self._is_dirty: bool = False
         self._result_stale: bool = False
-        # Guía de pasos (rediseño UX): si el resultado actual ya se
-        # exportó al menos una vez (PDF o Excel). Se reinicia en cada
-        # optimización nueva y en apertura/cierre de proyecto.
-        self._exported_current_result: bool = False
         self._suspend_change_tracking: bool = False
 
         self.resize(1280, 800)
@@ -226,7 +217,6 @@ class MainWindow(QMainWindow):
             self._suspend_change_tracking = False
         self.viewer_widget.set_dark_theme(self._settings.theme() == THEME_DARK)
         self._update_window_title()
-        self._update_workflow_steps()
 
         self._apply_catalog_availability()
         if catalog_error is not None:
@@ -244,9 +234,13 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _build_panels(self) -> None:
-        self.project_tree_panel = ProjectTreePanel(self)
         self.loading_space_form_panel = LoadingSpaceFormPanel(self)
-        self.product_table_panel = ProductTablePanel(self)
+        self.loading_space_summary_panel = LoadingSpaceSummaryPanel(self)
+        self.loading_space_editor_dialog = LoadingSpaceEditorDialog(
+            self, form_panel=self.loading_space_form_panel
+        )
+        catalog_repository = self._catalog_service.products if self._catalog_service else None
+        self.product_table_panel = ProductTablePanel(self, repository=catalog_repository)
         self.results_panel = ResultsPanel(self)
         self.unpacked_table_panel = UnpackedTablePanel(self)
         self.warnings_panel = WarningsPanel(self)
@@ -255,10 +249,17 @@ class MainWindow(QMainWindow):
         self.viewer_widget = Packing3DViewer(self)
         self.selection_details_panel = SelectionDetailsPanel(self)
 
-        self.project_tree_panel.step_activated.connect(self._on_workflow_step_activated)
         self.viewer_widget.placement_selected.connect(self._on_placement_selected)
         self.multi_space_results_panel.space_selected.connect(self._on_multi_space_space_selected)
+        self.product_table_panel.add_requested.connect(self._on_quick_add_requested)
 
+        self.loading_space_summary_panel.profile_selected.connect(
+            self.loading_space_form_panel.set_current_profile_name
+        )
+        self.loading_space_summary_panel.change_requested.connect(
+            self.loading_space_editor_dialog.exec
+        )
+        self.loading_space_form_panel.changed.connect(self._on_loading_space_changed)
         self.loading_space_form_panel.changed.connect(self._on_project_data_changed)
         product_model = self.product_table_panel.model
         product_model.dataChanged.connect(self._on_project_data_changed)
@@ -266,16 +267,9 @@ class MainWindow(QMainWindow):
         product_model.rowsRemoved.connect(self._on_project_data_changed)
         product_model.modelReset.connect(self._on_project_data_changed)
 
-    def _build_dock_widgets(self) -> None:
-        self.project_tree_dock = QDockWidget("Guía", self)
-        self.project_tree_dock.setObjectName("projectTreeDock")
-        self.project_tree_dock.setWidget(self.project_tree_panel)
-        self.project_tree_dock.setFeatures(
-            QDockWidget.DockWidgetFeature.DockWidgetMovable
-            | QDockWidget.DockWidgetFeature.DockWidgetFloatable
-        )
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_tree_dock)
+        self._sync_loading_space_summary()
 
+    def _build_dock_widgets(self) -> None:
         self.selection_details_dock = QDockWidget("Detalles de selección", self)
         self.selection_details_dock.setObjectName("selectionDetailsDock")
         self.selection_details_dock.setWidget(self.selection_details_panel)
@@ -284,11 +278,15 @@ class MainWindow(QMainWindow):
             | QDockWidget.DockWidgetFeature.DockWidgetFloatable
         )
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.selection_details_dock)
+        # Oculto por defecto (rediseño UX: "workspace operativo") — solo
+        # aparece cuando `_on_placement_selected` recibe una selección
+        # real del visor 3D; nunca ocupa espacio permanentemente.
+        self.selection_details_dock.setVisible(False)
 
     def _build_central_layout(self) -> None:
         self.left_work_splitter = QSplitter(Qt.Orientation.Vertical, self)
         self.left_work_splitter.setObjectName(_SPLITTER_LEFT_WORK)
-        self.left_work_splitter.addWidget(self.loading_space_form_panel)
+        self.left_work_splitter.addWidget(self.loading_space_summary_panel)
         self.left_work_splitter.addWidget(self.product_table_panel)
         self.left_work_splitter.setStretchFactor(1, 1)
 
@@ -323,6 +321,21 @@ class MainWindow(QMainWindow):
         self.main_splitter.setStretchFactor(0, 1)
 
         self.setCentralWidget(self.main_splitter)
+
+    def _on_loading_space_changed(self) -> None:
+        self._sync_loading_space_summary()
+
+    def _sync_loading_space_summary(self) -> None:
+        """Refleja el perfil/resumen reales de `loading_space_form_panel` en la versión
+        compacta (`loading_space_summary_panel`) — nunca al revés: el formulario completo
+        sigue siendo la única fuente de verdad del `LoadingSpace` actual.
+        """
+        self.loading_space_summary_panel.set_current_profile(
+            self.loading_space_form_panel.current_profile_name()
+        )
+        self.loading_space_summary_panel.set_summary(
+            self.loading_space_form_panel.build_loading_space()
+        )
 
     # ------------------------------------------------------------------
     # Acciones
@@ -435,9 +448,6 @@ class MainWindow(QMainWindow):
         self.action_show_results = self._make_action(
             "view3d", "&Ver resultados", None, self._on_show_results
         )
-
-        self.action_toggle_project_dock = self.project_tree_dock.toggleViewAction()
-        self.action_toggle_project_dock.setText("&Guía de pasos")
 
         self.action_toggle_selection_details_dock = self.selection_details_dock.toggleViewAction()
         self.action_toggle_selection_details_dock.setText("Panel de &detalles")
@@ -589,7 +599,6 @@ class MainWindow(QMainWindow):
         optimization_menu.addAction(self.action_show_results)
 
         view_menu = menu_bar.addMenu("&Ver")
-        view_menu.addAction(self.action_toggle_project_dock)
         view_menu.addAction(self.action_toggle_selection_details_dock)
         view_menu.addAction(self.action_view_3d_focus)
         view_menu.addSeparator()
@@ -705,9 +714,7 @@ class MainWindow(QMainWindow):
         self._last_multi_space_result = None
         self._last_multi_space_load_units_by_id = {}
         self._result_stale = False
-        self._exported_current_result = False
         self._mark_clean()
-        self._update_workflow_steps()
 
     def _on_open_project(self) -> None:
         if not self._confirm_discard_unsaved_changes():
@@ -768,14 +775,12 @@ class MainWindow(QMainWindow):
             self._suspend_change_tracking = False
 
         self._current_project_path = path
-        self._exported_current_result = False
         self._mark_clean()
         self._remember_directory_of(str(path))
         self._settings.add_recent_project_file(str(path))
         self._record_project_open_history(path)
         self.log_panel.append_entry(f"Proyecto abierto: {path}")
         self.statusBar().showMessage(f"Proyecto abierto: {path.name}", _STATUS_MESSAGE_MS)
-        self._update_workflow_steps()
 
     def _on_save_project(self) -> bool:
         if self._current_project_path is None:
@@ -1226,8 +1231,6 @@ class MainWindow(QMainWindow):
             self._show_error("No se pudo exportar el resultado", str(exc))
             return
         self.statusBar().showMessage(f"Resultado exportado a '{path.name}'.", _STATUS_MESSAGE_MS)
-        self._exported_current_result = True
-        self._update_workflow_steps()
 
     def _on_export_pdf(self) -> None:
         """Genera uno de los cinco informes PDF oficiales (fase 9.1, `docs/PdfReports.md`).
@@ -1270,8 +1273,6 @@ class MainWindow(QMainWindow):
             self._show_error("No se pudo generar el informe PDF", str(exc))
             return
         self.statusBar().showMessage(f"Informe PDF exportado a '{path.name}'.", _STATUS_MESSAGE_MS)
-        self._exported_current_result = True
-        self._update_workflow_steps()
 
     def _import_loading_spaces_from_path(self, path: Path) -> None:
         try:
@@ -1336,6 +1337,29 @@ class MainWindow(QMainWindow):
             self.action_import_packing_list_excel,
         ):
             action.setEnabled(available)
+        catalog_service = self._catalog_service
+        self.product_table_panel.set_catalog_repository(
+            catalog_service.products if catalog_service is not None else None
+        )
+
+    def _on_quick_add_requested(self, catalog_unit: LoadUnit, quantity: int) -> None:
+        """`ProductQuickAddPanel` (dentro de `product_table_panel`) resolvió un SKU del
+        catálogo; copia el `LoadUnit` al proyecto (UUID nuevo, mismo criterio que "Añadir
+        desde catálogo…") y le aplica la cantidad indicada por el usuario.
+        """
+        existing_skus = {unit.sku.lower() for unit in self.product_table_panel.model.load_units()}
+        if catalog_unit.sku.lower() in existing_skus:
+            self._show_warning(
+                "SKU ya presente en el proyecto",
+                f"'{catalog_unit.sku}' ya está en la lista de carga. Usa \"Editar "
+                'cantidad…" para cambiar cuántas unidades cargar.',
+            )
+            return
+        unit = replace(CatalogService.copy_to_project(catalog_unit), quantity=quantity)
+        self.product_table_panel.add_units_to_load((unit,))
+        self.statusBar().showMessage(
+            f"'{unit.sku}' añadido a la carga (cantidad {quantity}).", _STATUS_MESSAGE_MS
+        )
 
     def _on_open_catalog(self) -> None:
         if self._catalog_service is None:
@@ -1597,82 +1621,6 @@ class MainWindow(QMainWindow):
     def _on_clear_recent_projects(self) -> None:
         self._settings.set_recent_project_files([])
 
-    def _on_workflow_step_activated(self, step_id: str) -> None:
-        """Clic en un paso de la guía: navega al panel/acción de ese paso y lo explica.
-
-        Nunca dispara la acción por sí solo (p. ej. no ejecuta la
-        optimización al hacer clic en "3. Optimizar") — solo lleva al
-        usuario al lugar correcto y le dice qué hacer, igual que el árbol
-        de secciones original solo mostraba un mensaje en la barra de
-        estado; aquí además navega de verdad cuando tiene un panel al
-        que ir.
-        """
-        if step_id == STEP_SPACE:
-            self.loading_space_form_panel.setFocus()
-            self.statusBar().showMessage(
-                "Paso 1: define el espacio de carga (o elige un perfil).", _STATUS_MESSAGE_MS
-            )
-        elif step_id == STEP_PRODUCTS:
-            self.product_table_panel.setFocus()
-            self.statusBar().showMessage(
-                "Paso 2: agrega productos o importa un Excel.", _STATUS_MESSAGE_MS
-            )
-        elif step_id == STEP_OPTIMIZE:
-            self.statusBar().showMessage(
-                'Paso 3: pulsa "Ejecutar optimización" en la barra de herramientas.',
-                _STATUS_MESSAGE_MS,
-            )
-        elif step_id == STEP_VIEW_3D:
-            self._on_show_results()
-            self.statusBar().showMessage(
-                "Paso 4: revisa el resultado en el visor 3D.", _STATUS_MESSAGE_MS
-            )
-        elif step_id == STEP_EXPORT:
-            self.statusBar().showMessage(
-                "Paso 5: exporta el resultado a PDF o Excel.", _STATUS_MESSAGE_MS
-            )
-
-    def _update_workflow_steps(self) -> None:
-        """Recalcula el estado (pendiente/actual/hecho) de los 5 pasos de la guía.
-
-        Se llama tras cualquier cambio que pueda alterar en qué paso está
-        el usuario: cambios de espacio/productos (`_on_project_data_changed`),
-        fin de una optimización, y una exportación con éxito. Nunca decide
-        nada por sí sola — solo refleja el estado que ya existe en
-        `MainWindow`.
-        """
-        has_space = self.loading_space_form_panel.build_loading_space() is not None
-        has_products = self.product_table_panel.model.rowCount() > 0
-        has_result = (self._last_result is not None and not self._result_stale) or (
-            self._last_multi_space_result is not None
-        )
-
-        space_state = STEP_DONE if has_space else STEP_CURRENT
-        if has_space and not has_products:
-            products_state = STEP_CURRENT
-        elif has_products:
-            products_state = STEP_DONE
-        else:
-            products_state = STEP_PENDING
-        if has_result:
-            optimize_state = STEP_DONE
-            view_state = STEP_DONE if self._exported_current_result else STEP_CURRENT
-            export_state = STEP_DONE if self._exported_current_result else STEP_CURRENT
-        elif has_space and has_products:
-            optimize_state = STEP_CURRENT
-            view_state = STEP_PENDING
-            export_state = STEP_PENDING
-        else:
-            optimize_state = STEP_PENDING
-            view_state = STEP_PENDING
-            export_state = STEP_PENDING
-
-        self.project_tree_panel.set_step_state(STEP_SPACE, space_state)
-        self.project_tree_panel.set_step_state(STEP_PRODUCTS, products_state)
-        self.project_tree_panel.set_step_state(STEP_OPTIMIZE, optimize_state)
-        self.project_tree_panel.set_step_state(STEP_VIEW_3D, view_state)
-        self.project_tree_panel.set_step_state(STEP_EXPORT, export_state)
-
     def _on_show_results(self) -> None:
         self.results_tabs.setCurrentWidget(self.results_panel)
         self.results_panel.setFocus()
@@ -1712,12 +1660,15 @@ class MainWindow(QMainWindow):
     def _on_placement_selected(self, sequence_number: object) -> None:
         if not isinstance(sequence_number, int):
             self.selection_details_panel.clear()
+            self.selection_details_dock.setVisible(False)
             return
         visual = self.viewer_widget.find_placement_visual(sequence_number)
         if visual is None:
             self.selection_details_panel.clear()
+            self.selection_details_dock.setVisible(False)
             return
         self.selection_details_panel.display_placement(visual)
+        self.selection_details_dock.setVisible(True)
 
     def _set_theme(self, theme: str) -> None:
         app = QApplication.instance()
@@ -1734,9 +1685,6 @@ class MainWindow(QMainWindow):
         self.left_work_splitter.setSizes([total_height // 3, total_height - total_height // 3])
         main_height = self.main_splitter.height() or 800
         self.main_splitter.setSizes([main_height - 160, 160])
-        self.project_tree_dock.setFloating(False)
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.project_tree_dock)
-        self.project_tree_dock.show()
         self.statusBar().showMessage("Diseño de paneles restaurado.", _STATUS_MESSAGE_MS)
 
     def _on_about(self) -> None:
@@ -1859,13 +1807,11 @@ class MainWindow(QMainWindow):
     def _on_optimization_finished(self, result: PackingResult) -> None:
         self._last_result = result
         self._result_stale = False
-        self._exported_current_result = False
         self._populate_results(result)
         self.selection_details_panel.clear()
         self.viewer_widget.display_result(result, self._last_load_units_by_id)
         self._mark_dirty()
         self._set_state(STATE_FINISHED)
-        self._update_workflow_steps()
         if not self._cancel_requested:
             self._record_run_history(result)
         message = (
@@ -1974,7 +1920,6 @@ class MainWindow(QMainWindow):
 
     def _on_multi_space_finished(self, result: MultiSpaceAssignmentResult) -> None:
         self._last_multi_space_result = result
-        self._exported_current_result = False
         self.multi_space_results_panel.set_result(result, self._last_multi_space_load_units_by_id)
         if result.space_results:
             self.viewer_widget.display_result(
@@ -1995,7 +1940,6 @@ class MainWindow(QMainWindow):
         )
         self.statusBar().showMessage(message, _STATUS_MESSAGE_MS)
         self.results_tabs.setCurrentWidget(self.multi_space_results_panel)
-        self._update_workflow_steps()
 
     def _on_multi_space_space_selected(self, index: int) -> None:
         if self._last_multi_space_result is None:
@@ -2151,7 +2095,6 @@ class MainWindow(QMainWindow):
             self.results_panel.set_stale(True)
             self.log_panel.append_entry(_RESULT_INVALIDATED_MESSAGE)
             self.statusBar().showMessage(_RESULT_INVALIDATED_MESSAGE, _STATUS_MESSAGE_MS)
-        self._update_workflow_steps()
 
     def _confirm_discard_unsaved_changes(self) -> bool:
         """`True` si es seguro continuar (sin cambios, o el usuario ya decidió qué hacer)."""
@@ -2181,13 +2124,19 @@ class MainWindow(QMainWindow):
                 _SPLITTER_WORK_AREA: self._encode_bytes(self.work_area_splitter.saveState()),
                 _SPLITTER_LEFT_WORK: self._encode_bytes(self.left_work_splitter.saveState()),
             },
-            "docks_visible": {
-                "projectTreeDock": self.project_tree_dock.isVisible(),
-                "selectionDetailsDock": self.selection_details_dock.isVisible(),
-            },
         }
 
     def _apply_ui_state(self, ui_state: Mapping[str, Any]) -> None:
+        # Nota: versiones anteriores guardaban además `docks_visible`
+        # (visibilidad de "projectTreeDock"/"selectionDetailsDock"). Un
+        # `.cargo3d` antiguo con esa clave se sigue abriendo sin problema
+        # — simplemente se ignora — porque `presentation_state` siempre
+        # ha sido un `dict` opaco (ver `docs/ProjectFiles.md`), nunca un
+        # esquema validado. El panel de detalles de selección ya no es
+        # una preferencia persistente: su visibilidad la decide siempre
+        # `_on_placement_selected`, según haya o no una caja seleccionada
+        # en el visor 3D en cada momento (rediseño UX "workspace
+        # operativo").
         theme = ui_state.get("theme")
         if isinstance(theme, str) and theme in (THEME_LIGHT, THEME_DARK):
             self._set_theme(theme)
@@ -2201,13 +2150,6 @@ class MainWindow(QMainWindow):
             self._restore_splitter_from_state(
                 self.left_work_splitter, splitters.get(_SPLITTER_LEFT_WORK)
             )
-
-        docks_visible = ui_state.get("docks_visible")
-        if isinstance(docks_visible, dict):
-            if "projectTreeDock" in docks_visible:
-                self.project_tree_dock.setVisible(bool(docks_visible["projectTreeDock"]))
-            if "selectionDetailsDock" in docks_visible:
-                self.selection_details_dock.setVisible(bool(docks_visible["selectionDetailsDock"]))
 
     @staticmethod
     def _encode_bytes(value: QByteArray) -> str:

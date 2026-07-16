@@ -38,6 +38,7 @@ COL_EXTINGUISHER = 10
 COL_EXTINGUISHER_NOMINAL = 11
 COL_FRAGILE = 12
 COL_COLOR = 13
+COL_WEIGHT_TOTAL = 14
 
 _HEADERS = (
     "SKU",
@@ -54,6 +55,7 @@ _HEADERS = (
     "Peso nominal (kg)",
     "Fragilidad",
     "Color",
+    "Peso total (kg)",
 )
 
 _CHECKBOX_COLUMNS = frozenset({COL_EXTINGUISHER, COL_FRAGILE})
@@ -148,6 +150,7 @@ class ProductTableModel(QAbstractTableModel):
             COL_WEIGHT,
             COL_MAX_STACK,
             COL_EXTINGUISHER_NOMINAL,
+            COL_WEIGHT_TOTAL,
         ):
             return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
@@ -179,6 +182,8 @@ class ProductTableModel(QAbstractTableModel):
             return unit.extinguisher_nominal_kg if unit.extinguisher_nominal_kg is not None else ""
         if column == COL_COLOR:
             return unit.color_hex
+        if column == COL_WEIGHT_TOTAL:
+            return round(unit.quantity * unit.weight_kg, 1)
         return None
 
     def setData(  # noqa: N802

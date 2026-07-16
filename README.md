@@ -104,13 +104,16 @@ entre `optimization` y `rules`, sin cambiar la complejidad) — ver
 [docs/OptimizerPerformance.md](docs/OptimizerPerformance.md). La
 integración ERP se implementará en una fase posterior.
 
-**Versión actual: `1.0.0b1` — "Beta 1.0"**, primera versión pensada
-para distribuirse a un cliente real para pruebas. Cierra una auditoría
-completa de estabilización (sin funcionalidades nuevas): recorrido
-completo de la aplicación como lo haría un usuario, corrección de
-bugs reales encontrados (limpieza de hilos al cerrar la ventana,
-sincronización de estado entre optimización normal y multi-espacio,
-protección de perfiles integrados del catálogo, informe de
-importación masiva con errores reales) y sincronización de versión
-entre `pyproject.toml`, `src/cargo_optimizer/__init__.py` y el
-`CHANGELOG.md`. Ver `CHANGELOG.md` para el detalle completo.
+**Versión actual: `1.0.0b2`.** La `1.0.0b1` ("Beta 1.0") fue la
+primera versión pensada para distribuirse a un cliente real para
+pruebas, cerrando una auditoría completa de estabilización (sin
+funcionalidades nuevas): recorrido completo de la aplicación como lo
+haría un usuario, corrección de bugs reales encontrados (limpieza de
+hilos al cerrar la ventana, sincronización de estado entre
+optimización normal y multi-espacio, protección de perfiles
+integrados del catálogo, informe de importación masiva con errores
+reales). La `1.0.0b2` rediseña el workspace operativo de la interfaz
+de escritorio (espacio de carga compacto, alta rápida de producto por
+SKU/cantidad, "Lista de carga" simplificada, visor 3D protagonista) —
+solo interfaz, sin cambios de arquitectura. Ver `CHANGELOG.md` para el
+detalle completo de ambas.

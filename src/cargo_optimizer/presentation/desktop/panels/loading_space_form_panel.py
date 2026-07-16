@@ -47,7 +47,7 @@ _DOOR_LABELS: dict[DoorPosition, str] = {
     DoorPosition.UNRESTRICTED: "Sin restricción",
 }
 
-_CATEGORY_LABELS: dict[LoadingSpaceCategory, str] = {
+CATEGORY_LABELS: dict[LoadingSpaceCategory, str] = {
     LoadingSpaceCategory.CONTAINER: "Contenedor",
     LoadingSpaceCategory.TRUCK: "Camión",
     LoadingSpaceCategory.VAN: "Furgón / van",
@@ -59,7 +59,7 @@ _CATEGORY_LABELS: dict[LoadingSpaceCategory, str] = {
 
 
 @dataclass(frozen=True)
-class _Profile:
+class LoadingSpaceProfilePreset:
     name: str
     category: LoadingSpaceCategory
     dimensions: Dimensions3D
@@ -67,68 +67,68 @@ class _Profile:
     max_weight_kg: float | None
 
 
-def _profiles() -> dict[str, _Profile]:
+def loading_space_profiles() -> dict[str, LoadingSpaceProfilePreset]:
     container_20 = LoadingSpace.standard_20ft_container()
     container_40 = LoadingSpace.standard_40ft_container()
     container_40hq = LoadingSpace.standard_40ft_high_cube_container()
     return {
-        "Contenedor 20'": _Profile(
+        "Contenedor 20'": LoadingSpaceProfilePreset(
             container_20.name,
             container_20.category,
             container_20.internal_dimensions,
             container_20.door_position,
             container_20.max_weight_kg,
         ),
-        "Contenedor 40'": _Profile(
+        "Contenedor 40'": LoadingSpaceProfilePreset(
             container_40.name,
             container_40.category,
             container_40.internal_dimensions,
             container_40.door_position,
             container_40.max_weight_kg,
         ),
-        "Contenedor 40' HQ": _Profile(
+        "Contenedor 40' HQ": LoadingSpaceProfilePreset(
             container_40hq.name,
             container_40hq.category,
             container_40hq.internal_dimensions,
             container_40hq.door_position,
             container_40hq.max_weight_kg,
         ),
-        "Camión": _Profile(
+        "Camión": LoadingSpaceProfilePreset(
             "Camión rígido (perfil orientativo)",
             LoadingSpaceCategory.TRUCK,
             Dimensions3D(600.0, 240.0, 240.0),
             DoorPosition.REAR,
             8000.0,
         ),
-        "Semirremolque": _Profile(
+        "Semirremolque": LoadingSpaceProfilePreset(
             "Semirremolque (perfil orientativo)",
             LoadingSpaceCategory.TRAILER,
             Dimensions3D(1360.0, 245.0, 270.0),
             DoorPosition.REAR,
             24000.0,
         ),
-        "Furgón": _Profile(
+        "Furgón": LoadingSpaceProfilePreset(
             "Furgón de reparto (perfil orientativo)",
             LoadingSpaceCategory.VAN,
             Dimensions3D(400.0, 200.0, 200.0),
             DoorPosition.REAR,
             1500.0,
         ),
-        "Van": _Profile(
+        "Van": LoadingSpaceProfilePreset(
             "Van de carga (perfil orientativo)",
             LoadingSpaceCategory.VAN,
             Dimensions3D(300.0, 170.0, 170.0),
             DoorPosition.REAR,
             1000.0,
         ),
-        "Bodega": _Profile(
+        "Bodega": LoadingSpaceProfilePreset(
             "Bodega de almacenamiento (perfil orientativo)",
             LoadingSpaceCategory.WAREHOUSE,
             Dimensions3D(2000.0, 1500.0, 500.0),
             DoorPosition.UNRESTRICTED,
             None,
         ),
-        "Otro": _Profile(
+        "Otro": LoadingSpaceProfilePreset(
             "Espacio de carga",
             LoadingSpaceCategory.OTHER,
             Dimensions3D(500.0, 250.0, 250.0),
@@ -146,14 +146,14 @@ class LoadingSpaceFormPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("loadingSpaceForm")
-        self._profiles = _profiles()
+        self._profiles = loading_space_profiles()
 
         self._profile_combo = QComboBox(self)
         self._profile_combo.addItems([*self._profiles.keys(), PROFILE_CUSTOM])
 
         self._name_edit = QLineEdit(self)
         self._category_combo = QComboBox(self)
-        for category, label in _CATEGORY_LABELS.items():
+        for category, label in CATEGORY_LABELS.items():
             self._category_combo.addItem(label, category)
 
         self._length_spin = self._make_dimension_spin()

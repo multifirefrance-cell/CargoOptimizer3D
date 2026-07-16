@@ -13,6 +13,7 @@ from cargo_optimizer.presentation.desktop.models.product_table_model import (
     COL_NAME,
     COL_QUANTITY,
     COL_SKU,
+    COL_WEIGHT_TOTAL,
     ProductTableModel,
 )
 
@@ -31,7 +32,7 @@ def _unit(**overrides: object) -> LoadUnit:
 def test_empty_model_has_no_rows(qapp: QApplication) -> None:
     model = ProductTableModel()
     assert model.rowCount() == 0
-    assert model.columnCount() == 14
+    assert model.columnCount() == 15
 
 
 def test_model_starts_with_given_load_units(qapp: QApplication) -> None:
@@ -50,6 +51,12 @@ def test_display_data_matches_load_unit_fields(qapp: QApplication) -> None:
     assert model.data(sku_index) == "SKU-X"
     assert model.data(name_index) == "Producto X"
     assert model.data(quantity_index) == 5
+
+
+def test_weight_total_is_quantity_times_weight(qapp: QApplication) -> None:
+    model = ProductTableModel([_unit(sku="SKU-X", quantity=3, weight_kg=10.0)])
+    weight_total_index = model.index(0, COL_WEIGHT_TOTAL)
+    assert model.data(weight_total_index) == 30.0
 
 
 def test_header_data_returns_spanish_labels(qapp: QApplication) -> None:

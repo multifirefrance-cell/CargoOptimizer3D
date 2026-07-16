@@ -6,6 +6,54 @@ para pre-releases (`bN` = "beta N"); antes de esta versión el
 versionado 0.x podía incluir cambios estructurales entre versiones
 menores sin aviso adicional.
 
+## [1.0.0b2] - 2026-07-16
+
+Rediseño del workspace operativo de `presentation/desktop` (estilo
+EasyCargo, sin copiar su diseño): la pantalla principal deja de exigir
+que el usuario adivine dónde elegir el espacio de carga, agregar SKU o
+indicar cantidades. Solo toca la interfaz de escritorio — sin cambios
+en `domain`/`geometry`/`rules`/`optimization`/`application`/
+`infrastructure`.
+
+### Added
+
+- `LoadingSpaceSummaryPanel`: Tipo + Perfil + resumen de una línea
+  ("589 × 235 × 239 cm", "28.180 kg") + botón "Cambiar medidas…".
+- `LoadingSpaceEditorDialog`: envuelve el `LoadingSpaceFormPanel`
+  completo (ya existente, reutilizado tal cual) en un diálogo bajo
+  demanda, en vez de mantenerlo siempre embebido en la columna
+  izquierda.
+- `ProductQuickAddPanel`: buscador de SKU/nombre con autocompletado +
+  cantidad + "+ AGREGAR A LA CARGA"; "Crear nuevo SKU…" abre el editor
+  de catálogo solo cuando el producto todavía no existe.
+- Columna "Peso total (kg)" en `ProductTableModel`
+  (`quantity * weight_kg`).
+
+### Changed
+
+- `ProductTablePanel` ("Lista de carga"): solo muestra SKU, Nombre,
+  Cantidad y Peso total — el resto de columnas técnicas del catálogo
+  (dimensiones, orientaciones, apilamiento, tipo de empaque,
+  fragilidad, extintor, color) se ocultan, no se eliminan del modelo.
+  "Editar cantidad…" y "Eliminar" son las únicas dos acciones sobre
+  una línea ya agregada.
+- El panel "Guía" (`ProjectTreePanel`, pasos 1-5, introducido en el
+  rediseño anterior) se elimina por completo: la propia interfaz
+  explica el flujo sin necesidad de un panel de pasos aparte.
+- `SelectionDetailsPanel` permanece oculto por defecto y solo aparece
+  al seleccionar una caja en el visor 3D (ya no hay una preferencia
+  persistida de visibilidad del dock).
+
+### Fixed
+
+- `LoadingSpaceSummaryPanel._populate_profile_combo` restablecía
+  `_updating` a `False` sin condiciones en su `finally`, incluso
+  llamado desde dentro de `set_current_profile` (que ya lo había
+  puesto a `True`): el `setCurrentText` siguiente quedaba sin proteger
+  y `profile_selected` se emitía de forma espuria al sincronizar el
+  panel desde el `LoadingSpaceFormPanel` real. Ahora guarda/restaura el
+  valor anterior en vez de fijar `False`.
+
 ## [1.0.0b1] - 2026-07-16
 
 Primera Beta distribuible: cierre de la auditoría de estabilización

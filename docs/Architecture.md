@@ -170,9 +170,10 @@ presentation/desktop/
 │   ├── product_catalog_table_model.py    # QAbstractTableModel de solo lectura sobre el catálogo (7.1)
 │   └── loading_space_profile_table_model.py  # ídem sobre perfiles de espacio (fase 7.1)
 ├── panels/
-│   ├── project_tree_panel.py
-│   ├── loading_space_form_panel.py
-│   ├── product_table_panel.py
+│   ├── loading_space_form_panel.py       # formulario completo; ahora vive en un diálogo bajo demanda
+│   ├── loading_space_summary_panel.py    # rediseño "workspace operativo": Tipo/Perfil/resumen compacto
+│   ├── product_quick_add_panel.py        # rediseño "workspace operativo": buscador SKU + cantidad + agregar
+│   ├── product_table_panel.py            # "Lista de carga" simplificada (SKU/Nombre/Cantidad/Peso total)
 │   ├── results_panel.py          # resumen numérico del último PackingResult
 │   ├── unpacked_table_panel.py   # tabla de instancias no cargadas
 │   ├── warnings_panel.py         # PackingResult.warnings
@@ -181,6 +182,7 @@ presentation/desktop/
 ├── dialogs/                          # diálogos modales (fase 7.1; fase 8.1 añade los 4 siguientes)
 │   ├── product_catalog_dialog.py             # listar/buscar/CRUD/añadir al proyecto; acepta drag&drop (8.1)
 │   ├── catalog_product_editor_dialog.py      # editor modal de un LoadUnit de catálogo
+│   ├── loading_space_editor_dialog.py        # envuelve LoadingSpaceFormPanel bajo "Cambiar medidas…"
 │   ├── loading_space_profiles_dialog.py      # listar/buscar/CRUD/aplicar perfiles
 │   ├── loading_space_profile_editor_dialog.py  # reutiliza LoadingSpaceFormPanel tal cual
 │   ├── column_mapping_dialog.py               # Fase 8.1: asistente de mapeo de columnas + perfiles

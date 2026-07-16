@@ -120,16 +120,13 @@ def test_toggle_theme_updates_settings(qapp: QApplication, app_settings: AppSett
     window.close()
 
 
-def test_project_dock_toggle_action_exists(qapp: QApplication, app_settings: AppSettings) -> None:
-    # `action_toggle_project_dock` es `QDockWidget.toggleViewAction()`, un
-    # QAction propio de Qt: aquí solo se comprueba que está bien conectado al
-    # dock (checkable, en el menú Ver, casado inicialmente con la
-    # visibilidad real del panel). El propio ciclo mostrar/ocultar del dock
-    # es responsabilidad de Qt, no de este código.
+def test_selection_details_dock_hidden_by_default(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    # Rediseño "workspace operativo": el panel "Guía" desaparece por completo
+    # y el dock de detalles de selección solo se muestra cuando el usuario
+    # selecciona una caja en el visor 3D (nunca por defecto al arrancar).
     window = MainWindow(app_settings)
     window.show()
-    assert window.action_toggle_project_dock.isCheckable()
-    assert window.action_toggle_project_dock.isChecked() == window.project_tree_dock.isVisible()
-    window.project_tree_dock.setVisible(False)
-    assert not window.project_tree_dock.isVisible()
+    assert not window.selection_details_dock.isVisible()
     window.close()
