@@ -317,27 +317,31 @@ sesión, en la misma máquina.
 | 30  | 4.078 s (3.912–9.688 s) | 6.442 s (3.878–6.554 s) | 3 |
 | 60  | 36.720–66.007 s según la tanda (25.9–66.9 s en 8 corridas totales) | 17.745–51.425 s según la tanda (17.7–51.4 s en 8 corridas totales) | 8 |
 | 100 | 195.062 s | 142.532 s | 1 (una sola corrida; demasiado costosa para repetir varias veces en esta sesión) |
-| 200 | no medido (ver nota) | ver nota | — |
-| 500 | no medido (ver nota) | ver nota | — |
+| 200 | no medido (ver nota) | **583.007 s** (~9.7 min) | 1 (corrida en segundo plano, terminó tras el resto de esta fase) |
+| 500 | no medido (ver nota) | no medido (ver nota) | — |
 
-**200 y 500 no se ejecutaron por completo en esta sesión.** Con la
-complejidad real ~O(n³)-ish sin cambiar (ver más abajo), extrapolando
-desde 100 (≈150–195 s) el crecimiento cúbico observado en la fase 4.2
-y reconfirmado aquí (10→30→60→100 crece muy cerca de `(razón de
-tamaño)³`), 200 instancias tomarían del orden de **20-30 minutos** y
-500 del orden de **varias horas** — exactamente la limitación que ya
-documentaba `docs/OptimizationEngineDesign.md` y que esta fase no
-elimina, porque no cambia la complejidad, solo el factor constante (ver
-siguiente sección). No se ha inventado ni maquillado ninguna cifra
-para 200/500: no se ejecutaron completas porque hacerlo de forma
-fiable (con repeticiones, para lidiar con el ruido medido arriba)
-habría requerido horas de cómputo solo para esta verificación, y este
-informe prioriza no bloquear la entrega con una medición de valor
-marginal (el resultado cualitativo — mismo orden de magnitud que 100 —
-ya se puede anticipar con confianza razonable a partir del
-perfilado). Si se inició una corrida en segundo plano de 200
-instancias durante esta sesión, su resultado (si terminó a tiempo) se
-añade como nota al pie de esta tabla cuando esté disponible.
+**200 (después) se terminó de medir en segundo plano tras el resto de
+esta fase**: 583.007 s con el código ya optimizado. La razón 100→200
+(tamaño ×2) da un factor de tiempo de ×4.09 (142.532 s → 583.007 s),
+más cercano a un crecimiento cuadrático que al cúbico estricto que se
+había anticipado extrapolando de la fase 4.2 — con una sola medición
+por tamaño y el ruido de esta máquina ya documentado arriba, no se
+puede afirmar con confianza que el exponente real cambió; lo único que
+se puede afirmar con confianza es la cifra medida en sí, no la
+tendencia. **200 (antes) y 500 (antes/después) no se ejecutaron por
+completo en esta sesión**: extrapolando desde la razón 100→200
+realmente medida (×4.09 para ×2 de tamaño), 500 instancias (×2.5 de
+tamaño respecto a 200) tomarían muy aproximadamente entre **~1 y ~2.5
+horas**, según si el crecimiento real en ese rango es más cuadrático o
+más cúbico — un rango, no una cifra única, precisamente porque una
+sola medición por tamaño no permite ajustar el exponente con
+confianza. No se ha inventado ni maquillado ninguna cifra: 500 no se
+ejecutó completo porque hacerlo de forma fiable (con repeticiones,
+para lidiar con el ruido medido arriba) habría requerido horas de
+cómputo solo para esta verificación, y este informe prioriza no
+bloquear la entrega con una medición de valor marginal frente al
+diagnóstico ya claro (mismo orden de magnitud que 100/200, sin cambio
+de complejidad).
 
 ### Complejidad: qué cambió y qué no
 
