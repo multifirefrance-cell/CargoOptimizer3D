@@ -25,6 +25,7 @@ aplicación web, sin reescribirse.
 src/cargo_optimizer/
 ├── domain/          # Entidades y reglas de negocio puras. Sin dependencias externas.
 ├── application/     # Casos de uso, orquestación, puertos hacia infraestructura.
+│                    #   MultiSpaceAssignmentEngine: asignación automática multi-espacio.
 ├── infrastructure/  # Adaptadores concretos: persistence/ (proyectos .cargo3d, JSON),
 │                    #   database/ (catálogo SQLite/SQLAlchemy), excel/ (import/export .xlsx),
 │                    #   pdf/ (informes PDF, ReportLab).
@@ -88,5 +89,14 @@ Loading Space, perfiles de mapeo de Excel e historial básico),
 `docs/Excel.md` para el importador/exportador de Excel (plantillas
 oficiales en `examples/templates/`), `docs/ExcelAutomation.md` para la
 automatización del flujo, y `docs/PdfReports.md` para el sistema de
-informes PDF (`infrastructure/pdf/`, ReportLab). La integración ERP se
-implementará en una fase posterior.
+informes PDF (`infrastructure/pdf/`, ReportLab).
+
+Desde la fase 10.1, el trabajo posterior se rige por
+[docs/ProductBacklog.md](docs/ProductBacklog.md) (backlog comercial
+priorizado por valor, organizado en EPICs con un ID estable por ítem),
+no por la numeración secuencial de fases. Primer ítem implementado:
+`OPT-01`, asignación automática multi-espacio
+(`application.MultiSpaceAssignmentEngine` — ver
+[docs/MultiSpaceAssignment.md](docs/MultiSpaceAssignment.md)); la
+integración con la interfaz de escritorio queda para un encargo
+posterior. La integración ERP se implementará en una fase posterior.

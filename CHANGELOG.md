@@ -4,6 +4,81 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/).
 Este proyecto aún no ha alcanzado la versión 1.0; el versionado 0.x
 puede incluir cambios estructurales entre versiones menores.
 
+## [0.15.0] - 2026-07-16
+
+Implementación de `OPT-01` (asignación automática multi-espacio),
+primer ítem ejecutado del Product Backlog comercial
+(`docs/ProductBacklog.md`, fase 10.1) y primer caso de uso real de la
+capa `application`.
+
+### Added
+
+- `application/codes.py`: `MultiSpaceStopReason` (`all_packed` /
+  `impossible_remaining` / `max_spaces_reached` / `cancelled`).
+- `application/exceptions.py`: `ApplicationError`,
+  `MultiSpaceAssignmentValidationError`.
+- `application/models.py`: `MultiSpaceAssignmentRequest` (candidatos de
+  `LoadingSpace` en orden de preferencia, `load_units`, límites
+  opcionales por espacio y `max_spaces`), `MultiSpaceAssignmentResult`
+  (un `PackingResult` por espacio usado, más los agregados
+  consolidados) y `MultiSpaceProgress`.
+- `application/multi_space_assignment.py`: `MultiSpaceAssignmentEngine`
+  — orquesta varias ejecuciones de `PackingEngine.optimize(...)` (una
+  por espacio). En cada ronda evalúa **todos** los
+  `loading_space_candidates` (nunca se detiene en el primero que
+  coloca algo) y elige el mejor resultado con una clave de comparación
+  determinista y fija: mayor `packed_count`, luego mayor
+  `used_volume_cm3`, luego mayor `used_weight_kg`, luego menor
+  `loading_space.capacity_volume_cm3`, y el orden original de
+  `loading_space_candidates` como desempate final. Sin búsqueda
+  combinatoria entre rondas. Nunca reimplementa colocación, geometría
+  ni reglas — eso sigue siendo de `optimization`/`rules`/`geometry`,
+  sin cambios.
+- `MultiSpaceAssignmentResult`: resumen global además de
+  `space_results`, sin duplicar nada ya presente en cada
+  `PackingResult` — todo calculado como propiedad: conteo de espacios
+  usados por nombre de candidato (`spaces_used_by_candidate_name`),
+  `overall_weight_utilization_percent` (`None` si ningún espacio usado
+  declara `max_weight_kg`), `average_volume_utilization_percent`,
+  `max_volume_utilization_percent`, `min_volume_utilization_percent`,
+  `pending_count`.
+- `docs/ProductBacklog.md`: Product Backlog comercial completo (fase
+  10.1), incorporado al repositorio como referencia del proyecto.
+- `docs/MultiSpaceAssignment.md`: diseño y uso de
+  `MultiSpaceAssignmentEngine`, incluyendo el criterio exacto de
+  selección del mejor candidato y el análisis de costo de evaluarlos
+  todos.
+- `tests/application/`: 28 pruebas nuevas (validación de la solicitud,
+  un espacio basta, hacen falta varios, imposibilidad total, tope
+  `max_spaces`, cancelación entre espacios, fallback cuando un
+  candidato no coloca nada, selección del mejor candidato aunque el
+  primero de la lista ya coloque algo, los dos niveles de desempate
+  restantes, determinismo, progreso por espacio, resiliencia ante
+  excepciones del callback, pedido vacío, y las propiedades agregadas
+  incluidas las nuevas).
+
+### Changed
+
+- `application/__init__.py`: deja de estar vacío; expone la API
+  pública del caso de uso y corrige su docstring (dependía solo de
+  `domain` en el texto; ya dependía también de `geometry`/`rules`/
+  `optimization` según el contrato de capas, ahora lo refleja).
+- `docs/Roadmap.md`, `docs/Architecture.md`, `README.md`, `CLAUDE.md`:
+  documentan la transición de fase 10.1 en adelante (el Product
+  Backlog, no la numeración secuencial `X.Y`, es la fuente de verdad
+  de qué construir después) y el nuevo contenido de `application/`.
+
+### Not in scope
+
+- Integración con `presentation/desktop` (menú, diálogo de candidatos,
+  worker en segundo plano): el motor se entrega probado de forma
+  independiente; conectarlo a la interfaz queda para un encargo
+  posterior, mismo criterio que ya separó `optimization` (fase 4.1) de
+  su conexión a la interfaz (fase 5.1).
+- Minimización exacta del número de espacios usados (NP-duro),
+  secuenciación multi-parada (`LOG-03`) y sugerencia automática de
+  espacio (`LOG-05`): ítems propios del backlog, no de `OPT-01`.
+
 ## [0.14.0] - 2026-07-16
 
 Implementación del sistema profesional de informes PDF (fase 9.1),

@@ -172,7 +172,9 @@ userdata/            # Datos generados por el usuario en tiempo de ejecución. N
    perfiles, vista previa, importación parcial, duplicados, drag&drop,
    importación masiva, informes, exportación avanzada) — 9.0. Diseño
    del sistema profesional de informes PDF — 9.1. Informes PDF:
-   implementación — 10. Integración ERP — 11. Versión comercial.
+   implementación — 10. Integración ERP — 10.1. Product Backlog
+   comercial (`docs/ProductBacklog.md`) y ejecución de sus ítems por ID
+   (empezando por `OPT-01`) — 11. Versión comercial.
 
 La fase 2 original ("Motor geométrico") se dividió en 2.1 (modelo de
 dominio puro) y 2.2 (motor geométrico) para poder completar el modelo
@@ -200,6 +202,19 @@ informes PDF, `docs/PdfReportDesign.md`, ADR-0012) y **9.1**
 "Integración ERP" pasó de 9 a **10**, y "Versión comercial" de 10 a
 **11** — ver `docs/Roadmap.md`, secciones "Nota sobre la numeración de
 la fase 8" y "Nota sobre la numeración de la fase 9".
+
+Un quinto encargo, con la fase 9.1 completada, pidió un análisis
+completo de producto (auditoría comercial, sin código) seguido de
+"FASE 10.1 — Construcción del Product Backlog comercial"
+(`docs/ProductBacklog.md`, sin código): desde esta fase, el roadmap
+secuencial `X.Y` deja de ser la fuente de verdad de qué construir
+después — lo es el backlog, priorizado por valor y organizado en EPICs
+con un ID estable por ítem (`OPT-01`, `LOG-03`, etc.), no un número de
+fase. Ver `docs/Roadmap.md`, sección "Nota sobre la transición al
+Product Backlog". Un sexto encargo, inmediatamente posterior,
+implementó el primer ítem del backlog, `OPT-01` (asignación automática
+multi-espacio), como primer caso de uso real de `application` — ver
+`docs/MultiSpaceAssignment.md`.
 
 Estado actual: **sistema de informes PDF completamente implementado**
 (fin de fase 9.1), exactamente según el diseño de la fase 9.0 sin
@@ -395,6 +410,47 @@ conservado como historial).
   alcance de la fase 4.2. No prometer rendimiento distinto al
   documentado en `docs/OptimizerPerformance.md` sin haber implementado
   esa estructura, con ADR explícito.
+
+## Invariantes de `application` (implementado desde la fase 10.1, no romper sin ADR)
+
+Detalle completo en `docs/MultiSpaceAssignment.md`.
+
+- `application` depende de `domain`, `geometry`, `rules` y
+  `optimization`; nunca de `infrastructure` ni `presentation`.
+  Verificado por `import-linter` (el contrato de capas ya lo permitía
+  desde la fase 1; esta fase es la primera vez que se ejercita).
+- `MultiSpaceAssignmentEngine` nunca reimplementa búsqueda de
+  colocación, geometría ni reglas de negocio: orquesta llamadas a
+  `PackingEngine.optimize(...)` tal cual existe, una por
+  `LoadingSpace` usado. Si hace falta cambiar *dónde* se coloca algo
+  dentro de un espacio, eso se cambia en `optimization`/`rules`/
+  `geometry`, nunca añadiendo lógica de colocación aquí.
+- El algoritmo de asignación multi-espacio es determinista y sin
+  búsqueda combinatoria: para cada espacio nuevo se ejecuta el motor
+  sobre **todos** los `loading_space_candidates` de la ronda y se
+  elige el mejor resultado con una clave de comparación fija — mayor
+  `packed_count`, luego mayor `used_volume_cm3`, luego mayor
+  `used_weight_kg`, luego menor `loading_space.capacity_volume_cm3`,
+  y el orden original de `loading_space_candidates` como desempate
+  final. Nunca se descarta un candidato por ser el "primero que
+  funciona": todos se evalúan siempre. Minimizar el número de espacios
+  de forma *exacta* sigue siendo NP-duro y fuera de alcance — no
+  introducir búsqueda combinatoria sobre combinaciones de espacios sin
+  una razón nueva y un ADR.
+- `MultiSpaceAssignmentResult.space_results[i].unpacked_units` (de una
+  ronda intermedia) y `MultiSpaceAssignmentResult.final_unpacked_units`
+  (el consolidado final) son conceptos distintos — no colapsarlos: el
+  primero se reintenta en el siguiente espacio, el segundo no.
+- `MultiSpaceAssignmentEngine` reutiliza `CancellationToken` de
+  `optimization` tal cual (nunca importa PySide6, mismo criterio que el
+  resto del motor); la cancelación se comprueba tanto dentro de cada
+  `PackingEngine.optimize(...)` como entre espacios.
+- Esta fase entrega únicamente el motor de orquestación
+  (`application`), probado de forma independiente. No conectarlo a
+  `presentation/desktop` (menú, diálogo de candidatos, worker en
+  segundo plano) salvo que se pida explícitamente como encargo
+  separado — mismo criterio que ya separó la fase 4.1
+  (`optimization`) de la fase 5.1 (conexión a la interfaz).
 
 ## Invariantes de `presentation/desktop` (no romper sin ADR)
 

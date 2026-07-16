@@ -27,6 +27,8 @@ fase se adelanta a la anterior.
 | 9.0 | Diseño del sistema profesional de informes PDF | Ninguno (solo documentación: `docs/PdfReportDesign.md`, ADR-0012) | **Completada** |
 | 9.1 | Informes PDF — implementación | `infrastructure/pdf` (nuevo) | **Completada** |
 | 10 | Integración ERP | `presentation` (nuevo adaptador, p. ej. `presentation/api`) | Pendiente |
+| 10.1 | Product Backlog comercial (`docs/ProductBacklog.md`, sin código) | Ninguno (solo documentación) | **Completada** |
+| 10.1+ | Ejecución del Product Backlog, ítem por ítem (empezando por `OPT-01`) | Variable según el ítem — ver `docs/ProductBacklog.md` | En curso |
 | 11 | Versión comercial | — | Pendiente |
 
 ## `optimization` (`geometry`, `rules` y `optimization` ya existen)
@@ -151,6 +153,34 @@ antigua fila 9 ("Integración ERP") pasa a **10**, y "Versión comercial"
 pasa de 10 a **11**. Ninguna fase completada cambia de número; solo se
 renumeran las que todavía estaban pendientes, mismo principio que ya
 guio las notas de las fases 2, 5, 6, 7 y 8.
+
+## Nota sobre la transición al Product Backlog (fase 10.1 en adelante)
+
+Hasta la fase 9.1, el roadmap era la única fuente de verdad de qué
+construir después, numerada secuencialmente `X.Y`. La fase 10.1
+("Construcción del Product Backlog comercial") reemplaza esa
+numeración secuencial por un backlog priorizado por valor
+(`docs/ProductBacklog.md`), organizado en EPICs (`OPT`, `LOG`, `VIS`,
+`UX`, `DAT`, `REP`, `INT`, `ADM`, `COM`) con un ID estable por ítem
+(p. ej. `OPT-01`) en vez de un número de fase. A partir de aquí, esta
+tabla solo registra hitos de alto nivel (cuándo se completó el backlog,
+qué ítem se está ejecutando); el detalle de alcance, criterios de
+aceptación y estado de cada pieza de trabajo vive en
+`docs/ProductBacklog.md`, columna "Estado" de cada ítem — esa es la
+fuente de verdad a partir de ahora, no una fila nueva por cada ítem en
+esta tabla.
+
+El primer ítem ejecutado tras el backlog es `OPT-01` (asignación
+automática multi-espacio): implementado como primer caso de uso real
+de `application` — ver `docs/MultiSpaceAssignment.md`. Alcance de esta
+entrega: el motor de orquestación (`MultiSpaceAssignmentEngine`),
+probado de forma independiente. La integración con
+`presentation/desktop` (menú, diálogo de candidatos, worker) queda
+explícitamente para un encargo posterior, mismo criterio que ya separó
+`optimization` (fase 4.1) de su conexión a la interfaz (fase 5.1) — ver
+`docs/ProductBacklog.md`, ítem `OPT-01`, para el criterio de aceptación
+todavía pendiente ("el usuario puede pedir 'optimiza este pedido'"
+desde la interfaz).
 
 ## Estado actual
 

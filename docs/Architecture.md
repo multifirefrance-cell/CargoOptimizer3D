@@ -47,11 +47,28 @@ datos.
 
 ### `application`
 
-Casos de uso (p. ej. "optimizar un plan de carga para un Loading
-Space dado un conjunto de Load Units") y los puertos — interfaces
-Python (probablemente `Protocol` o `ABC` mínimas, a decidir en su
-fase) que `infrastructure` implementará: repositorios de persistencia,
-exportadores, proveedores de render. Depende solo de `domain`.
+Casos de uso (orquestación) y los puertos — interfaces Python
+(probablemente `Protocol` o `ABC` mínimas, a decidir cuando haga
+falta) que `infrastructure` implementará: repositorios de
+persistencia, exportadores, proveedores de render. Depende de
+`domain`, `geometry`, `rules` y `optimization`; nunca de
+`infrastructure` ni `presentation`.
+
+Primer caso de uso real (fase 10.1, ítem `OPT-01` de
+`docs/ProductBacklog.md`): `MultiSpaceAssignmentEngine` — orquesta
+varias ejecuciones de `PackingEngine.optimize(...)` (una por
+`LoadingSpace`) para responder "¿cuántos espacios hacen falta para
+este pedido, y qué va en cada uno?", sin reimplementar ninguna
+búsqueda de colocación (eso sigue siendo de `optimization`). Ver
+`docs/MultiSpaceAssignment.md` para el diseño completo.
+
+```
+application/
+├── codes.py                      # MultiSpaceStopReason (StrEnum)
+├── exceptions.py                  # ApplicationError, MultiSpaceAssignmentValidationError
+├── models.py                      # MultiSpaceAssignmentRequest/Result, MultiSpaceProgress
+└── multi_space_assignment.py      # MultiSpaceAssignmentEngine.assign(...)
+```
 
 ### `infrastructure`
 
