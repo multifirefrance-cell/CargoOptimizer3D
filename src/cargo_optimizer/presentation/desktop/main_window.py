@@ -691,6 +691,16 @@ class MainWindow(QMainWindow):
             self._last_load_units_by_id = {unit.id: unit for unit in loaded.project.load_units}
             self._last_result = loaded.project.latest_result
             self._result_stale = bool(loaded.presentation_state.get("result_stale", False))
+            # `.cargo3d` nunca guarda un resultado multi-espacio (ver
+            # `docs/MultiSpaceAssignment.md`, §9): si el proyecto abierto
+            # antes tenía uno en pantalla, debe desaparecer junto con el
+            # resto del estado del proyecto anterior — si no, el
+            # selector de la pestaña "Multi-espacio" seguiría pudiendo
+            # sobrescribir el visor con datos de un proyecto que ya no
+            # está abierto.
+            self._last_multi_space_result = None
+            self._last_multi_space_load_units_by_id = {}
+            self.multi_space_results_panel.clear()
 
             self.selection_details_panel.clear()
             if self._last_result is not None:
@@ -1660,6 +1670,14 @@ class MainWindow(QMainWindow):
         self.results_panel.clear()
         self.unpacked_table_panel.model.clear()
         self.warnings_panel.clear()
+        # Un resultado multi-espacio de una ejecución anterior queda
+        # obsoleto en cuanto se ejecuta una optimización normal — si no
+        # se limpiara, el selector de la pestaña "Multi-espacio" seguiría
+        # pudiendo sobrescribir en silencio el visor recién actualizado
+        # con datos de esa ejecución multi-espacio anterior.
+        self._last_multi_space_result = None
+        self._last_multi_space_load_units_by_id = {}
+        self.multi_space_results_panel.clear()
         self.viewer_widget.clear_scene()
         self.selection_details_panel.clear()
         self._progress_bar.setRange(0, 1)
@@ -1784,6 +1802,11 @@ class MainWindow(QMainWindow):
         self._set_state(STATE_PREPARING)
         self._set_running_controls_enabled(False)
         self.multi_space_results_panel.clear()
+        # No se toca `_last_result`/`results_panel` aquí a propósito: son
+        # la última optimización de un solo espacio real (la que
+        # "Exportar PDF"/"Exportar Excel" usan) y una exploración
+        # multi-espacio no la invalida — seguirá siendo exportable
+        # después, exactamente como antes de ejecutar esta.
         self.viewer_widget.clear_scene()
         self.selection_details_panel.clear()
         self._progress_bar.setRange(0, 1)
@@ -2060,10 +2083,16 @@ class MainWindow(QMainWindow):
         if not self._confirm_discard_unsaved_changes():
             event.ignore()
             return
-        worker = self._optimization_worker
-        if worker is not None and worker.isRunning():
-            worker.cancellation_token.cancel()
-            worker.wait(5000)
+        # Ambos tipos de worker deben cancelarse y esperarse antes de
+        # cerrar: si solo se comprobara `_optimization_worker`, cerrar la
+        # ventana durante una optimización multi-espacio en curso
+        # destruiría los widgets mientras `MultiSpaceOptimizationWorker`
+        # sigue corriendo en su propio hilo y más tarde intenta emitir
+        # señales hacia objetos Qt ya liberados.
+        for worker in (self._optimization_worker, self._multi_space_worker):
+            if worker is not None and worker.isRunning():
+                worker.cancellation_token.cancel()
+                worker.wait(5000)
         self._save_ui_state()
         self.viewer_widget.shutdown()
         if self._catalog_service is not None:

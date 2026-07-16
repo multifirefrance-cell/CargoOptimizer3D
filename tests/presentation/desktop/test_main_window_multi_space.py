@@ -283,7 +283,72 @@ def test_cancel_multi_space_dispatches_to_worker_token(
 
     assert fake_worker.cancellation_token.is_cancelled()
     assert window._cancel_requested is True
+
+    # El doble de prueba no implementa el resto de la API de QThread
+    # (`.wait()`, etc.): se limpia antes de cerrar la ventana para no
+    # confundir esta prueba de despacho de cancelación con el ciclo de
+    # vida real de un worker, que ya cubren las pruebas del propio
+    # worker y `closeEvent`.
+    window._multi_space_worker = None
     window.close()
+
+
+def test_running_normal_optimization_clears_stale_multi_space_result(
+    qapp: QApplication, app_settings: AppSettings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regresión: un resultado multi-espacio previo no debe sobrevivir a una optimización normal.
+
+    Antes de esta corrección, `_last_multi_space_result` y la pestaña
+    "Multi-espacio" seguían mostrando datos de una ejecución anterior
+    tras correr la optimización normal — el selector de espacio podía
+    entonces sobrescribir en silencio el visor recién actualizado.
+    """
+    window = MainWindow(app_settings, catalog_service=None)
+    result, load_units_by_id = _real_two_space_result()
+    window._on_multi_space_finished(result)
+    assert window._last_multi_space_result is not None
+
+    for _ in range(3):
+        window.product_table_panel.model.add_default_product()
+    window.action_run_optimization.trigger()
+
+    assert window._last_multi_space_result is None
+    assert window.multi_space_results_panel._spaces_used_label.text() == "—"
+
+    _allow_close_without_saving(monkeypatch)
+    window.close()
+
+
+def test_close_event_waits_for_running_multi_space_worker(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    """Regresión: `closeEvent` solo esperaba `_optimization_worker`, nunca el multi-espacio.
+
+    Cerrar la ventana durante una optimización multi-espacio en curso
+    podía destruir los widgets mientras el `QThread` seguía corriendo y
+    más tarde intentaba emitir señales hacia objetos Qt ya liberados.
+    """
+    window = MainWindow(app_settings, catalog_service=None)
+
+    class _FakeWorker:
+        def __init__(self) -> None:
+            self.cancellation_token = CancellationToken()
+            self.wait_called_with: int | None = None
+
+        def isRunning(self) -> bool:  # noqa: N802
+            return True
+
+        def wait(self, timeout_ms: int) -> bool:
+            self.wait_called_with = timeout_ms
+            return True
+
+    fake_worker = _FakeWorker()
+    window._multi_space_worker = fake_worker  # type: ignore[assignment]
+
+    window.close()
+
+    assert fake_worker.cancellation_token.is_cancelled()
+    assert fake_worker.wait_called_with == 5000
 
 
 def test_save_project_shows_multi_space_not_saved_warning(
