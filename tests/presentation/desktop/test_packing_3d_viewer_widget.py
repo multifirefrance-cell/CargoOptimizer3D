@@ -59,6 +59,7 @@ def test_fallback_widget_is_shown(qapp: QApplication) -> None:
 def test_all_public_methods_are_safe_no_ops_when_unavailable(qapp: QApplication) -> None:
     viewer = Packing3DViewer()
     viewer.display_result(_empty_result(), {})
+    viewer.display_empty_space(_empty_result().loading_space)
     viewer.clear_scene()
     viewer.reset_camera()
     viewer.set_container_visible(True)

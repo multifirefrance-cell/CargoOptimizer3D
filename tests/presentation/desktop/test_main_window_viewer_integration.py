@@ -109,7 +109,12 @@ def test_run_optimization_clears_viewer_and_details_panel(
         window.product_table_panel.model.add_default_product()
 
     clear_calls: list[str] = []
-    monkeypatch.setattr(window.viewer_widget, "clear_scene", lambda: clear_calls.append("scene"))
+    # Con un `LoadingSpace` válido (el perfil por defecto), el visor se
+    # resetea mostrando el contenedor vacío (`display_empty_space`), no un
+    # `clear_scene` a ciegas — ver `MainWindow._show_empty_space_preview`.
+    monkeypatch.setattr(
+        window.viewer_widget, "display_empty_space", lambda space: clear_calls.append("scene")
+    )
     monkeypatch.setattr(
         window.selection_details_panel, "clear", lambda: clear_calls.append("details")
     )
@@ -200,7 +205,12 @@ def test_new_project_clears_viewer_and_details(
 ) -> None:
     window = MainWindow(app_settings)
     clear_calls: list[str] = []
-    monkeypatch.setattr(window.viewer_widget, "clear_scene", lambda: clear_calls.append("scene"))
+    # Con un `LoadingSpace` válido (el perfil por defecto), el visor se
+    # resetea mostrando el contenedor vacío (`display_empty_space`), no un
+    # `clear_scene` a ciegas — ver `MainWindow._show_empty_space_preview`.
+    monkeypatch.setattr(
+        window.viewer_widget, "display_empty_space", lambda space: clear_calls.append("scene")
+    )
     monkeypatch.setattr(
         window.selection_details_panel, "clear", lambda: clear_calls.append("details")
     )

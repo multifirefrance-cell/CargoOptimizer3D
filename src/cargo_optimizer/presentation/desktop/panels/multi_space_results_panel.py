@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QScrollArea,
     QTableView,
     QVBoxLayout,
     QWidget,
@@ -113,15 +114,36 @@ class MultiSpaceResultsPanel(QWidget):
         self._unpacked_table.horizontalHeader().setStretchLastSection(True)
         self._unpacked_table.verticalHeader().setVisible(False)
 
+        # Este panel apila un formulario de 14 filas + selector + otro
+        # formulario + una lista + una tabla: sin envolverlo en un
+        # `QScrollArea`, su `minimumSizeHint()` (varios cientos de px)
+        # pasaba a ser el mínimo de **todo** `results_tabs`
+        # (`QTabWidget.minimumSizeHint()` es el máximo entre todas sus
+        # pestañas, aunque solo "Multi-espacio" lo necesite) — forzando a
+        # reservar ese espacio incluso viendo la pestaña "Resumen", que
+        # apenas necesita ~95px. Con el contenido dentro de un scroll, el
+        # mínimo del panel vuelve a ser trivial y el contenido solo
+        # aparece recortado con barra de desplazamiento cuando de verdad
+        # falta espacio, nunca forzando el resto de la ventana.
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.addWidget(self._global_group)
+        content_layout.addWidget(QLabel("Espacio:", content))
+        content_layout.addWidget(self._space_combo)
+        content_layout.addWidget(self._individual_group)
+        content_layout.addWidget(QLabel("Avisos del espacio seleccionado", content))
+        content_layout.addWidget(self._warnings_list)
+        content_layout.addWidget(QLabel("No cargados del espacio seleccionado", content))
+        content_layout.addWidget(self._unpacked_table)
+
+        scroll_area = QScrollArea(self)
+        scroll_area.setObjectName("multiSpaceResultsScrollArea")
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(content)
+
         layout = QVBoxLayout(self)
-        layout.addWidget(self._global_group)
-        layout.addWidget(QLabel("Espacio:", self))
-        layout.addWidget(self._space_combo)
-        layout.addWidget(self._individual_group)
-        layout.addWidget(QLabel("Avisos del espacio seleccionado", self))
-        layout.addWidget(self._warnings_list)
-        layout.addWidget(QLabel("No cargados del espacio seleccionado", self))
-        layout.addWidget(self._unpacked_table)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(scroll_area)
 
         self.clear()
 

@@ -3,6 +3,11 @@
 "Crear nuevo SKU…" abre `CatalogProductEditorDialog`: nunca se llama a
 `.exec()` real (bloquearía el hilo bajo `offscreen`), se sustituye por
 un doble de prueba — mismo patrón que `test_product_catalog_dialog.py`.
+
+El buscador es un `QComboBox` editable (no un `QLineEdit` con
+`QCompleter` aparte): `test_dropdown_shows_full_catalog_without_typing`
+prueba justo la mejora de diseño pedida — ver toda la lista de
+productos con un clic, sin escribir nada primero.
 """
 
 from __future__ import annotations
@@ -54,12 +59,27 @@ def _fake_editor_dialog_class(accepted: bool, result_unit: LoadUnit | None) -> t
     return _FakeEditorDialog
 
 
+def test_dropdown_shows_full_catalog_without_typing(qapp: QApplication, tmp_path: Path) -> None:
+    repo = _repository(tmp_path)
+    repo.add(_unit(sku="BOX-1", name="Caja de herramientas"))
+    repo.add(_unit(sku="PALLET-1", name="Pallet estándar"))
+    repo.add(_unit(sku="DRUM-1", name="Tambor 200L"))
+    panel = ProductQuickAddPanel(repository=repo)
+
+    items = [panel._search_combo.itemText(i) for i in range(panel._search_combo.count())]
+
+    assert len(items) == 3
+    assert "BOX-1 — Caja de herramientas" in items
+    assert "PALLET-1 — Pallet estándar" in items
+    assert "DRUM-1 — Tambor 200L" in items
+
+
 def test_search_by_sku_resolves_the_product(qapp: QApplication, tmp_path: Path) -> None:
     repo = _repository(tmp_path)
     repo.add(_unit(sku="BOX-1"))
     panel = ProductQuickAddPanel(repository=repo)
 
-    panel._search_edit.setText("BOX-1")
+    panel._search_combo.setCurrentText("BOX-1")
 
     assert panel._resolved_unit is not None
     assert panel._resolved_unit.sku == "BOX-1"
@@ -71,10 +91,23 @@ def test_search_by_display_name_resolves_the_product(qapp: QApplication, tmp_pat
     repo.add(_unit(sku="BOX-1", name="Caja de herramientas"))
     panel = ProductQuickAddPanel(repository=repo)
 
-    panel._search_edit.setText("BOX-1 — Caja de herramientas")
+    panel._search_combo.setCurrentText("BOX-1 — Caja de herramientas")
 
     assert panel._resolved_unit is not None
     assert panel._resolved_unit.sku == "BOX-1"
+
+
+def test_selecting_dropdown_item_resolves_the_product(qapp: QApplication, tmp_path: Path) -> None:
+    repo = _repository(tmp_path)
+    repo.add(_unit(sku="BOX-1", name="Caja de herramientas"))
+    repo.add(_unit(sku="PALLET-1", name="Pallet estándar"))
+    panel = ProductQuickAddPanel(repository=repo)
+
+    index = panel._search_combo.findText("PALLET-1 — Pallet estándar")
+    panel._search_combo.setCurrentIndex(index)
+
+    assert panel._resolved_unit is not None
+    assert panel._resolved_unit.sku == "PALLET-1"
 
 
 def test_unresolved_text_disables_add_button(qapp: QApplication, tmp_path: Path) -> None:
@@ -82,7 +115,7 @@ def test_unresolved_text_disables_add_button(qapp: QApplication, tmp_path: Path)
     repo.add(_unit(sku="BOX-1"))
     panel = ProductQuickAddPanel(repository=repo)
 
-    panel._search_edit.setText("no existe")
+    panel._search_combo.setCurrentText("no existe")
 
     assert panel._resolved_unit is None
     assert not panel._add_button.isEnabled()
@@ -92,7 +125,7 @@ def test_add_clicked_emits_add_requested_with_quantity(qapp: QApplication, tmp_p
     repo = _repository(tmp_path)
     repo.add(_unit(sku="BOX-1"))
     panel = ProductQuickAddPanel(repository=repo)
-    panel._search_edit.setText("BOX-1")
+    panel._search_combo.setCurrentText("BOX-1")
     panel._quantity_spin.setValue(12)
     received: list[tuple[LoadUnit, int]] = []
     panel.add_requested.connect(lambda unit, qty: received.append((unit, qty)))
@@ -109,12 +142,12 @@ def test_add_clicked_clears_search_and_resets_quantity(qapp: QApplication, tmp_p
     repo = _repository(tmp_path)
     repo.add(_unit(sku="BOX-1"))
     panel = ProductQuickAddPanel(repository=repo)
-    panel._search_edit.setText("BOX-1")
+    panel._search_combo.setCurrentText("BOX-1")
     panel._quantity_spin.setValue(5)
 
     panel._on_add_clicked()
 
-    assert panel._search_edit.text() == ""
+    assert panel._search_combo.currentText() == ""
     assert panel._quantity_spin.value() == 1
 
 
@@ -132,7 +165,7 @@ def test_add_clicked_without_resolved_unit_does_nothing(qapp: QApplication, tmp_
 def test_no_repository_disables_search_and_create(qapp: QApplication) -> None:
     panel = ProductQuickAddPanel(repository=None)
 
-    assert not panel._search_edit.isEnabled()
+    assert not panel._search_combo.isEnabled()
     assert not panel._create_sku_button.isEnabled()
 
 
@@ -144,8 +177,8 @@ def test_set_repository_refreshes_catalog(qapp: QApplication, tmp_path: Path) ->
     repo.add(_unit(sku="BOX-1"))
     panel.refresh_catalog()
 
-    assert panel._search_edit.isEnabled()
-    panel._search_edit.setText("BOX-1")
+    assert panel._search_combo.isEnabled()
+    panel._search_combo.setCurrentText("BOX-1")
     assert panel._resolved_unit is not None
 
 
@@ -163,7 +196,7 @@ def test_create_new_sku_adds_to_catalog_and_selects_it(
     panel._on_create_new_sku()
 
     assert repo.get_by_sku("NEW-1") is not None
-    assert panel._search_edit.text() == "NEW-1 — Producto nuevo"
+    assert panel._search_combo.currentText() == "NEW-1 — Producto nuevo"
     assert panel._resolved_unit is not None
     assert panel._resolved_unit.sku == "NEW-1"
 
@@ -180,7 +213,7 @@ def test_create_new_sku_cancelled_adds_nothing(
     panel._on_create_new_sku()
 
     assert repo.get_by_sku("NEW-1") is None
-    assert panel._search_edit.text() == ""
+    assert panel._search_combo.currentText() == ""
 
 
 def test_catalog_technical_fields_are_preserved_on_the_resolved_unit(
@@ -190,7 +223,7 @@ def test_catalog_technical_fields_are_preserved_on_the_resolved_unit(
     repo.add(_unit(sku="BOX-1", fragile=True, max_stack_count=2))
     panel = ProductQuickAddPanel(repository=repo)
 
-    panel._search_edit.setText("BOX-1")
+    panel._search_combo.setCurrentText("BOX-1")
 
     assert panel._resolved_unit is not None
     assert panel._resolved_unit.fragile is True

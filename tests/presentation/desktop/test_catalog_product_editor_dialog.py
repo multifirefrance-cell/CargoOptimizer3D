@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from cargo_optimizer.domain.dimensions import Dimensions3D
 from cargo_optimizer.domain.enums import ExtinguisherAgent, PackageType
 from cargo_optimizer.domain.load_unit import LoadUnit
+from cargo_optimizer.infrastructure.database.engine import DatabaseManager
+from cargo_optimizer.infrastructure.database.paths import get_user_database_path
+from cargo_optimizer.infrastructure.database.repositories import ProductCatalogRepository
 from cargo_optimizer.presentation.desktop.dialogs.catalog_product_editor_dialog import (
     CatalogProductEditorDialog,
 )
@@ -118,3 +123,63 @@ def test_package_type_individual_forces_units_per_package_one(qapp: QApplication
     unit = dialog._build_load_unit()
 
     assert unit.units_per_package == 1
+
+
+def test_build_load_unit_package_type_is_a_real_enum_instance(qapp: QApplication) -> None:
+    # Regresión: `QComboBox.currentData()` pasa por `QVariant`, y un
+    # `StrEnum` (subclase de `str`) puede volver como un `str` plano en
+    # vez del enum original — comparar por igualdad (`== PackageType.X`)
+    # no lo detecta, porque un `str` con el mismo valor sigue comparando
+    # igual. Solo `isinstance`/`type()` expone el problema, y solo se
+    # nota de verdad al pasar el `LoadUnit` a
+    # `ProductCatalogRepository.add()`, que lanza `AttributeError` al
+    # leer `.value` de un `str` plano (bug real encontrado al crear un
+    # producto nuevo desde `ProductQuickAddPanel`).
+    dialog = CatalogProductEditorDialog(None)
+    dialog._sku_edit.setText("BOX-1")
+    dialog._name_edit.setText("Caja")
+
+    unit = dialog._build_load_unit()
+
+    assert isinstance(unit.package_type, PackageType)
+    assert type(unit.package_type) is PackageType
+
+
+def test_build_load_unit_extinguisher_agent_is_a_real_enum_instance(qapp: QApplication) -> None:
+    dialog = CatalogProductEditorDialog(None)
+    dialog._sku_edit.setText("EXT-1")
+    dialog._name_edit.setText("Extintor")
+    dialog._is_extinguisher_check.setChecked(True)
+    index = dialog._extinguisher_agent_combo.findData(ExtinguisherAgent.CO2)
+    dialog._extinguisher_agent_combo.setCurrentIndex(index)
+
+    unit = dialog._build_load_unit()
+
+    assert isinstance(unit.extinguisher_agent, ExtinguisherAgent)
+    assert type(unit.extinguisher_agent) is ExtinguisherAgent
+
+
+def test_build_load_unit_can_be_added_to_a_real_sqlite_repository(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    # Regresión de extremo a extremo: antes de la corrección,
+    # `ProductCatalogRepository.add()` lanzaba `AttributeError: 'str'
+    # object has no attribute 'value'` al intentar leer
+    # `load_unit.package_type.value` sobre el `str` plano que devolvía
+    # `QComboBox.currentData()` — el usuario podía rellenar "Crear nuevo
+    # SKU…", pulsar Aceptar, y el producto nunca se guardaba en el
+    # catálogo, sin ningún error visible (`_on_create_new_sku` solo
+    # capturaba `RepositoryError`, no `AttributeError`).
+    manager = DatabaseManager(get_user_database_path(base_dir=tmp_path))
+    manager.initialize()
+    repo = ProductCatalogRepository(manager)
+
+    dialog = CatalogProductEditorDialog(None)
+    dialog._sku_edit.setText("NEW-SKU-1")
+    dialog._name_edit.setText("Producto nuevo")
+
+    unit = dialog._build_load_unit()
+    added = repo.add(unit)
+
+    assert repo.get_by_sku("NEW-SKU-1") is not None
+    assert added.sku == "NEW-SKU-1"

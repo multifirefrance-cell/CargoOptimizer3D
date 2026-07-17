@@ -35,9 +35,10 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QApplication, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from cargo_optimizer.domain.load_unit import LoadUnit
+from cargo_optimizer.domain.loading_space import LoadingSpace
 from cargo_optimizer.domain.packing_result import PackingResult
 from cargo_optimizer.presentation.desktop.viewer.constants import THEME_DARK, THEME_LIGHT
-from cargo_optimizer.presentation.desktop.viewer.models import PlacementVisualModel
+from cargo_optimizer.presentation.desktop.viewer.models import PlacementVisualModel, SceneModel
 from cargo_optimizer.presentation.desktop.viewer.scene_builder import SceneBuilder
 from cargo_optimizer.presentation.desktop.viewer.scene_controller import SceneController
 
@@ -164,6 +165,19 @@ class Packing3DViewer(QWidget):
             return
         scene = SceneBuilder().build(result, load_units_by_id)
         self._controller.load_scene(scene)
+
+    def display_empty_space(self, loading_space: LoadingSpace) -> None:
+        """Muestra solo el contenedor vacío (sin cajas) — antes de la primera optimización.
+
+        Reutiliza `SceneController._build_container` tal cual (vía
+        `load_scene`, con `placement_visuals=()`): no reimplementa el
+        dibujado del contenedor ni añade un modo nuevo al controlador.
+        Nunca ejecuta `PackingEngine` ni construye un `PackingResult` —
+        `SceneModel` solo necesita el `LoadingSpace` ya conocido.
+        """
+        if self._controller is None:
+            return
+        self._controller.load_scene(SceneModel(loading_space=loading_space, placement_visuals=()))
 
     def clear_scene(self) -> None:
         if self._controller is not None:

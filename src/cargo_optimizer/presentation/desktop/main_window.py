@@ -27,23 +27,25 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
-from PySide6.QtCore import QByteArray, QSize, Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QDockWidget,
     QFileDialog,
+    QHBoxLayout,
     QInputDialog,
     QLabel,
     QMainWindow,
     QMenu,
     QMessageBox,
     QProgressBar,
-    QSplitter,
     QStatusBar,
     QTabWidget,
     QToolBar,
+    QVBoxLayout,
+    QWidget,
 )
 
 from cargo_optimizer import __version__
@@ -127,9 +129,15 @@ from cargo_optimizer.presentation.desktop.panels.selection_details_panel import 
     SelectionDetailsPanel,
 )
 from cargo_optimizer.presentation.desktop.panels.unpacked_table_panel import UnpackedTablePanel
+from cargo_optimizer.presentation.desktop.panels.viewer_stats_header import ViewerStatsHeader
 from cargo_optimizer.presentation.desktop.panels.warnings_panel import WarningsPanel
 from cargo_optimizer.presentation.desktop.settings import AppSettings
-from cargo_optimizer.presentation.desktop.style import THEME_DARK, THEME_LIGHT, apply_theme
+from cargo_optimizer.presentation.desktop.style import (
+    SPACING_SM,
+    THEME_DARK,
+    THEME_LIGHT,
+    apply_theme,
+)
 from cargo_optimizer.presentation.desktop.viewer.widget import Packing3DViewer
 from cargo_optimizer.presentation.desktop.workers.multi_space_optimization_worker import (
     MultiSpaceOptimizationWorker,
@@ -138,16 +146,11 @@ from cargo_optimizer.presentation.desktop.workers.optimization_worker import Opt
 
 _NOT_IMPLEMENTED_MESSAGE_MS = 4000
 _STATUS_MESSAGE_MS = 4000
-_SPLITTER_MAIN = "main"
-_SPLITTER_WORK_AREA = "workArea"
-_SPLITTER_LEFT_WORK = "leftWork"
-# El visor 3D ocupa ~70% del área de trabajo por defecto (rediseño UX:
-# "la vista 3D pasa a ser el protagonista absoluto").
+# El visor 3D ocupa ~70% del área de trabajo (rediseño UX: "la vista 3D
+# pasa a ser el protagonista absoluto") — factores de estiramiento de un
+# `QHBoxLayout` de celdas fijas, nunca tamaños de un `QSplitter`.
 _WORK_AREA_LEFT_STRETCH = 3
 _WORK_AREA_VIEWER_STRETCH = 7
-_WORK_AREA_VIEWER_RATIO = _WORK_AREA_VIEWER_STRETCH / (
-    _WORK_AREA_LEFT_STRETCH + _WORK_AREA_VIEWER_STRETCH
-)
 _HEADER_PRODUCT_TABLE = "productTable"
 _ENGINE_LABEL = f"Motor: {GreedyExtremePointStrategy.name}"
 
@@ -247,6 +250,7 @@ class MainWindow(QMainWindow):
         self.log_panel = LogPanel(self)
         self.multi_space_results_panel = MultiSpaceResultsPanel(self)
         self.viewer_widget = Packing3DViewer(self)
+        self.viewer_stats_header = ViewerStatsHeader(self)
         self.selection_details_panel = SelectionDetailsPanel(self)
 
         self.viewer_widget.placement_selected.connect(self._on_placement_selected)
@@ -284,27 +288,39 @@ class MainWindow(QMainWindow):
         self.selection_details_dock.setVisible(False)
 
     def _build_central_layout(self) -> None:
-        self.left_work_splitter = QSplitter(Qt.Orientation.Vertical, self)
-        self.left_work_splitter.setObjectName(_SPLITTER_LEFT_WORK)
-        self.left_work_splitter.addWidget(self.loading_space_summary_panel)
-        self.left_work_splitter.addWidget(self.product_table_panel)
-        self.left_work_splitter.setStretchFactor(1, 1)
+        # Todo el workspace es de celdas fijas, sin ningún separador
+        # arrastrable (ni aquí, ni entre columna izquierda/visor, ni entre
+        # área de trabajo/pestañas de resultados): el usuario nunca puede
+        # reordenar el diseño de la interfaz, solo usarla — "Espacio de
+        # carga" ocupa su altura natural y "Agregar productos"/"Lista de
+        # carga" se reparten el resto.
+        self.left_work_container = QWidget(self)
+        left_work_layout = QVBoxLayout(self.left_work_container)
+        left_work_layout.setContentsMargins(0, 0, 0, 0)
+        left_work_layout.setSpacing(0)
+        left_work_layout.addWidget(self.loading_space_summary_panel, 0)
+        left_work_layout.addWidget(self.product_table_panel, 1)
 
-        self.work_area_splitter = QSplitter(Qt.Orientation.Horizontal, self)
-        self.work_area_splitter.setObjectName(_SPLITTER_WORK_AREA)
-        self.work_area_splitter.addWidget(self.left_work_splitter)
-        self.work_area_splitter.addWidget(self.viewer_widget)
-        # El visor 3D es el protagonista de la interfaz (rediseño UX): al
-        # redimensionar la ventana o al usar "Restaurar diseño de
-        # paneles" (`_on_reset_layout`), el visor recibe ~70% del espacio
-        # nuevo/recalculado, nunca 50/50. El reparto exacto en el primer
-        # arranque depende además del tamaño preferido de los paneles
-        # vecinos (`QSplitter` da prioridad al `sizeHint` de cada panel
-        # cuando hay espacio de sobra) — no es 100% determinista solo con
-        # el factor de stretch, pero queda documentado y verificado en
-        # `docs/Roadmap.md` como limitación conocida de esta fase.
-        self.work_area_splitter.setStretchFactor(0, _WORK_AREA_LEFT_STRETCH)
-        self.work_area_splitter.setStretchFactor(1, _WORK_AREA_VIEWER_STRETCH)
+        viewer_container = QWidget(self)
+        viewer_layout = QVBoxLayout(viewer_container)
+        viewer_layout.setContentsMargins(0, 0, 0, 0)
+        viewer_layout.setSpacing(SPACING_SM)
+        viewer_layout.addWidget(self.viewer_stats_header)
+        viewer_layout.addWidget(self.viewer_widget, 1)
+
+        # Celdas fijas también aquí: sin separador arrastrable entre la
+        # columna izquierda y el visor 3D. El visor sigue siendo el
+        # protagonista (~70% del ancho, `_WORK_AREA_VIEWER_STRETCH` vs.
+        # `_WORK_AREA_LEFT_STRETCH`), pero como factor de estiramiento de
+        # un `QHBoxLayout`, no como tamaño de un `QSplitter` — nunca
+        # depende del `sizeHint()` de cada panel ni de una repartición
+        # inicial que el usuario después podría desordenar arrastrando.
+        self.work_area_container = QWidget(self)
+        work_area_layout = QHBoxLayout(self.work_area_container)
+        work_area_layout.setContentsMargins(0, 0, 0, 0)
+        work_area_layout.setSpacing(SPACING_SM)
+        work_area_layout.addWidget(self.left_work_container, _WORK_AREA_LEFT_STRETCH)
+        work_area_layout.addWidget(viewer_container, _WORK_AREA_VIEWER_STRETCH)
 
         self.results_tabs = QTabWidget(self)
         self.results_tabs.setObjectName("resultsTabs")
@@ -314,13 +330,14 @@ class MainWindow(QMainWindow):
         self.results_tabs.addTab(self.log_panel, "Registro")
         self.results_tabs.addTab(self.multi_space_results_panel, "Multi-espacio")
 
-        self.main_splitter = QSplitter(Qt.Orientation.Vertical, self)
-        self.main_splitter.setObjectName(_SPLITTER_MAIN)
-        self.main_splitter.addWidget(self.work_area_splitter)
-        self.main_splitter.addWidget(self.results_tabs)
-        self.main_splitter.setStretchFactor(0, 1)
+        central_container = QWidget(self)
+        central_layout = QVBoxLayout(central_container)
+        central_layout.setContentsMargins(SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM)
+        central_layout.setSpacing(SPACING_SM)
+        central_layout.addWidget(self.work_area_container, 1)
+        central_layout.addWidget(self.results_tabs, 0)
 
-        self.setCentralWidget(self.main_splitter)
+        self.setCentralWidget(central_container)
 
     def _on_loading_space_changed(self) -> None:
         self._sync_loading_space_summary()
@@ -330,12 +347,28 @@ class MainWindow(QMainWindow):
         compacta (`loading_space_summary_panel`) — nunca al revés: el formulario completo
         sigue siendo la única fuente de verdad del `LoadingSpace` actual.
         """
+        space = self.loading_space_form_panel.build_loading_space()
         self.loading_space_summary_panel.set_current_profile(
             self.loading_space_form_panel.current_profile_name()
         )
-        self.loading_space_summary_panel.set_summary(
-            self.loading_space_form_panel.build_loading_space()
-        )
+        self.loading_space_summary_panel.set_summary(space)
+        self.viewer_stats_header.set_space(space)
+        if self._last_result is None:
+            self._show_empty_space_preview(space)
+
+    def _show_empty_space_preview(self, space: LoadingSpace | None) -> None:
+        """Muestra el contenedor vacío (sin cajas) en el visor, o lo limpia si no hay espacio.
+
+        Reutiliza `Packing3DViewer.display_empty_space` (que a su vez
+        reutiliza `_build_container` tal cual): nunca ejecuta el motor de
+        optimización. Solo debe llamarse cuando no hay un `PackingResult`
+        real mostrado (`self._last_result is None`) — mostrar el
+        contenedor vacío por encima de un resultado real lo borraría.
+        """
+        if space is not None:
+            self.viewer_widget.display_empty_space(space)
+        else:
+            self.viewer_widget.clear_scene()
 
     # ------------------------------------------------------------------
     # Acciones
@@ -494,9 +527,6 @@ class MainWindow(QMainWindow):
         self.action_dark_theme = self._make_action(
             "preferences", "Tema &oscuro", None, lambda: self._set_theme(THEME_DARK)
         )
-        self.action_reset_layout = self._make_action(
-            "open", "&Restaurar diseño de paneles", None, self._on_reset_layout
-        )
 
         self.action_project_properties = self._make_action(
             "save", "&Propiedades del proyecto…", None, self._stub("Propiedades del proyecto")
@@ -613,8 +643,6 @@ class MainWindow(QMainWindow):
         view_menu.addSeparator()
         view_menu.addAction(self.action_light_theme)
         view_menu.addAction(self.action_dark_theme)
-        view_menu.addSeparator()
-        view_menu.addAction(self.action_reset_layout)
 
         tools_menu = menu_bar.addMenu("&Herramientas")
         tools_menu.addAction(self.action_preferences)
@@ -697,10 +725,11 @@ class MainWindow(QMainWindow):
             model = self.product_table_panel.model
             model.remove_rows_at(list(range(model.rowCount())))
             self.results_panel.clear()
+            self.viewer_stats_header.clear_result_stats()
             self.unpacked_table_panel.model.clear()
             self.warnings_panel.clear()
             self.multi_space_results_panel.clear()
-            self.viewer_widget.clear_scene()
+            self._show_empty_space_preview(self.loading_space_form_panel.build_loading_space())
             self.selection_details_panel.clear()
         finally:
             self._suspend_change_tracking = False
@@ -763,9 +792,10 @@ class MainWindow(QMainWindow):
                 self.viewer_widget.display_result(self._last_result, self._last_load_units_by_id)
             else:
                 self.results_panel.clear()
+                self.viewer_stats_header.clear_result_stats()
                 self.unpacked_table_panel.model.clear()
                 self.warnings_panel.clear()
-                self.viewer_widget.clear_scene()
+                self._show_empty_space_preview(loaded.project.loading_space)
             self.results_panel.set_stale(self._result_stale)
 
             ui_state = loaded.presentation_state.get("ui_state")
@@ -1624,17 +1654,13 @@ class MainWindow(QMainWindow):
     def _on_show_results(self) -> None:
         self.results_tabs.setCurrentWidget(self.results_panel)
         self.results_panel.setFocus()
-        sizes = self.main_splitter.sizes()
-        if len(sizes) == 2 and sizes[1] < 80:
-            total = sum(sizes)
-            self.main_splitter.setSizes([total - 200, 200])
 
     def _on_toggle_3d_focus(self, checked: bool) -> None:
-        total = sum(self.work_area_splitter.sizes()) or 1
-        if checked:
-            self.work_area_splitter.setSizes([0, total])
-        else:
-            self.work_area_splitter.setSizes([total // 2, total - total // 2])
+        # Oculta la columna izquierda por completo en vez de mover un
+        # separador: sin `QSplitter` en el workspace (celdas fijas, sin
+        # barras móviles), este es el único mecanismo que le da al visor
+        # 3D el 100% del ancho bajo demanda.
+        self.left_work_container.setVisible(not checked)
 
     def _on_reset_camera(self) -> None:
         self.viewer_widget.reset_camera()
@@ -1676,16 +1702,6 @@ class MainWindow(QMainWindow):
             apply_theme(app, theme)
         self.viewer_widget.set_dark_theme(theme == THEME_DARK)
         self._settings.set_theme(theme)
-
-    def _on_reset_layout(self) -> None:
-        total_width = self.work_area_splitter.width() or 1200
-        viewer_width = round(total_width * _WORK_AREA_VIEWER_RATIO)
-        self.work_area_splitter.setSizes([total_width - viewer_width, viewer_width])
-        total_height = self.left_work_splitter.height() or 600
-        self.left_work_splitter.setSizes([total_height // 3, total_height - total_height // 3])
-        main_height = self.main_splitter.height() or 800
-        self.main_splitter.setSizes([main_height - 160, 160])
-        self.statusBar().showMessage("Diseño de paneles restaurado.", _STATUS_MESSAGE_MS)
 
     def _on_about(self) -> None:
         QMessageBox.about(
@@ -1751,6 +1767,7 @@ class MainWindow(QMainWindow):
         self._set_state(STATE_PREPARING)
         self._set_running_controls_enabled(False)
         self.results_panel.clear()
+        self.viewer_stats_header.clear_result_stats()
         self.unpacked_table_panel.model.clear()
         self.warnings_panel.clear()
         # Un resultado multi-espacio de una ejecución anterior queda
@@ -1761,7 +1778,7 @@ class MainWindow(QMainWindow):
         self._last_multi_space_result = None
         self._last_multi_space_load_units_by_id = {}
         self.multi_space_results_panel.clear()
-        self.viewer_widget.clear_scene()
+        self._show_empty_space_preview(request.loading_space)
         self.selection_details_panel.clear()
         self._progress_bar.setRange(0, 1)
         self._progress_bar.setValue(0)
@@ -1965,16 +1982,22 @@ class MainWindow(QMainWindow):
             multi_worker.deleteLater()
 
     def _populate_results(self, result: PackingResult) -> None:
+        volume_m3 = result.used_volume_cm3 / 1_000_000.0
         self.results_panel.set_results(
             requested_count=result.requested_count,
             packed_count=result.packed_count,
             pending_count=result.unpacked_count,
             weight_kg=result.used_weight_kg,
-            volume_m3=result.used_volume_cm3 / 1_000_000.0,
+            volume_m3=volume_m3,
             utilization_percent=result.volume_utilization_percent,
             elapsed_seconds=result.execution_time_seconds,
             status="Cancelado" if self._cancel_requested else "Finalizado",
             warnings_count=len(result.warnings),
+        )
+        self.viewer_stats_header.set_result_stats(
+            volume_m3=volume_m3,
+            weight_kg=result.used_weight_kg,
+            utilization_percent=result.volume_utilization_percent,
         )
         self.unpacked_table_panel.model.set_unpacked_units(
             result.unpacked_units, self._last_load_units_by_id
@@ -2028,9 +2051,6 @@ class MainWindow(QMainWindow):
 
     def _restore_ui_state(self) -> None:
         self._settings.restore_main_window_state(self)
-        self._settings.restore_splitter_state(_SPLITTER_MAIN, self.main_splitter)
-        self._settings.restore_splitter_state(_SPLITTER_WORK_AREA, self.work_area_splitter)
-        self._settings.restore_splitter_state(_SPLITTER_LEFT_WORK, self.left_work_splitter)
         self._settings.restore_header_state(
             _HEADER_PRODUCT_TABLE, self.product_table_panel.table_view.horizontalHeader()
         )
@@ -2040,9 +2060,6 @@ class MainWindow(QMainWindow):
 
     def _save_ui_state(self) -> None:
         self._settings.save_main_window_state(self)
-        self._settings.save_splitter_state(_SPLITTER_MAIN, self.main_splitter)
-        self._settings.save_splitter_state(_SPLITTER_WORK_AREA, self.work_area_splitter)
-        self._settings.save_splitter_state(_SPLITTER_LEFT_WORK, self.left_work_splitter)
         self._settings.save_header_state(
             _HEADER_PRODUCT_TABLE, self.product_table_panel.table_view.horizontalHeader()
         )
@@ -2117,49 +2134,25 @@ class MainWindow(QMainWindow):
         return True
 
     def _collect_ui_state(self) -> dict[str, Any]:
-        return {
-            "theme": self._settings.theme(),
-            "splitters": {
-                _SPLITTER_MAIN: self._encode_bytes(self.main_splitter.saveState()),
-                _SPLITTER_WORK_AREA: self._encode_bytes(self.work_area_splitter.saveState()),
-                _SPLITTER_LEFT_WORK: self._encode_bytes(self.left_work_splitter.saveState()),
-            },
-        }
+        return {"theme": self._settings.theme()}
 
     def _apply_ui_state(self, ui_state: Mapping[str, Any]) -> None:
         # Nota: versiones anteriores guardaban además `docks_visible`
-        # (visibilidad de "projectTreeDock"/"selectionDetailsDock"). Un
-        # `.cargo3d` antiguo con esa clave se sigue abriendo sin problema
-        # — simplemente se ignora — porque `presentation_state` siempre
-        # ha sido un `dict` opaco (ver `docs/ProjectFiles.md`), nunca un
-        # esquema validado. El panel de detalles de selección ya no es
-        # una preferencia persistente: su visibilidad la decide siempre
+        # (visibilidad de "projectTreeDock"/"selectionDetailsDock") y un
+        # estado de `splitters` (`leftWork`/`workArea`/`main`, de cuando el
+        # workspace todavía usaba `QSplitter` con separadores arrastrables
+        # — eliminados por completo: celdas fijas en todo el workspace, ver
+        # rediseño UX "workspace operativo"). Un `.cargo3d` antiguo con
+        # esas claves se sigue abriendo sin problema — simplemente se
+        # ignoran— porque `presentation_state` siempre ha sido un `dict`
+        # opaco (ver `docs/ProjectFiles.md`), nunca un esquema validado. El
+        # panel de detalles de selección tampoco es una preferencia
+        # persistente: su visibilidad la decide siempre
         # `_on_placement_selected`, según haya o no una caja seleccionada
-        # en el visor 3D en cada momento (rediseño UX "workspace
-        # operativo").
+        # en el visor 3D en cada momento.
         theme = ui_state.get("theme")
         if isinstance(theme, str) and theme in (THEME_LIGHT, THEME_DARK):
             self._set_theme(theme)
-
-        splitters = ui_state.get("splitters")
-        if isinstance(splitters, dict):
-            self._restore_splitter_from_state(self.main_splitter, splitters.get(_SPLITTER_MAIN))
-            self._restore_splitter_from_state(
-                self.work_area_splitter, splitters.get(_SPLITTER_WORK_AREA)
-            )
-            self._restore_splitter_from_state(
-                self.left_work_splitter, splitters.get(_SPLITTER_LEFT_WORK)
-            )
-
-    @staticmethod
-    def _encode_bytes(value: QByteArray) -> str:
-        return bytes(value.toBase64().data()).decode("ascii")
-
-    @staticmethod
-    def _restore_splitter_from_state(splitter: QSplitter, encoded: object) -> None:
-        if not isinstance(encoded, str) or not encoded:
-            return
-        splitter.restoreState(QByteArray.fromBase64(encoded.encode("ascii")))
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 (nombre impuesto por Qt)
         if not self._confirm_discard_unsaved_changes():

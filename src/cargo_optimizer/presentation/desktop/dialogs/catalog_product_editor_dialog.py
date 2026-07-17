@@ -232,6 +232,14 @@ class CatalogProductEditorDialog(QDialog):
             code for code, check in self._orientation_checks.items() if check.isChecked()
         )
         is_extinguisher = self._is_extinguisher_check.isChecked()
+        # `currentData()` pasa por `QVariant`: un `StrEnum` (subclase de
+        # `str`) vuelve como `str` plano, no como el enum original — se
+        # reconstruye explícitamente para no guardar strings sueltos en un
+        # campo tipado como enum (mismo hallazgo que
+        # `loading_space_form_panel.py::build_loading_space`). Sin esto,
+        # `ProductCatalogRepository.add()`/`update()` lanzan
+        # `AttributeError` al intentar leer `.value` de un `str` plano.
+        package_type = PackageType(self._package_type_combo.currentData())
         return LoadUnit(
             id=self._editing_id if self._editing_id is not None else uuid4(),
             sku=self._sku_edit.text().strip(),
@@ -240,10 +248,10 @@ class CatalogProductEditorDialog(QDialog):
                 self._length_spin.value(), self._width_spin.value(), self._height_spin.value()
             ),
             weight_kg=self._weight_spin.value(),
-            package_type=self._package_type_combo.currentData(),
+            package_type=package_type,
             units_per_package=(
                 1
-                if self._package_type_combo.currentData() == PackageType.INDIVIDUAL
+                if package_type == PackageType.INDIVIDUAL
                 else self._units_per_package_spin.value()
             ),
             max_stack_count=self._max_stack_spin.value(),
@@ -256,7 +264,7 @@ class CatalogProductEditorDialog(QDialog):
             fragile=self._fragile_check.isChecked(),
             is_extinguisher=is_extinguisher,
             extinguisher_agent=(
-                self._extinguisher_agent_combo.currentData()
+                ExtinguisherAgent(self._extinguisher_agent_combo.currentData())
                 if is_extinguisher
                 else ExtinguisherAgent.NOT_APPLICABLE
             ),

@@ -68,14 +68,21 @@ class ResultsPanel(QWidget):
         weight_tile, self._weight_label = _tile("Peso")
         time_tile, self._time_label = _tile("Tiempo")
 
+        # Una sola fila de 6 tarjetas (antes 2x3): la disposición en dos
+        # filas casi duplicaba la altura mínima de este panel, que vive en
+        # `main_splitter` compitiendo por espacio con el área de trabajo
+        # (espacio de carga + productos + visor 3D) — con stretch factor 0
+        # Qt protege su `sizeHint()` al repartir un déficit, así que un
+        # panel de resultados innecesariamente alto termina exprimiendo el
+        # resto de la ventana por debajo de sus propios mínimos, causando
+        # solapamiento visual en los paneles vecinos, no solo un problema
+        # estético aquí.
         grid = QGridLayout()
         grid.setSpacing(SPACING_SM)
-        grid.addWidget(packed_tile, 0, 0)
-        grid.addWidget(pending_tile, 0, 1)
-        grid.addWidget(utilization_tile, 0, 2)
-        grid.addWidget(volume_tile, 1, 0)
-        grid.addWidget(weight_tile, 1, 1)
-        grid.addWidget(time_tile, 1, 2)
+        for column, tile in enumerate(
+            (utilization_tile, weight_tile, volume_tile, packed_tile, pending_tile, time_tile)
+        ):
+            grid.addWidget(tile, 0, column)
 
         self._requested_label = QLabel(_EMPTY, self)
         self._status_label = QLabel(_EMPTY, self)

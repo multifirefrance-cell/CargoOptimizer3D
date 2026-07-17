@@ -28,6 +28,16 @@ en `domain`/`geometry`/`rules`/`optimization`/`application`/
   de catálogo solo cuando el producto todavía no existe.
 - Columna "Peso total (kg)" en `ProductTableModel`
   (`quantity * weight_kg`).
+- `ViewerStatsHeader`: barra encima del visor 3D con el nombre y
+  dimensiones del espacio de carga elegido, y el volumen/peso/
+  utilización del último resultado — llenaba un hueco real del encargo
+  original de esta fase que no se había implementado.
+- `Packing3DViewer.display_empty_space(loading_space)`: muestra el
+  contenedor vacío (sin cajas) en el visor mientras no hay un resultado
+  todavía — reutiliza `SceneController._build_container` tal cual (vía
+  `load_scene` con `placement_visuals=()`), nunca ejecuta el motor de
+  optimización. Antes, el visor quedaba en blanco hasta la primera
+  optimización.
 
 ### Changed
 
@@ -43,6 +53,26 @@ en `domain`/`geometry`/`rules`/`optimization`/`application`/
 - `SelectionDetailsPanel` permanece oculto por defecto y solo aparece
   al seleccionar una caja en el visor 3D (ya no hay una preferencia
   persistida de visibilidad del dock).
+- Todo el workspace pasa a celdas fijas, sin ningún `QSplitter` con
+  separador arrastrable (ni entre "Espacio de carga"/"Lista de carga",
+  ni entre la columna izquierda y el visor 3D, ni entre el área de
+  trabajo y las pestañas de resultados): el usuario nunca puede
+  reordenar el diseño de la interfaz, solo usarla. "Restaurar diseño de
+  paneles" se elimina (ya no hay nada que restaurar). El toggle "Vista
+  3D" (`Ctrl+3`) sigue disponible, ahora ocultando/mostrando la columna
+  izquierda por completo en vez de mover un separador.
+- `ProductQuickAddPanel`: el campo "SKU o Nombre" pasa de un
+  `QLineEdit` con autocompletado a ciegas a un `QComboBox` editable —
+  la flecha del combo muestra de inmediato toda la lista de productos
+  activos del catálogo sin que el usuario tenga que escribir nada;
+  escribir sigue filtrando igual que antes.
+- `MultiSpaceResultsPanel` envuelve su contenido (formulario de 14
+  filas + selector + otro formulario + lista + tabla) en un
+  `QScrollArea`: su altura mínima real (~634 px) forzaba a
+  `QTabWidget.minimumSizeHint()` — el máximo entre todas sus
+  pestañas, aunque solo "Multi-espacio" lo necesitara — a reservar esa
+  altura incluso mostrando "Resumen" (que apenas necesita ~95 px),
+  dejando una franja de espacio sin usar debajo de las tarjetas KPI.
 
 ### Fixed
 
@@ -53,6 +83,42 @@ en `domain`/`geometry`/`rules`/`optimization`/`application`/
   y `profile_selected` se emitía de forma espuria al sincronizar el
   panel desde el `LoadingSpaceFormPanel` real. Ahora guarda/restaura el
   valor anterior en vez de fijar `False`.
+- `ResultsPanel` (tarjetas KPI) usaba una cuadrícula de 2x3, con una
+  altura mínima que superaba el presupuesto reservado en
+  `MainWindow._apply_default_layout_sizes` (160 px). Al forzar
+  `QSplitter` a respetar ese mínimo, exprimía el resto de la ventana
+  (espacio de carga, alta rápida de producto, lista de carga) por
+  debajo de sus propios mínimos, provocando que las filas de
+  `ProductQuickAddPanel` se solaparan visualmente en vez de
+  simplemente recortarse — un defecto real, no solo estético. Ahora es
+  una sola fila de 6 tarjetas, con una altura mínima muy por debajo del
+  presupuesto disponible. Además, `MainWindow` fija tamaños iniciales
+  explícitos para los tres `QSplitter` del workspace nada más
+  construirlos (`_apply_default_layout_sizes`, antes solo se llamaba
+  desde "Restaurar diseño de paneles") y `left_work_splitter` ya no
+  permite colapsar un panel a 0 px arrastrando el separador
+  (`setChildrenCollapsible(False)`). Todos los `QSplitter` del workspace
+  se eliminaron por completo poco después (ver "Changed", más arriba).
+- `CatalogProductEditorDialog._build_load_unit()` pasaba directamente
+  `self._package_type_combo.currentData()`/
+  `self._extinguisher_agent_combo.currentData()` al `LoadUnit`
+  construido. `QComboBox.currentData()` pasa por `QVariant`, y un
+  `StrEnum` (`PackageType`/`ExtinguisherAgent`, subclases de `str`)
+  puede volver como un `str` plano en vez del enum original — un `str`
+  compara igual que el enum (`"individual" == PackageType.INDIVIDUAL`
+  es `True`), así que ninguna prueba existente lo detectaba. El
+  problema solo se manifestaba al pasar ese `LoadUnit` a
+  `ProductCatalogRepository.add()`/`update()`, que leen
+  `.package_type.value` asumiendo un enum real: con un `str` plano
+  lanzaban `AttributeError`, no capturado por el `except
+  RepositoryError` de los llamadores (`ProductQuickAddPanel._on_create_new_sku`,
+  `ProductCatalogDialog._on_add`/`._on_edit`) — el usuario podía crear
+  un producto nuevo, pulsar "Aceptar", y el producto nunca se guardaba
+  en el catálogo, sin ningún error visible. Mismo hallazgo ya corregido
+  antes en `LoadingSpaceFormPanel.build_loading_space()`
+  (`LoadingSpaceCategory`/`DoorPosition`), nunca aplicado aquí. Ahora
+  `_build_load_unit()` reconstruye ambos valores explícitamente
+  (`PackageType(...)`/`ExtinguisherAgent(...)`).
 
 ## [1.0.0b1] - 2026-07-16
 
