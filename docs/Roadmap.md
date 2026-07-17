@@ -232,3 +232,35 @@ Peso total) y derecha (visor 3D protagonista). El panel "Guía"
 falta explicar el flujo con un panel aparte. Solo toca
 `presentation/desktop`; `domain`/`geometry`/`rules`/`optimization`/
 `application`/`infrastructure` sin ningún cambio.
+
+Un encargo posterior de diseño ("celdas fijas, sin barras móviles")
+eliminó los tres `QSplitter` restantes del workspace (todo pasa a
+`QVBoxLayout`/`QHBoxLayout` de proporciones fijas), rediseñó el
+buscador de "Agregar productos a la carga" como un `QComboBox`
+editable (la lista completa del catálogo se ve con un clic, sin
+escribir nada), corrigió que `MultiSpaceResultsPanel` inflaba el
+mínimo de todo `results_tabs` (envuelto ahora en `QScrollArea`), y
+corrigió un bug real de pérdida de datos: `CatalogProductEditorDialog`
+leía `QComboBox.currentData()` directamente para
+`package_type`/`extinguisher_agent`, y el redondeo por `QVariant` de
+PySide6 puede devolver un `str` plano en vez del `StrEnum` original —
+`ProductCatalogRepository.add()`/`update()` fallaban con
+`AttributeError` silencioso, así que "Crear nuevo SKU…" parecía
+funcionar pero nunca guardaba el producto. Solo toca
+`presentation/desktop`; sin cambios en las demás capas.
+
+El mismo encargo derivó en una investigación real de rendimiento (un
+usuario reportó que 1300 unidades de una caja pequeña solo cargaban
+148 antes de cancelar): perfilado real confirmó, con un caso concreto
+y evidencia nueva, el mismo diagnóstico ya documentado en las fases
+4.2/OPT-02 (`docs/OptimizerPerformance.md`) — el costo domina en
+comprobaciones O(n) de colisión/soporte sin índice espacial, no en
+`optimization` ni en la interfaz. Por decisión explícita del
+arquitecto del proyecto, la investigación se cerró **sin escribir
+código, sin tocar `domain`/`geometry`/`rules`/`optimization`, y sin
+redactar todavía el ADR del índice espacial** — ver
+`docs/OptimizerPerformance.md`, sección "OPT-03 → OPT-11
+(2026-07-17)", y `docs/ProductBacklog.md`, ítem **OPT-11** (postergado,
+sin ADR). La prioridad vuelve por completo al desarrollo funcional de
+la Beta 1.0; no abrir nuevas investigaciones de rendimiento hasta que
+esa Beta esté funcionalmente terminada.

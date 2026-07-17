@@ -149,7 +149,7 @@ Cada ítem lleva: descripción funcional, problema, beneficios, ficha de gestió
 
 | Prioridad | Valor usuario | Impacto comercial | Esfuerzo | Riesgo técnico | Dependencias | Versión | Estado |
 |---|---|---|---|---|---|---|---|
-| Crítico | Muy alto | Muy alto | Alto | Medio-alto — ya se identificó la solución (índice espacial), el riesgo es de tiempo, no de incertidumbre técnica | Habilita OPT-01 a escala real | 1.0 | **Parcial**: caché de cajas ya conocidas entre `optimization`/`rules` implementada (~15% más rápido, cero cambio de resultado — ver `docs/OptimizerPerformance.md`, sección "Fase OPT-02"); el índice espacial real (el que cambiaría la complejidad, no solo el factor constante) sigue pendiente |
+| Crítico | Muy alto | Muy alto | Alto | Medio-alto — ya se identificó la solución (índice espacial), el riesgo es de tiempo, no de incertidumbre técnica | Habilita OPT-01 a escala real | 1.0 | **Parcial**: caché de cajas ya conocidas entre `optimization`/`rules` implementada (~15% más rápido, cero cambio de resultado — ver `docs/OptimizerPerformance.md`, sección "Fase OPT-02"); el índice espacial real (el que cambiaría la complejidad, no solo el factor constante) sigue pendiente — investigado con evidencia nueva y formalizado como **OPT-11**, postergado sin ADR (ver más abajo) |
 
 **Criterios de aceptación:**
 - El sistema debe optimizar un envío de 500+ bultos en menos de 10 segundos en hardware estándar.
@@ -278,6 +278,96 @@ Empaquetado real de piezas no rectangulares (maquinaria, muebles). Valor medio-a
 **Criterios de aceptación:** El sistema debe impedir colocar dos productos declarados "no adyacentes" en contacto directo.
 
 **Caso de uso:** *Usuarios:* fábrica de alimentos. *Ejemplo:* un producto con olor fuerte no puede quedar junto a uno absorbente, aunque ninguno esté apilado sobre el otro.
+
+---
+
+#### OPT-11 — Índice espacial para colisión/soporte (postergado, sin ADR)
+**Descripción:** eliminar de raíz el cuello de botella real del motor —comprobaciones de
+colisión (`geometry/collision.py::boxes_overlap`) y de soporte
+(`geometry/support.py::horizontal_overlap_area_cm2`,
+`rules/stacking_rules.py::find_direct_supporting_placements`)— mediante
+una estructura de datos espacial (p. ej. una rejilla/hash espacial)
+dentro de `rules`/`geometry` que descarte, antes de comparar
+geometría, los `existing_placements` que no pueden compartir altura ni
+solape horizontal con el candidato evaluado. Es la continuación
+concreta, con evidencia nueva, de la parte de OPT-02 que ya se marcó
+"pendiente" ("el índice espacial real... sigue pendiente" — ver tabla
+de OPT-02, arriba).
+**Problema que resuelve:** con cantidades grandes de bultos pequeños
+que llenan o desbordan el espacio de carga, el tiempo de cálculo deja
+de ser aceptable — no por un límite de volumen o peso, sino porque el
+propio algoritmo se vuelve impracticablemente lento antes de terminar.
+**Beneficio usuario:** poder cargar volúmenes reales grandes (miles de
+bultos) sin que la optimización parezca "colgada".
+**Beneficio comercial:** sin esto, OPT-01 (multi-espacio) y cualquier
+caso de uso con volumen real de cliente mediano/grande quedan, en la
+práctica, inutilizables — mismo argumento ya registrado en OPT-02.
+
+| Prioridad | Valor usuario | Impacto comercial | Esfuerzo | Riesgo técnico | Dependencias | Versión | Estado |
+|---|---|---|---|---|---|---|---|
+| Postergado | Muy alto | Muy alto | Alto | **Alto** — una implementación incorrecta puede introducir un falso negativo de colisión o de soporte, silencioso y grave (una caja "válida" que en realidad se solapa o no está soportada); exige verificación por equivalencia exhaustiva contra el comportamiento actual, no solo pruebas de humo | Profundiza OPT-02 | Sin asignar | **Investigado, sin ADR, sin código** — ver `docs/OptimizerPerformance.md`, sección "OPT-03 → OPT-11 (2026-07-17)", para las métricas completas |
+
+**Hallazgo que motiva este ítem (2026-07-17):** perfilado real
+(`cProfile`) del escenario reportado por el usuario (caja 20×20×50 cm,
+peso 9 kg, contenedor 20', apilamiento hasta 30 niveles), reducido a
+300 unidades (todas caben, sin desbordar) para que el perfilado fuera
+completable en esta sesión:
+
+| función | llamadas | tiempo propio (tottime) |
+|---|---:|---:|
+| `geometry/collision.py::boxes_overlap` | 54 529 308 | 566.588 s |
+| `rules/stacking_rules.py::find_direct_supporting_placements` | 634 806 | 105.133 s |
+| `geometry/support.py::horizontal_overlap_area_cm2` | 35 499 546 | 79.593 s |
+| `geometry/box.py::overlaps` | 54 529 308 | 58.037 s |
+
+Tiempo total instrumentado: **1262.476 s** (~21 min) para solo 300
+instancias, sin desbordar el contenedor — confirma, con datos nuevos,
+el mismo diagnóstico ya documentado en `docs/OptimizerPerformance.md`
+(fases 4.2 y OPT-02): el costo dominante vive en comprobaciones O(n)
+de colisión/soporte contra **todos** los `existing_placements`, y
+crece de forma no lineal a medida que se acumulan más cajas colocadas.
+El caso original reportado (1300 unidades del mismo bulto, solo 148
+colocadas al cancelar tras ~15 s) **no es un bug de la interfaz ni del
+hilo de optimización**: es el mismo crecimiento no lineal, aplicado a
+un escenario donde la mayoría de las 1300 unidades termina sin caber.
+
+**Por qué queda postergado, explícitamente, sin ADR todavía:**
+1. Toca `rules`/`geometry`, las capas más protegidas del proyecto
+   (`CLAUDE.md`: "Detente únicamente si... debes modificar reglas...
+   debes cambiar semántica geométrica").
+2. El riesgo de un falso negativo de colisión/soporte es real y grave
+   — un resultado "válido" que en la práctica no lo es, en un dominio
+   donde eso significa cargas mal calculadas fuera del software.
+3. `stacking_rules.evaluate_supported_weight` necesita conocer, para
+   cada soporte transitivo, todo lo que descansa sobre él en
+   cualquier parte del layout — filtrar `existing_placements` por
+   proximidad espacial antes de pasarlo a `rules` ya se evaluó y
+   se descartó en la fase 4.2 por producir resultados incorrectos de
+   peso soportado; cualquier índice espacial nuevo debe resolver esto
+   sin romper esa garantía, lo cual no es trivial.
+4. Decisión explícita del arquitecto del proyecto (2026-07-17): cerrar
+   la investigación con la evidencia ya reunida, sin implementar nada
+   todavía y sin redactar el ADR todavía, para volver de lleno al
+   desarrollo funcional de la Beta 1.0.
+
+**Criterios de aceptación (cuando se retome, no antes):**
+- Un ADR explícito que documente la estructura de datos elegida y,
+  sobre todo, cómo preserva la garantía de soporte transitivo completo.
+- Pruebas de equivalencia exhaustivas (mismo patrón que
+  `tests/rules/test_performance_cache_equivalence.py` de OPT-02):
+  mismo `RuleEvaluation`/`PackingResult`, con y sin el índice, sobre
+  varios escenarios de referencia — no solo que "no falle", sino que
+  produzca exactamente el mismo resultado.
+- El sistema debe optimizar un envío de 500+ bultos en menos de 10
+  segundos en hardware estándar (mismo criterio ya fijado en OPT-02).
+
+**Caso de uso:** *Usuarios:* cualquier operador que cargue una
+cantidad grande de bultos pequeños relativos al espacio de carga.
+*Ejemplo:* 1300 cajas de 20×20×50 cm en un contenedor de 20 pies — hoy
+el cálculo no termina en un tiempo práctico; con el índice espacial,
+debería completarse en segundos, con exactamente el mismo resultado
+que produce hoy el algoritmo (mismas cajas colocadas, mismas
+rechazadas, mismas razones).
 
 ---
 

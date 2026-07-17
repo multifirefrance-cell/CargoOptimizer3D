@@ -158,6 +158,69 @@ aborde un índice espacial dentro de `rules`/`geometry` si el
 rendimiento a esa escala sigue siendo prioritario — ver
 `docs/Roadmap.md`.
 
+---
+
+## OPT-03 → OPT-11 (2026-07-17): confirmación con un caso real, investigación cerrada sin código
+
+Un usuario reportó, en la interfaz real, un caso concreto: al pedir
+1300 unidades de una caja de 20×20×50 cm (9 kg, apilamiento hasta 30
+niveles) en un contenedor de 20 pies, solo se cargaron 148 antes de
+que el usuario cancelara la ejecución tras ~15 s, con el 91.1% del
+volumen y el 95.3% del peso todavía disponibles. Dos preguntas
+distintas, mismo origen:
+
+1. **"¿Por qué solo 148 de 1300?"** — no es un límite de volumen/peso
+   (solo 8.9% de volumen y 4.7% de peso usados); es que el algoritmo
+   agota su capacidad práctica de encontrar más colocaciones válidas en
+   un tiempo razonable antes de completar el intento.
+2. **"¿Por qué 'Ejecutar optimización' parece no hacer nada y solo
+   aparece un resultado al cancelar?"** — el cálculo sí está
+   corriendo (la barra de progreso avanza), pero para una cantidad tan
+   grande, completar naturalmente el intento sobre todas las unidades
+   que terminan sin caber toma mucho más tiempo del que un usuario
+   espera razonablemente. Cancelar es, hoy, la única forma práctica de
+   obtener un resultado utilizable en poco tiempo para este caso.
+
+**Perfilado real (`cProfile`) del mismo escenario, reducido a 300
+unidades** (todas caben sin desbordar, precisamente para poder medir
+algo completable en una sesión):
+
+```
+2 184 133 573 llamadas de función en 1262.476 s (tiempo instrumentado)
+
+ncalls      tottime  función
+54 529 308   566.588  geometry/collision.py:boxes_overlap
+   634 806   105.133  rules/stacking_rules.py:find_direct_supporting_placements
+35 499 546    79.593  geometry/support.py:horizontal_overlap_area_cm2
+54 529 308    58.037  geometry/box.py:overlaps
+   211 953    38.844  geometry/support.py:support_area_cm2
+```
+
+**~21 minutos para 300 instancias que caben sin problema** (packed=300,
+unpacked=0) — confirma, con datos frescos y un escenario distinto (caja
+pequeña, apilamiento profundo hasta 30 niveles, muchas colocaciones
+acumuladas) al de las fases 4.2/OPT-02 anteriores (bodega grande, cajas
+dispersas), el mismo diagnóstico: el costo dominante es la comprobación
+O(n) de colisión/soporte contra **todos** los `existing_placements`,
+y crece de forma no lineal a medida que se acumulan más cajas
+colocadas — no importa si el escenario de referencia es "cajas
+dispersas en una bodega" o "apilamiento denso en un contenedor
+pequeño": el mecanismo de fondo (recorrido O(n) sin índice espacial)
+es el mismo, y ambos lo confirman de forma independiente.
+
+**Decisión explícita del arquitecto del proyecto (2026-07-17):**
+cerrar esta investigación aquí, sin escribir código, sin modificar
+`domain`/`geometry`/`rules`/`optimization`, y sin redactar todavía el
+ADR del índice espacial — la evidencia ya reunida (aquí y en las
+secciones anteriores) es suficiente para tomar la decisión técnica
+cuando se retome. El ítem queda formalizado en `docs/ProductBacklog.md`
+como **OPT-11 — Índice espacial para colisión/soporte (postergado, sin
+ADR)**, con el problema, las métricas, el riesgo de falsos negativos
+de colisión/soporte, y la razón explícita de la postergación. La
+prioridad vuelve por completo al desarrollo funcional de la Beta 1.0;
+no se abrirán nuevas investigaciones de rendimiento hasta que esa Beta
+esté funcionalmente terminada.
+
 ## Metodología
 
 Mismo entorno, mismo escenario (`scripts/benchmark_optimizer.py::build_scenario`)
