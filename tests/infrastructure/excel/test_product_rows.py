@@ -6,7 +6,11 @@ import pytest
 
 from cargo_optimizer.domain.dimensions import Dimensions3D
 from cargo_optimizer.domain.enums import ExtinguisherAgent, OrientationCode, PackageType
-from cargo_optimizer.domain.load_unit import DEFAULT_MAX_STACK_COUNT, LoadUnit
+from cargo_optimizer.domain.load_unit import (
+    DEFAULT_MAX_STACK_COUNT,
+    DEFAULT_ORIENTATION_CODES,
+    LoadUnit,
+)
 from cargo_optimizer.infrastructure.excel.product_rows import (
     PRODUCT_COLUMNS,
     RowConversionError,
@@ -86,6 +90,29 @@ def test_round_trip_of_an_extinguisher() -> None:
     assert rebuilt.allowed_orientation_codes == (OrientationCode.LWH_XYZ,)
 
 
+def test_blank_orientations_cell_means_reduced_default_not_all_six() -> None:
+    """Fase OPT-17: una celda vacía en una importación nueva ya no significa "las 6"."""
+    unit = LoadUnit(
+        sku="SKU-3",
+        name="Caja",
+        dimensions=Dimensions3D(40, 30, 20),
+        weight_kg=5.0,
+    )
+    row = load_unit_to_row(unit)
+    assert unit.allowed_orientation_codes == DEFAULT_ORIENTATION_CODES
+    rebuilt = row_to_load_unit(2, row)
+    assert rebuilt.allowed_orientation_codes == DEFAULT_ORIENTATION_CODES
+
+
+def test_explicit_todas_label_from_excel_still_means_all_six() -> None:
+    """La etiqueta explícita "Todas" (de una exportación anterior a esta fase, o
+    escrita a mano) sigue significando las 6 tal cual — no es un valor por defecto
+    silencioso, es una elección explícita del usuario."""
+    values = ("SKU-4", "Caja", 40, 30, 20, 5.0, 1, "", "No", "", "No", "", "", "", "Todas", "")
+    unit = row_to_load_unit(2, values)
+    assert set(unit.allowed_orientation_codes) == set(OrientationCode)
+
+
 def test_round_trip_with_all_orientations() -> None:
     unit = LoadUnit(
         sku="SKU-2",
@@ -93,6 +120,7 @@ def test_round_trip_with_all_orientations() -> None:
         dimensions=Dimensions3D(120, 100, 110),
         weight_kg=300.0,
         package_type=PackageType.PALLET,
+        allowed_orientation_codes=tuple(OrientationCode),
     )
     row = load_unit_to_row(unit)
     rebuilt = row_to_load_unit(2, row)

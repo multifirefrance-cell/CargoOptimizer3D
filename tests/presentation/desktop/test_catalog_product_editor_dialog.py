@@ -5,23 +5,28 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QApplication, QColorDialog, QMessageBox
 
 from cargo_optimizer.domain.dimensions import Dimensions3D
-from cargo_optimizer.domain.enums import ExtinguisherAgent, PackageType
-from cargo_optimizer.domain.load_unit import LoadUnit
+from cargo_optimizer.domain.enums import ExtinguisherAgent, OrientationCode, PackageType
+from cargo_optimizer.domain.load_unit import DEFAULT_ORIENTATION_CODES, LoadUnit
 from cargo_optimizer.infrastructure.database.engine import DatabaseManager
 from cargo_optimizer.infrastructure.database.paths import get_user_database_path
 from cargo_optimizer.infrastructure.database.repositories import ProductCatalogRepository
+from cargo_optimizer.presentation.desktop.color_suggestions import _HEX_COLOR_PATTERN
 from cargo_optimizer.presentation.desktop.dialogs.catalog_product_editor_dialog import (
     CatalogProductEditorDialog,
 )
 
 
 def test_new_dialog_has_sensible_defaults(qapp: QApplication) -> None:
+    """Fase OPT-17: un producto nuevo recibe un color pastel automático (hex válido,
+    no necesariamente "#CCCCCC") y solo las 2 orientaciones horizontales por defecto."""
     dialog = CatalogProductEditorDialog(None)
-    assert dialog._color_edit.text() == "#CCCCCC"
-    assert all(check.isChecked() for check in dialog._orientation_checks.values())
+    assert _HEX_COLOR_PATTERN.match(dialog._color_edit.text())
+    for code, check in dialog._orientation_checks.items():
+        assert check.isChecked() == (code in DEFAULT_ORIENTATION_CODES)
 
 
 def test_editing_populates_fields_from_load_unit(qapp: QApplication) -> None:
@@ -183,3 +188,97 @@ def test_build_load_unit_can_be_added_to_a_real_sqlite_repository(
 
     assert repo.get_by_sku("NEW-SKU-1") is not None
     assert added.sku == "NEW-SKU-1"
+
+
+def test_manual_orientation_edit_is_honored(qapp: QApplication) -> None:
+    """Fase OPT-17: el administrador puede habilitar más orientaciones a mano."""
+    dialog = CatalogProductEditorDialog(None)
+    dialog._sku_edit.setText("BOX-1")
+    dialog._name_edit.setText("Caja")
+    for check in dialog._orientation_checks.values():
+        check.setChecked(True)
+
+    unit = dialog._build_load_unit()
+
+    assert set(unit.allowed_orientation_codes) == set(OrientationCode)
+
+
+def test_editing_existing_product_keeps_its_configured_orientations(qapp: QApplication) -> None:
+    """Fase OPT-17: abrir un producto ya configurado nunca le cambia las orientaciones."""
+    unit = LoadUnit(
+        sku="BOX-2",
+        name="Caja",
+        dimensions=Dimensions3D(40.0, 30.0, 20.0),
+        weight_kg=5.0,
+        allowed_orientation_codes=tuple(OrientationCode),
+    )
+    dialog = CatalogProductEditorDialog(None, load_unit=unit)
+    for code, check in dialog._orientation_checks.items():
+        assert check.isChecked() == (code in unit.allowed_orientation_codes)
+
+    rebuilt = dialog._build_load_unit()
+    assert set(rebuilt.allowed_orientation_codes) == set(OrientationCode)
+
+
+def test_existing_colors_are_never_used_for_an_existing_products_color(
+    qapp: QApplication,
+) -> None:
+    """Fase OPT-17: `existing_colors` solo influye en un SKU NUEVO, nunca sobrescribe uno
+    guardado."""
+    unit = LoadUnit(
+        sku="BOX-3",
+        name="Caja",
+        dimensions=Dimensions3D(40.0, 30.0, 20.0),
+        weight_kg=5.0,
+        color_hex="#123456",
+    )
+    dialog = CatalogProductEditorDialog(
+        None, load_unit=unit, existing_colors=("#AAAAAA", "#BBBBBB")
+    )
+    assert dialog._color_edit.text() == "#123456"
+
+
+def test_new_product_pastel_color_avoids_existing_colors(qapp: QApplication) -> None:
+    dialog_no_existing = CatalogProductEditorDialog(None)
+    dialog_with_existing = CatalogProductEditorDialog(
+        None, existing_colors=(dialog_no_existing._color_edit.text(),)
+    )
+    assert dialog_with_existing._color_edit.text() != dialog_no_existing._color_edit.text()
+
+
+def test_color_picker_button_updates_color_edit(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Fase OPT-17: selector visual de color — el botón "..." abre `QColorDialog`."""
+    dialog = CatalogProductEditorDialog(None)
+    monkeypatch.setattr(QColorDialog, "getColor", staticmethod(lambda *_a, **_k: QColor("#336699")))
+
+    dialog._on_pick_color()
+
+    assert dialog._color_edit.text() == "#336699"
+
+
+def test_color_picker_cancelled_keeps_previous_color(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dialog = CatalogProductEditorDialog(None)
+    dialog._color_edit.setText("#ABCDEF")
+    monkeypatch.setattr(QColorDialog, "getColor", staticmethod(lambda *_a, **_k: QColor()))
+
+    dialog._on_pick_color()
+
+    assert dialog._color_edit.text() == "#ABCDEF"
+
+
+def test_manually_picked_color_round_trips_through_build_load_unit(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dialog = CatalogProductEditorDialog(None)
+    dialog._sku_edit.setText("BOX-4")
+    dialog._name_edit.setText("Caja")
+    monkeypatch.setattr(QColorDialog, "getColor", staticmethod(lambda *_a, **_k: QColor("#00FF7F")))
+    dialog._on_pick_color()
+
+    unit = dialog._build_load_unit()
+
+    assert unit.color_hex == "#00FF7F"

@@ -12,10 +12,13 @@ título parametrizable con `title`/`title_when_editing`.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from uuid import UUID, uuid4
 
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
+    QColorDialog,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -26,6 +29,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
+    QPushButton,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -34,7 +38,12 @@ from PySide6.QtWidgets import (
 from cargo_optimizer.domain.dimensions import Dimensions3D
 from cargo_optimizer.domain.enums import ExtinguisherAgent, OrientationCode, PackageType
 from cargo_optimizer.domain.exceptions import DomainValidationError
-from cargo_optimizer.domain.load_unit import DEFAULT_MAX_STACK_COUNT, LoadUnit
+from cargo_optimizer.domain.load_unit import (
+    DEFAULT_MAX_STACK_COUNT,
+    DEFAULT_ORIENTATION_CODES,
+    LoadUnit,
+)
+from cargo_optimizer.presentation.desktop.color_suggestions import suggest_pastel_color
 
 _PACKAGE_TYPE_LABELS: dict[PackageType, str] = {
     PackageType.INDIVIDUAL: "Individual",
@@ -78,6 +87,7 @@ class CatalogProductEditorDialog(QDialog):
         load_unit: LoadUnit | None = None,
         title: str = "Nuevo producto de catálogo",
         title_when_editing: str = "Editar producto de catálogo",
+        existing_colors: Sequence[str] = (),
     ) -> None:
         super().__init__(parent)
         self._editing_id: UUID | None = load_unit.id if load_unit is not None else None
@@ -130,6 +140,10 @@ class CatalogProductEditorDialog(QDialog):
 
         self._color_edit = QLineEdit(self)
         self._color_edit.setPlaceholderText("#RRGGBB")
+        self._color_picker_button = QPushButton("...", self)
+        self._color_picker_button.setFixedWidth(32)
+        self._color_picker_button.setToolTip("Elegir color…")
+        self._color_picker_button.clicked.connect(self._on_pick_color)
         self._notes_edit = QPlainTextEdit(self)
         self._notes_edit.setFixedHeight(60)
 
@@ -145,9 +159,18 @@ class CatalogProductEditorDialog(QDialog):
         if load_unit is not None:
             self._populate_from(load_unit)
         else:
-            self._color_edit.setText("#CCCCCC")
-            for check in self._orientation_checks.values():
-                check.setChecked(True)
+            # Color pastel automático (fase OPT-17): solo para un SKU
+            # nuevo sin color todavía. Si el SKU ya tiene un color
+            # guardado (rama `_populate_from` de arriba), nunca se toca.
+            self._color_edit.setText(suggest_pastel_color(existing_colors))
+            # Orientaciones reducidas por defecto (fase OPT-17, ver
+            # `DEFAULT_ORIENTATION_CODES`): un producto nuevo solo se
+            # marca horizontal, largo paralelo al contenedor + su única
+            # alternativa horizontal — nunca las 6 rotaciones. El
+            # administrador habilita el resto a mano si el producto
+            # concreto lo permite.
+            for code, check in self._orientation_checks.items():
+                check.setChecked(code in DEFAULT_ORIENTATION_CODES)
             # Mismo valor por defecto que `LoadUnit.max_stack_count`
             # (`DEFAULT_MAX_STACK_COUNT`): un producto nuevo nunca queda
             # "no apilable" por accidente — ver docstring del campo.
@@ -179,7 +202,10 @@ class CatalogProductEditorDialog(QDialog):
         form.addRow("Peso máximo soportado", max_weight_row)
 
         form.addRow("", self._fragile_check)
-        form.addRow("Color", self._color_edit)
+        color_row = QHBoxLayout()
+        color_row.addWidget(self._color_edit)
+        color_row.addWidget(self._color_picker_button)
+        form.addRow("Color", color_row)
         form.addRow("Notas", self._notes_edit)
 
         orientations_group = QGroupBox("Orientaciones permitidas", self)
@@ -202,6 +228,16 @@ class CatalogProductEditorDialog(QDialog):
     def _on_is_extinguisher_toggled(self, checked: bool) -> None:
         self._extinguisher_agent_combo.setEnabled(checked)
         self._extinguisher_nominal_spin.setEnabled(checked)
+
+    def _on_pick_color(self) -> None:
+        """Selector visual de color (fase OPT-17): el usuario siempre puede sobrescribir
+        el color pastel automático o el ya guardado con cualquier color de su elección."""
+        current = QColor(self._color_edit.text().strip() or "#CCCCCC")
+        if not current.isValid():
+            current = QColor("#CCCCCC")
+        chosen = QColorDialog.getColor(current, self, "Elegir color")
+        if chosen.isValid():
+            self._color_edit.setText(chosen.name().upper())
 
     def _populate_from(self, load_unit: LoadUnit) -> None:
         self._sku_edit.setText(load_unit.sku)
@@ -264,7 +300,7 @@ class CatalogProductEditorDialog(QDialog):
                 if self._no_max_supported_weight_check.isChecked()
                 else self._max_supported_weight_spin.value()
             ),
-            allowed_orientation_codes=allowed_codes or tuple(OrientationCode),
+            allowed_orientation_codes=allowed_codes or DEFAULT_ORIENTATION_CODES,
             fragile=self._fragile_check.isChecked(),
             is_extinguisher=is_extinguisher,
             extinguisher_agent=(

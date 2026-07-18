@@ -33,6 +33,16 @@ def test_add_and_get_by_id(db_manager: DatabaseManager) -> None:
     assert fetched == added
 
 
+def test_pastel_or_manual_color_persists_and_is_restored(db_manager: DatabaseManager) -> None:
+    """Fase OPT-17: un color pastel automático o elegido a mano es un `color_hex`
+    normal -- persiste en el catálogo SQLite y se restaura igual que cualquier otro."""
+    repo = ProductCatalogRepository(db_manager)
+    added = repo.add(_unit(sku="BOX-COLOR", color_hex="#C9E4CA"))
+    fetched = repo.get_by_id(added.id)
+    assert fetched is not None
+    assert fetched.color_hex == "#C9E4CA"
+
+
 def test_get_by_sku_is_case_insensitive(db_manager: DatabaseManager) -> None:
     repo = ProductCatalogRepository(db_manager)
     repo.add(_unit(sku="BOX-1"))

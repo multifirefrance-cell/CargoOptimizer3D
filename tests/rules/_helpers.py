@@ -54,6 +54,10 @@ def make_individual_extinguisher(nominal_kg: float = 3.0, **overrides: object) -
 
 
 def make_grouped_extinguisher(nominal_kg: float = 1.0, **overrides: object) -> LoadUnit:
+    """Extintor grupal de prueba con las 6 orientaciones declaradas por defecto: la
+    regla de negocio real es "sin restricción de orientación" para estos productos
+    (ver `rules/extinguisher_rules.py`), no el valor por defecto reducido de
+    `LoadUnit` (fase OPT-17, pensado para un producto normal sin verificar)."""
     kwargs: dict[str, object] = {
         "sku": "EXT-GRP",
         "name": "Extintores en caja grupal",
@@ -64,6 +68,7 @@ def make_grouped_extinguisher(nominal_kg: float = 1.0, **overrides: object) -> L
         "is_extinguisher": True,
         "extinguisher_agent": ExtinguisherAgent.PQS,
         "extinguisher_nominal_kg": nominal_kg,
+        "allowed_orientation_codes": tuple(OrientationCode),
     }
     kwargs.update(overrides)
     return LoadUnit(**kwargs)  # type: ignore[arg-type]

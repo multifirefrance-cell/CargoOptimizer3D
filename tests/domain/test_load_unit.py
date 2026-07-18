@@ -107,8 +107,24 @@ def test_duplicate_orientations_are_deduplicated_preserving_order() -> None:
     )
 
 
-def test_default_orientations_are_all_six() -> None:
+def test_default_orientations_are_the_reduced_horizontal_pair() -> None:
+    """Fase OPT-17: un producto nuevo solo se marca horizontal + su única
+    alternativa horizontal, nunca las 6 rotaciones (ver `DEFAULT_ORIENTATION_CODES`)."""
     unit = LoadUnit(**_base_kwargs())
+    assert unit.allowed_orientation_codes == (OrientationCode.LWH_XYZ, OrientationCode.WLH_XYZ)
+
+
+def test_default_orientations_are_both_horizontal() -> None:
+    """Ninguna de las dos orientaciones por defecto tumba la caja de canto:
+    `height_cm` original debe quedar sobre Z en ambas."""
+    unit = LoadUnit(**_base_kwargs())
+    for orientation in unit.candidate_orientations():
+        assert orientation.z_size_cm == unit.dimensions.height_cm
+
+
+def test_explicit_all_six_orientations_still_works() -> None:
+    """El administrador puede seguir habilitando las 6 a mano por SKU."""
+    unit = LoadUnit(**_base_kwargs(allowed_orientation_codes=tuple(OrientationCode)))
     assert len(unit.allowed_orientation_codes) == 6
 
 

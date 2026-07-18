@@ -54,7 +54,34 @@ from cargo_optimizer.domain.exceptions import DomainValidationError
 from cargo_optimizer.domain.orientation import Orientation
 
 _COLOR_HEX_PATTERN = re.compile(r"^#[0-9A-Fa-f]{6}$")
-_ALL_ORIENTATION_CODES: tuple[OrientationCode, ...] = tuple(OrientationCode)
+
+DEFAULT_ORIENTATION_CODES: tuple[OrientationCode, ...] = (
+    OrientationCode.LWH_XYZ,
+    OrientationCode.WLH_XYZ,
+)
+"""Orientaciones permitidas por defecto para un producto nuevo (fase OPT-17).
+
+Ambas son horizontales (la dimensión `height_cm` original queda sobre
+Z, nunca de canto): `LWH_XYZ` deja `length_cm` paralelo al eje X del
+Loading Space (el largo del contenedor); `WLH_XYZ` es la única
+alternativa horizontal — el mismo apoyo, girado 90° sobre el eje
+vertical, con `width_cm` sobre X en su lugar. De las 6 combinaciones
+de `OrientationCode`, estas son las únicas dos que dejan `height_cm`
+en Z (ver `domain/orientation.py::_AXIS_INDICES`): las otras cuatro
+tumban la caja sobre otra cara, lo que rara vez tiene sentido para un
+producto nuevo sin verificarlo antes.
+
+Antes de esta fase, el valor por defecto era `tuple(OrientationCode)`
+(las 6): probar las 6 rotaciones por defecto permitía que el motor
+tumbara productos de canto sin que el usuario lo hubiera confirmado
+nunca. Un producto ya existente con `allowed_orientation_codes`
+guardado explícitamente (cualquier subconjunto, incluidas las 6)
+conserva ese valor intacto al cargarse — el cambio de valor por
+defecto solo afecta a construcciones nuevas sin el campo explícito,
+igual que `DEFAULT_MAX_STACK_COUNT`. El administrador puede habilitar
+cualquiera de las otras 4 orientaciones editando el SKU si ese
+producto concreto sí puede tumbarse de forma segura.
+"""
 
 DEFAULT_MAX_STACK_COUNT = 30
 """Valor por defecto de `max_stack_count` para un producto nuevo sin este campo configurado.
@@ -90,7 +117,7 @@ class LoadUnit:
     units_per_package: int = 1
     max_stack_count: int = DEFAULT_MAX_STACK_COUNT
     max_supported_weight_kg: float | None = None
-    allowed_orientation_codes: tuple[OrientationCode, ...] = _ALL_ORIENTATION_CODES
+    allowed_orientation_codes: tuple[OrientationCode, ...] = DEFAULT_ORIENTATION_CODES
     fragile: bool = False
     is_extinguisher: bool = False
     extinguisher_agent: ExtinguisherAgent = ExtinguisherAgent.NOT_APPLICABLE

@@ -34,11 +34,24 @@ from cargo_optimizer.optimization.models import (
     PhysicalLoadInstance,
 )
 from cargo_optimizer.optimization.ordering import order_instances
+from cargo_optimizer.optimization.pattern_packing import PatternCursor, generate_grid_positions
 from cargo_optimizer.optimization.result_builder import ALGORITHM_NAME, build_packing_result
 from cargo_optimizer.optimization.state import PackingState
 from cargo_optimizer.optimization.strategy import StrategyCapabilities
 from cargo_optimizer.rules.codes import LOADING_SPACE_WEIGHT_EXCEEDED
 from cargo_optimizer.rules.engine import RulesEngine
+
+_PATTERN_MIN_QUANTITY = 8
+"""Cantidad mínima de instancias de un mismo `LoadUnit` para intentar el patrón de
+filas/capas (fase OPT-17) en vez de resolver cada instancia con una búsqueda completa.
+
+Un número deliberadamente conservador: por debajo de este umbral, la
+búsqueda general ya es rápida (pocas instancias) y no vale la pena la
+complejidad añadida. No afecta a la corrección en ningún caso — solo a
+si se intenta el atajo — porque cada posición generada por el patrón
+sigue evaluándose con `RulesEngine.evaluate_placement` completo antes
+de aceptarse.
+"""
 
 
 class GreedyExtremePointStrategy:
@@ -73,6 +86,7 @@ class GreedyExtremePointStrategy:
         state = PackingState(load_units_by_id=load_units_by_id)
         orientation_cache: dict[object, tuple[Orientation, ...]] = {}
         preferred_orientation_cache: dict[UUID, tuple[int, Orientation]] = {}
+        pattern_cursors: dict[UUID, PatternCursor] = {}
         total = len(ordered_instances)
 
         self._emit_progress(progress_callback, state, total, None, start_time)
@@ -108,6 +122,7 @@ class GreedyExtremePointStrategy:
                 orientation_cache,
                 preferred_orientation_cache,
                 strict=True,
+                pattern_cursors=pattern_cursors,
             )
             if not placed:
                 pending_after_round_one.append(instance)
@@ -189,6 +204,7 @@ class GreedyExtremePointStrategy:
         orientation_cache: dict[object, tuple[Orientation, ...]],
         preferred_orientation_cache: dict[UUID, tuple[int, Orientation]],
         strict: bool,
+        pattern_cursors: dict[UUID, PatternCursor] | None = None,
     ) -> bool:
         """Intenta colocar `instance`; devuelve `True` si se aceptó un placement.
 
@@ -209,8 +225,30 @@ class GreedyExtremePointStrategy:
         hueco residual junto a una pared que la orientación preferida no
         puede llenar). Si tampoco así hay colocación válida, la instancia
         se rechaza aquí de forma definitiva (`state.reject_instance`).
+
+        `pattern_cursors` (fase OPT-17, solo se usa cuando `strict=True`
+        y hay suficiente cantidad — ver `_PATTERN_MIN_QUANTITY` y
+        `optimization/pattern_packing.py`): si ya existe un patrón de
+        filas/capas en curso para este `LoadUnit`, se prueba directamente
+        su siguiente posición (un único candidato, evaluado con
+        `RulesEngine` completo, igual que cualquier otro) en vez de
+        recorrer todos los puntos candidatos disponibles. Si esa posición
+        falla, el patrón se marca agotado y esta instancia (solo esta)
+        cae a la búsqueda general de más abajo, sin perder ninguna
+        colocación posible.
         """
         load_unit = instance.load_unit
+
+        if strict and pattern_cursors is not None:
+            cursor = pattern_cursors.get(load_unit.id)
+            if cursor is not None and not cursor.exhausted:
+                placed = self._try_pattern_position(instance, request, rules_engine, state, cursor)
+                if placed:
+                    return True
+                cursor.exhausted = True
+                # No se pierde esta instancia: cae a la búsqueda general
+                # de más abajo, exactamente como si nunca hubiera existido
+                # un patrón para este LoadUnit.
         if load_unit.id not in orientation_cache:
             orientation_cache[load_unit.id] = rules_engine.allowed_orientations(
                 load_unit, request.loading_space
@@ -279,6 +317,15 @@ class GreedyExtremePointStrategy:
             state.accept_placement(best)
             for warning in best.evaluation.warnings:
                 state.add_warning(f"'{load_unit.sku}': {warning.message}")
+            if (
+                strict
+                and pattern_cursors is not None
+                and load_unit.id not in pattern_cursors
+                and load_unit.quantity >= _PATTERN_MIN_QUANTITY
+            ):
+                pattern_cursors[load_unit.id] = self._start_pattern_cursor(
+                    request, preferred_index, preferred_orientation, best.position
+                )
             return True
 
         if strict:
@@ -292,6 +339,85 @@ class GreedyExtremePointStrategy:
             f"{generation_index} candidato(s) evaluado(s).",
         )
         return False
+
+    @staticmethod
+    def _start_pattern_cursor(
+        request: PackingRequest,
+        orientation_index: int,
+        orientation: Orientation,
+        anchor: Position3D,
+    ) -> PatternCursor:
+        """Inicia un patrón de filas/capas a partir de la primera colocación real
+        (`anchor`) de un `LoadUnit` con cantidad grande — fase OPT-17.
+
+        `anchor` viene de una búsqueda completa real (`_search_best_candidate`),
+        así que ya respeta cualquier otra caja u otro SKU colocado antes; el
+        patrón solo avanza geométricamente desde ahí (fila, luego capa),
+        dejando que `RulesEngine` valide cada posición generada.
+        """
+        dims = request.loading_space.internal_dimensions
+        positions = generate_grid_positions(
+            anchor=anchor,
+            x_size_cm=orientation.x_size_cm,
+            y_size_cm=orientation.y_size_cm,
+            z_size_cm=orientation.z_size_cm,
+            length_cm=dims.length_cm,
+            width_cm=dims.width_cm,
+            height_cm=dims.height_cm,
+        )
+        next(positions, None)  # `anchor` ya está colocado: se descarta.
+        return PatternCursor(
+            orientation=orientation, orientation_index=orientation_index, positions=positions
+        )
+
+    @staticmethod
+    def _try_pattern_position(
+        instance: PhysicalLoadInstance,
+        request: PackingRequest,
+        rules_engine: RulesEngine,
+        state: PackingState,
+        cursor: PatternCursor,
+    ) -> bool:
+        """Prueba la siguiente posición del patrón de `cursor` para `instance`.
+
+        Un único candidato, evaluado con `RulesEngine.evaluate_placement`
+        completo (colisión, soporte, apilamiento, peso, fragilidad,
+        orientación, extintor) — nunca se salta ninguna regla. `devuelve
+        True` si se aceptó; `False` si la posición no era válida (o si el
+        patrón ya no tiene más posiciones dentro de límites), sin haber
+        rechazado `instance` — quien llama decide qué hacer a continuación.
+        """
+        position = cursor.next_position()
+        if position is None:
+            return False
+
+        candidate = build_candidate(
+            instance=instance,
+            position=position,
+            orientation=cursor.orientation,
+            orientation_order_index=cursor.orientation_index,
+            loading_space=request.loading_space,
+            existing_placements=state.placements,
+            existing_boxes=state.accepted_boxes,
+            existing_bounding_dimensions=state.bounding_dimensions,
+            load_units_by_id=state.load_units_by_id,
+            rules_engine=rules_engine,
+            minimum_support_ratio=request.minimum_support_ratio,
+            generation_index=0,
+            spatial_index=state.spatial_index,
+            box_by_sequence_number=state.box_by_sequence_number,
+            stack_level_by_sequence_number=state.stack_level_by_sequence_number,
+            placement_by_sequence_number=state.placement_by_sequence_number,
+            total_weight_kg=state.packed_weight_kg,
+        )
+        state.record_candidate_generated()
+        if not candidate.evaluation.is_allowed:
+            return False
+
+        state.accept_placement(candidate)
+        for warning in candidate.evaluation.warnings:
+            state.add_warning(f"'{instance.load_unit.sku}': {warning.message}")
+        return True
 
     @staticmethod
     def _search_best_candidate(

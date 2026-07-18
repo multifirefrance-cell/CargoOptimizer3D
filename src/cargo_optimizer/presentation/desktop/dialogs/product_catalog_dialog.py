@@ -154,7 +154,8 @@ class ProductCatalogDialog(QDialog):
         return sorted({index.row() for index in self.table_view.selectionModel().selectedRows()})
 
     def _on_add(self) -> None:
-        dialog = CatalogProductEditorDialog(self)
+        existing_colors = tuple(entry.load_unit.color_hex for entry in self._repository.list_all())
+        dialog = CatalogProductEditorDialog(self, existing_colors=existing_colors)
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         unit = dialog.result_load_unit()

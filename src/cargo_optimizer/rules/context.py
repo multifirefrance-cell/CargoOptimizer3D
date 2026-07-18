@@ -82,6 +82,25 @@ recorría `existing_placements` completo (`O(n)`) en cada candidato
 evaluado para sumar este mismo total una y otra vez. Cuando no se
 proporciona (`None`), el comportamiento es exactamente el de antes:
 sumar `existing_placements` completo.
+
+`precomputed_support_ratio` (fase OPT-17) es el `support_ratio` (unión
+de rectángulos, ver `geometry.support`) ya calculado para
+`candidate_box` contra `nearby_existing_boxes`, cuando el llamador
+(`optimization.candidates.build_candidate`) ya lo necesitaba de todas
+formas para el *score* del candidato. Antes de esta fase, el mismo
+valor se calculaba dos veces por candidato: una dentro de
+`rules.spatial_rules.evaluate_support` (para decidir si hay soporte
+suficiente) y otra en `build_candidate` (para puntuar el candidato una
+vez aceptado) — la unión de rectángulos es la parte más cara de
+construir un candidato (ver docstring de `build_candidate`), así que
+duplicarla en cada candidato aceptado era trabajo desperdiciado.
+`build_candidate` solo lo precalcula cuando ya sabe que la colocación
+no colisiona (`evaluate_collision` es barato, indexado espacialmente),
+para no adelantar el cálculo caro en candidatos que de todas formas se
+van a rechazar por colisión antes de llegar a evaluar soporte. Cuando
+no se proporciona (`None`, el caso de toda prueba unitaria que
+construye un `PlacementRuleContext` a mano), `evaluate_support` calcula
+`support_ratio` exactamente como antes de esta fase.
 """
 
 from __future__ import annotations
@@ -118,6 +137,7 @@ class PlacementRuleContext:
     precomputed_stack_level_by_sequence_number: Mapping[int, int] | None = None
     precomputed_placement_by_sequence_number: Mapping[int, Placement] | None = None
     precomputed_total_weight_kg: float | None = None
+    precomputed_support_ratio: float | None = None
 
     @property
     def nearby_sequence_numbers(self) -> frozenset[int] | None:

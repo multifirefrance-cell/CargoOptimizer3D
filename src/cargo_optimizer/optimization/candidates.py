@@ -7,6 +7,7 @@ No duplica lógica geométrica ni de negocio: delega siempre en
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Mapping, Sequence
 from uuid import UUID
 
@@ -26,6 +27,7 @@ from cargo_optimizer.optimization.scoring import (
 )
 from cargo_optimizer.rules.context import PlacementRuleContext
 from cargo_optimizer.rules.engine import RulesEngine
+from cargo_optimizer.rules.spatial_rules import evaluate_collision
 
 
 def orientation_fits_loading_space(orientation: Orientation, loading_space: LoadingSpace) -> bool:
@@ -161,6 +163,17 @@ def build_candidate(
     `GreedyExtremePointStrategy._process_instance`), así que calcularlo
     sería trabajo desperdiciado — y es, en concreto, la parte más cara
     de construir un candidato (soporte físico vía unión de rectángulos).
+
+    Desde la fase OPT-17, ese mismo `support_ratio` se precalcula una
+    única vez (`precomputed_support_ratio`, ver docstring de
+    `PlacementRuleContext`) y se pasa a `RulesEngine.evaluate_placement`
+    para que `evaluate_support` lo reutilice en vez de repetir la unión
+    de rectángulos — antes se calculaba dos veces por candidato
+    aceptado. Solo se precalcula cuando ya no hay colisión
+    (`evaluate_collision`, barato gracias al índice espacial): un
+    candidato que colisiona nunca llega a evaluar soporte (ver
+    `rules.placement_rules`), así que precalcularlo también ahí sería,
+    de nuevo, trabajo desperdiciado.
     """
     context = PlacementRuleContext(
         loading_space=loading_space,
@@ -176,6 +189,14 @@ def build_candidate(
         precomputed_placement_by_sequence_number=placement_by_sequence_number,
         precomputed_total_weight_kg=total_weight_kg,
     )
+
+    precomputed_support_ratio: float | None = None
+    if evaluate_collision(context).is_allowed:
+        precomputed_support_ratio = compute_support_ratio(
+            context.candidate_box, context.nearby_existing_boxes
+        )
+        context = dataclasses.replace(context, precomputed_support_ratio=precomputed_support_ratio)
+
     evaluation = rules_engine.evaluate_placement(
         context, minimum_support_ratio=minimum_support_ratio
     )
@@ -183,7 +204,8 @@ def build_candidate(
     candidate_box = AxisAlignedBox(position=position, dimensions=orientation.dimensions)
 
     if evaluation.is_allowed:
-        support = compute_support_ratio(candidate_box, context.nearby_existing_boxes)
+        assert precomputed_support_ratio is not None
+        support = precomputed_support_ratio
         volume_increment = bounding_volume_increment_from_dimensions(
             existing_bounding_dimensions,
             candidate_box.max_x,

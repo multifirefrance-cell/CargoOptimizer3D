@@ -19,7 +19,12 @@ from tests.rules._helpers import (
 
 
 def test_normal_load_unit_returns_all_six_orientations() -> None:
-    unit = make_load_unit(dimensions=Dimensions3D(40.0, 30.0, 20.0))
+    """Con las 6 declaradas explícitamente (no el valor por defecto reducido de la
+    fase OPT-17), un producto normal no sufre ningún filtrado adicional."""
+    unit = make_load_unit(
+        dimensions=Dimensions3D(40.0, 30.0, 20.0),
+        allowed_orientation_codes=tuple(OrientationCode),
+    )
     orientations = allowed_orientations_for_load_unit(unit, DEFAULT_SPACE)
     assert len(orientations) == 6
 
@@ -40,7 +45,10 @@ def test_undeclared_orientation_is_rejected() -> None:
 
 
 def test_repeated_dimensions_are_deduplicated() -> None:
-    unit = make_load_unit(dimensions=Dimensions3D(10.0, 10.0, 20.0))
+    unit = make_load_unit(
+        dimensions=Dimensions3D(10.0, 10.0, 20.0),
+        allowed_orientation_codes=tuple(OrientationCode),
+    )
     orientations = allowed_orientations_for_load_unit(unit, DEFAULT_SPACE)
     seen_dims = {o.dimensions for o in orientations}
     assert len(orientations) == len(seen_dims)
@@ -62,7 +70,13 @@ def test_no_duplicates_even_with_cube() -> None:
 
 def test_individual_large_extinguisher_only_allows_two_orientations() -> None:
     # Tres ejes distintos para que LWH_XYZ y LHW_XYZ no coincidan geométricamente.
-    unit = make_individual_extinguisher(nominal_kg=5.0, dimensions=Dimensions3D(60.0, 15.0, 20.0))
+    # Las 6 declaradas explícitamente para probar el filtrado de la propia regla
+    # de horizontalidad, no el valor por defecto reducido de la fase OPT-17.
+    unit = make_individual_extinguisher(
+        nominal_kg=5.0,
+        dimensions=Dimensions3D(60.0, 15.0, 20.0),
+        allowed_orientation_codes=tuple(OrientationCode),
+    )
     orientations = allowed_orientations_for_load_unit(unit, DEFAULT_SPACE)
     assert len(orientations) == 2
     assert all(o.code in (OrientationCode.LWH_XYZ, OrientationCode.LHW_XYZ) for o in orientations)

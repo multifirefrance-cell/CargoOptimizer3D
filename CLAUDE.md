@@ -287,6 +287,16 @@ cualquier sesión futura debe respetar al tocar `src/cargo_optimizer/domain/`:
 - Ni `Orientation` ni `Placement` implementan detección de colisiones:
   esa lógica vive en `cargo_optimizer.geometry`, nunca en el modelo de
   dominio.
+- **`LoadUnit.allowed_orientation_codes` (fase OPT-17)**: el valor por
+  defecto de este campo es `DEFAULT_ORIENTATION_CODES` (`LWH_XYZ`,
+  `WLH_XYZ` — las dos únicas orientaciones que mantienen `height_cm` en
+  el eje Z, es decir, horizontales), no las 6 orientaciones. Esto
+  afecta solo a un `LoadUnit` **nuevo** sin este campo configurado
+  explícitamente; un valor explícito (incluidas las 6 orientaciones)
+  se preserva tal cual, tanto en memoria como al cargar un proyecto o
+  el catálogo existentes — no reinterpretar ni migrar datos ya
+  guardados. El administrador puede habilitar cualquier orientación
+  adicional a mano por SKU (`CatalogProductEditorDialog`).
 - La regla de horizontalidad obligatoria de extintores (no apilar de
   canto) es del motor de restricciones (fase 3), no del dominio ni de
   `geometry`. El dominio solo deja los campos necesarios preparados.
@@ -490,6 +500,32 @@ conservado como historial).
   `select_preferred_orientation` que teselara los 3 ejes en vez de solo
   XY: empeoró el resultado real (−26 unidades) — no cambiar esa función
   basándose en esa intuición sin volver a medir.
+- **Fase OPT-17 (2026-07-18, patrón de filas/capas + caché de
+  `support_ratio`, ver `docs/OptimizerPerformance.md`)**: nuevo módulo
+  `optimization/pattern_packing.py` (`generate_grid_positions`,
+  `PatternCursor`) — para un `LoadUnit` con `quantity >= 8`, tras
+  colocar la primera instancia con la búsqueda completa habitual (el
+  "ancla", ya validada por `RulesEngine`), las siguientes instancias de
+  la ronda 1 intentan un único candidato por turno (la siguiente
+  posición de una rejilla regular fila/fila/capa) en vez de repetir la
+  búsqueda completa; ese único candidato sigue pasando por
+  `RulesEngine.evaluate_placement` completo, y cualquier fallo agota el
+  patrón de forma permanente para ese `LoadUnit`, cayendo a la búsqueda
+  general exactamente como si el patrón no hubiera existido — no puede
+  producir, por construcción, un resultado peor que antes de esta fase.
+  `PlacementRuleContext.precomputed_support_ratio` (nuevo campo, mismo
+  patrón que los demás `precomputed_*`) elimina un cálculo redundante
+  de `support_ratio` (unión de rectángulos) que antes se hacía dos
+  veces por candidato aceptado — una en `evaluate_support`, otra en
+  `optimization/candidates.py::build_candidate` para puntuar. Verificado
+  en el caso real de 2000 unidades: mismo resultado exacto en las tres
+  repeticiones (1397/2000, 84,46 % de utilización, cero
+  colisiones/cajas flotantes/avisos). **El speedup de esta fase no está
+  confirmado**: una medición aislada dio 472,73 s (14,4 % más rápido que
+  la línea base de 552,30 s) pero otra, con otros procesos del sistema
+  activos en paralelo, dio 1362,77 s (más lenta que la línea base) —
+  no citar ningún número de "×" de esta fase sin volver a medir en una
+  máquina descargada, ver `docs/OptimizerPerformance.md`, "Fase OPT-17".
 - **Fase OPT-02 (rendimiento, backlog)**: `PlacementRuleContext`
   (`rules/context.py`) acepta un `precomputed_existing_boxes` opcional
   (y expone `box_by_sequence_number`) para que `optimization` le pase

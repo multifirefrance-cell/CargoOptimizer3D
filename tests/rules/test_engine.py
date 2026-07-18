@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from cargo_optimizer.domain.dimensions import Dimensions3D
+from cargo_optimizer.domain.enums import OrientationCode
 from cargo_optimizer.domain.position import Position3D
 from cargo_optimizer.rules.engine import RulesEngine
 from tests.rules._helpers import DEFAULT_SPACE, make_context, make_load_unit
@@ -12,7 +13,7 @@ _DIMS = Dimensions3D(40.0, 30.0, 20.0)
 
 def test_facade_delegates_allowed_orientations() -> None:
     engine = RulesEngine()
-    unit = make_load_unit(dimensions=_DIMS)
+    unit = make_load_unit(dimensions=_DIMS, allowed_orientation_codes=tuple(OrientationCode))
     assert len(engine.allowed_orientations(unit, DEFAULT_SPACE)) == 6
 
 

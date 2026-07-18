@@ -112,6 +112,27 @@ def test_round_trip_preserves_the_full_project(tmp_path: Path) -> None:
     assert loaded.metadata.application_version == _APP_VERSION
 
 
+def test_round_trip_preserves_a_custom_or_pastel_sku_color(tmp_path: Path) -> None:
+    """Fase OPT-17: un color pastel automático o elegido a mano por el usuario es un
+    `color_hex` normal -- persiste y se restaura exactamente igual que cualquier otro."""
+    repo = ProjectFileRepository()
+    space = _space()
+    unit = LoadUnit(
+        sku="BOX-COLOR",
+        name="Caja con color pastel",
+        dimensions=Dimensions3D(40.0, 30.0, 20.0),
+        weight_kg=12.5,
+        color_hex="#E8C9A3",
+    )
+    project = CargoProject(name="Proyecto de color", loading_space=space, load_units=(unit,))
+    path = tmp_path / "proyecto_color.cargo3d"
+
+    repo.save(project, path, application_version=_APP_VERSION)
+    loaded = repo.load(path)
+
+    assert loaded.project.load_units[0].color_hex == "#E8C9A3"
+
+
 def test_round_trip_without_a_result_yet(tmp_path: Path) -> None:
     repo = ProjectFileRepository()
     project = _project(with_result=False)

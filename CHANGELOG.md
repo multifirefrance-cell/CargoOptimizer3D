@@ -13,10 +13,40 @@ Correcciones sobre dos casos reales reportados: cubicaje deficiente
 caso lento de 2000 unidades (~50 min). Fases OPT-14/OPT-15: sin
 cambios en el algoritmo de cubicaje. Fase OPT-16: cambios solo de
 rendimiento en `optimization`/`rules`, mismo resultado exacto
-verificado en el caso real (1397/2000, 84,46 % de utilización).
+verificado en el caso real (1397/2000, 84,46 % de utilización). Fase
+OPT-17: orientaciones por defecto reducidas, carga por patrón de
+filas/capas, caché de `support_ratio`, colores pastel automáticos y
+selector manual — mismo resultado exacto verificado en el caso real;
+**el speedup final de esta fase queda pendiente de confirmar en una
+máquina descargada** (una de las mediciones estuvo contaminada por
+otros procesos del sistema corriendo en paralelo — ver
+`docs/OptimizerPerformance.md`, "Fase OPT-17").
 
 ### Changed
 
+- **Fase OPT-17**: `LoadUnit` nuevo sin orientaciones configuradas
+  recibe ahora solo 2 de las 6 orientaciones por defecto
+  (`DEFAULT_ORIENTATION_CODES` = `LWH_XYZ`/`WLH_XYZ`, las únicas dos
+  horizontales); productos ya configurados no se tocan. Nuevo patrón de
+  filas/capas (`optimization/pattern_packing.py`) para SKU con
+  `quantity >= 8`: reutiliza una rejilla regular en vez de repetir la
+  búsqueda completa por instancia, con caída automática y exacta a la
+  búsqueda general ante cualquier fallo (colisión, rejilla agotada,
+  cualquier regla) — no puede producir un resultado peor que antes.
+  `PlacementRuleContext.precomputed_support_ratio` elimina un cálculo
+  redundante de soporte por candidato. Nuevo módulo
+  `presentation/desktop/color_suggestions.py`: color pastel automático
+  (determinista, sin `random`) para un SKU nuevo sin color, con
+  selector manual (`QColorDialog`) en `CatalogProductEditorDialog`.
+  Verificado en el caso real de 2000 unidades: mismo resultado exacto
+  (1397/2000 cargadas, 84,46 % de utilización, cero colisiones/cajas
+  flotantes/avisos) en las tres repeticiones; el tiempo medido varió
+  entre 472,73 s (14,4 % más rápido que la línea base, en condiciones
+  aisladas) y 1362,77 s (con otros procesos del sistema activos,
+  descartada como cifra oficial) — ver `docs/OptimizerPerformance.md`,
+  "Fase OPT-17", para el detalle completo y la recomendación de
+  remedir en una máquina descargada antes de citar un speedup
+  definitivo.
 - **Fase OPT-14**: `LoadUnit.max_stack_count` pasa de tener un valor
   por defecto de `1` a `DEFAULT_MAX_STACK_COUNT` (30) para productos
   nuevos sin este campo configurado explícitamente. Sigue siendo un

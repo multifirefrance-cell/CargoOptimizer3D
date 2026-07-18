@@ -471,6 +471,97 @@ esa estructura — ver `docs/Roadmap.md` y `docs/ProductBacklog.md`,
 paso real y verificado en esa dirección, no el cierre completo del
 ítem).
 
+## Fase OPT-17 (2026-07-18): patrón de filas/capas, orientaciones por defecto reducidas, caché de `support_ratio`
+
+Fase integrada de un solo encargo: orientaciones por defecto más
+simples para SKU nuevos, carga por patrón (filas/capas) para
+cantidades grandes del mismo SKU, reutilización del `support_ratio` ya
+calculado dentro de un mismo candidato, y colores pastel
+automáticos/selector manual (esto último sin impacto de rendimiento,
+documentado en `docs/Database.md`/`docs/ProjectFiles.md`, no aquí).
+Ninguno de los cambios ya aceptados de las fases OPT-02 a OPT-16 se
+revirtió: índice espacial, cachés incrementales, early-exit exacto,
+memoización de posiciones candidatas, preferred orientation,
+empaquetado en dos rondas, simplificación de apilamiento, eliminación
+de peso soportado acumulado y de apilamiento recursivo — todo sigue
+intacto.
+
+### Qué se añadió
+
+1. **Orientaciones por defecto reducidas** (`domain/load_unit.py::DEFAULT_ORIENTATION_CODES`):
+   un `LoadUnit` nuevo sin `allowed_orientation_codes` explícito ahora
+   recibe solo `LWH_XYZ` y `WLH_XYZ` (las dos únicas orientaciones que
+   mantienen `height_cm` en el eje Z) en vez de las 6. Un producto ya
+   configurado (incluidos los que ya declaraban las 6) nunca se toca al
+   editarlo — la reducción es solo el valor por defecto del campo, no
+   una migración de datos existentes.
+2. **Patrón de filas/capas** (`optimization/pattern_packing.py`,
+   nuevo): para un `LoadUnit` con `quantity >= 8`, tras colocar la
+   primera instancia con la búsqueda completa habitual (que actúa como
+   "ancla" real, ya validada por `RulesEngine`), las siguientes
+   instancias de la misma ronda 1 intentan **un único candidato** por
+   turno — la siguiente posición de una rejilla regular
+   (`generate_grid_positions`, fila completa en X, luego fila en Y,
+   luego capa en Z) — en vez de repetir la búsqueda completa de
+   extremos. Ese único candidato pasa por
+   `RulesEngine.evaluate_placement` completo, sin ningún atajo de
+   corrección: si falla (colisión, rejilla agotada, cualquier regla),
+   el patrón se marca agotado para ese `LoadUnit` de forma permanente y
+   **todas** las instancias restantes caen a la búsqueda general
+   exactamente como si el patrón no hubiera existido nunca. Este diseño
+   hace que el patrón no pueda, por construcción, producir un resultado
+   peor que el algoritmo anterior: en el peor caso se comporta
+   idéntico a él.
+3. **Reutilización de `support_ratio` dentro de un mismo candidato**
+   (`rules/context.py::PlacementRuleContext.precomputed_support_ratio`,
+   `optimization/candidates.py::build_candidate`): antes de esta fase,
+   la unión de rectángulos que calcula el soporte se ejecutaba dos
+   veces por candidato aceptado — una dentro de
+   `rules/spatial_rules.py::evaluate_support` (para decidir si hay
+   soporte suficiente) y otra en `build_candidate` (para puntuar el
+   candidato). Ahora se calcula una sola vez, solo cuando ya se sabe
+   que el candidato no colisiona (`evaluate_collision`, barato gracias
+   al índice espacial), y se reutiliza para ambos propósitos. Sin
+   `precomputed_support_ratio` (toda prueba unitaria que construye un
+   `PlacementRuleContext` a mano), el comportamiento es idéntico al de
+   antes de esta fase.
+4. **Render 3D auditado, sin cambios**: se confirmó que
+   `GreedyExtremePointStrategy._emit_progress` solo construye un
+   `PackingProgress` (contadores, ningún objeto de Qt/PyVista) y que
+   `MainWindow._on_optimization_progress` solo actualiza la barra de
+   progreso — `Packing3DViewer.display_result(...)` se sigue llamando
+   una única vez, tras `_on_optimization_finished`, nunca dentro del
+   bucle de optimización. No hizo falta ningún cambio de código.
+
+### Medición del caso real (`cargo2500.cargo3d`, 2000 unidades, mismo SKU)
+
+Corrección idéntica en las **tres** repeticiones —
+1397/2000 cargadas, 603 pendientes, 84,4589 % de utilización, cero
+colisiones, cero cajas fuera de límites, cero cajas flotantes, cero
+avisos —, confirmando que ninguno de los cambios de esta fase alteró
+ninguna decisión del algoritmo, solo (en principio) su coste:
+
+| Medición | Condición | Tiempo | vs. baseline (552,30 s) |
+|---|---|---:|---|
+| Baseline (fin de OPT-16) | — | 552,30 s | — |
+| Aislada, justo tras implementar el patrón (antes de sumar la caché de `support_ratio`) | sin otros procesos detectados | 472,73 s | 14,4 % más rápido (1,17×) |
+| "Limpia" según el protocolo pedido (sin pytest ni otro benchmark en paralelo), con la caché de `support_ratio` ya incluida | con una instancia residual de `CargoOptimizer3D`, Chrome y Dropbox activos en el sistema durante la medición | 1362,77 s | 146,7 % más lento (0,41×) — **descartada como oficial** |
+
+**El speedup final de esta fase queda pendiente de confirmar en una
+máquina descargada.** La segunda medición "limpia" (sin procesos de
+prueba propios corriendo) coincidió con otros procesos del sistema
+operativo activos que no se controlaron ni se cerraron antes de medir,
+y su tiempo es indistinguible de contención de CPU ajena al código: el
+resultado del algoritmo fue exactamente igual en las tres ejecuciones
+(mismo `packed_count`, misma utilización, cero avisos), lo que descarta
+un defecto de corrección o una regresión algorítmica real, pero no
+permite descartar contención como causa del tiempo alto. La única cifra
+de espera medida en condiciones verificadamente aisladas
+(472,73 s, 14,4 % más rápida) no incluye todavía la caché de
+`support_ratio` de esta misma fase. No se debe citar ningún número de
+"×" de esta fase como definitivo hasta repetir la medición en una
+máquina sin otras aplicaciones activas — ver `docs/Roadmap.md`.
+
 ## Fase OPT-16 (2026-07-18): caso real de 2000 unidades — de ~2973 s a ~552-960 s, mismo resultado exacto
 
 Caso real reportado: contenedor 20' (589×235×239 cm, 28180 kg), un

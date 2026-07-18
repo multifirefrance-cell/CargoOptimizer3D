@@ -174,7 +174,10 @@ class ProductQuickAddPanel(QWidget):
     def _on_create_new_sku(self) -> None:
         if self._repository is None:
             return
-        dialog = CatalogProductEditorDialog(self, title="Nuevo producto")
+        existing_colors = tuple(unit.color_hex for unit in self._repository.list_active())
+        dialog = CatalogProductEditorDialog(
+            self, title="Nuevo producto", existing_colors=existing_colors
+        )
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
         unit = dialog.result_load_unit()

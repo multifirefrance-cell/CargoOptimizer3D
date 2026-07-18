@@ -88,14 +88,12 @@ def test_two_boxes_aligned_in_x_when_y_has_no_room() -> None:
     result = PackingEngine().optimize(request)
     assert result.packed_count == 2
     positions = sorted((p.x_cm, p.y_cm, p.z_cm) for p in result.placements)
-    # La orientación preferida ya no es necesariamente LWH_XYZ (huella
-    # 40x30): `select_preferred_orientation` fija, una vez por Load
-    # Unit, la orientación que maximiza cuántas unidades caben por piso
-    # (ver docs/OptimizationEngine.md) — en este espacio de 30 cm de
-    # ancho, HWL_XYZ (huella 20x30) tesela el doble de veces en los 200
-    # cm de largo (10 huecos de 20 cm frente a 5 de 40 cm), así que las
-    # dos cajas quedan alineadas en X cada 20 cm, no 40.
-    assert positions == [(0.0, 0.0, 0.0), (20.0, 0.0, 0.0)]
+    # Con las orientaciones por defecto reducidas a las 2 horizontales
+    # (fase OPT-17: `LWH_XYZ`/`WLH_XYZ`, ver `DEFAULT_ORIENTATION_CODES`),
+    # `WLH_XYZ` (huella 30x40) no cabe en un espacio de 30 cm de ancho —
+    # solo queda `LWH_XYZ` (huella 40x30) como orientación factible, así
+    # que las dos cajas quedan alineadas en X cada 40 cm.
+    assert positions == [(0.0, 0.0, 0.0), (40.0, 0.0, 0.0)]
 
 
 def test_two_boxes_stacked_in_z_when_no_room_beside() -> None:

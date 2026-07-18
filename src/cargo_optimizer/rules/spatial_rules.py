@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from cargo_optimizer.geometry.bounds import fits_inside_loading_space
 from cargo_optimizer.geometry.collision import boxes_overlap
-from cargo_optimizer.geometry.support import is_supported
+from cargo_optimizer.geometry.constants import GEOMETRY_EPSILON_CM
+from cargo_optimizer.geometry.support import support_ratio as compute_support_ratio
 from cargo_optimizer.rules.codes import COLLISION, OUT_OF_BOUNDS, UNSUPPORTED
 from cargo_optimizer.rules.context import PlacementRuleContext
 from cargo_optimizer.rules.results import RuleEvaluation, RuleSeverity, RuleViolation
@@ -105,12 +106,19 @@ def evaluate_support(
     índice espacial cuando está disponible, `existing_boxes` completo
     si no) en vez de recorrer siempre todas las cajas existentes — ver
     docstring de `evaluate_collision`.
+
+    Fase OPT-17: si `context.precomputed_support_ratio` ya viene
+    calculado (el llamador, `optimization.candidates.build_candidate`,
+    lo necesitaba de todas formas para puntuar el candidato), se
+    reutiliza en vez de volver a calcular la unión de rectángulos — ver
+    docstring de `PlacementRuleContext`. Sin precálculo, el
+    comportamiento es exactamente el de antes de esta fase.
     """
-    if is_supported(
-        context.candidate_box,
-        context.nearby_existing_boxes,
-        minimum_support_ratio=minimum_support_ratio,
-    ):
+    if context.precomputed_support_ratio is not None:
+        ratio = context.precomputed_support_ratio
+    else:
+        ratio = compute_support_ratio(context.candidate_box, context.nearby_existing_boxes)
+    if ratio >= minimum_support_ratio - GEOMETRY_EPSILON_CM:
         return RuleEvaluation.allowed()
     return RuleEvaluation.rejected(
         (

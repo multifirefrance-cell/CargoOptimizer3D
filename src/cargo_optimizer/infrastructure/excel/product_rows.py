@@ -20,7 +20,11 @@ from uuid import uuid4
 from cargo_optimizer.domain.dimensions import Dimensions3D
 from cargo_optimizer.domain.enums import ExtinguisherAgent, OrientationCode, PackageType
 from cargo_optimizer.domain.exceptions import DomainValidationError
-from cargo_optimizer.domain.load_unit import DEFAULT_MAX_STACK_COUNT, LoadUnit
+from cargo_optimizer.domain.load_unit import (
+    DEFAULT_MAX_STACK_COUNT,
+    DEFAULT_ORIENTATION_CODES,
+    LoadUnit,
+)
 from cargo_optimizer.infrastructure.excel.row_parsing import (
     RowConversionError,
     format_bool,
@@ -91,7 +95,13 @@ def _label_for(mapping: Mapping[Any, str], value: object) -> str:
 
 
 def _parse_orientations(raw: object, *, row_number: int) -> tuple[OrientationCode, ...]:
-    if is_blank(raw) or str(raw).strip().casefold() == _ALL_ORIENTATIONS_LABEL.casefold():
+    """Celda vacía (producto nuevo sin configurar) -> `DEFAULT_ORIENTATION_CODES` (fase
+    OPT-17), nunca las 6. Una celda con el texto explícito "Todas" sigue significando
+    las 6 tal cual — es una elección explícita del usuario/exportación anterior, no un
+    valor por defecto silencioso."""
+    if is_blank(raw):
+        return DEFAULT_ORIENTATION_CODES
+    if str(raw).strip().casefold() == _ALL_ORIENTATIONS_LABEL.casefold():
         return tuple(OrientationCode)
     codes: list[OrientationCode] = []
     for part in str(raw).split(","):
