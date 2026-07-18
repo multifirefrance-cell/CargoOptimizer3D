@@ -162,7 +162,12 @@ parcialmente, en una `LoadUnit` con `fragile=True`, usando soporte
 físico real (contacto de altura + solape horizontal positivo), no una
 coincidencia aproximada de X/Y. Una `LoadUnit` frágil sí puede
 colocarse sobre otra: la regla solo restringe qué se coloca *encima*
-de ella.
+de ella. Desde la fase OPT-16 (ver `docs/OptimizerPerformance.md`),
+pasa el índice espacial y `box_by_sequence_number`/
+`placement_by_sequence_number` a `find_direct_supporting_placements` —
+antes no lo hacía, así que reconstruía la caja de todos los
+`Placement` existentes en cada candidato evaluado, el cuello de
+botella dominante medido en el caso real de 2000 unidades.
 
 ## Soporte
 

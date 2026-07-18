@@ -58,6 +58,30 @@ recorriendo la cadena de soporte hacia arriba de forma recursiva — ver
 toda prueba unitaria que construye un `PlacementRuleContext` a mano),
 `stack_level_by_sequence_number` los calcula en una única pasada lineal
 no recursiva (`compute_stack_levels`). Mismo resultado en ambos casos.
+
+`precomputed_placement_by_sequence_number` (fase OPT-16, ver
+`docs/OptimizerPerformance.md`) es la misma familia de caché
+incremental que las anteriores, para `Placement` completos (no solo
+sus cajas): `optimization.state.PackingState` lo mantiene añadiendo una
+entrada por `Placement` aceptado. Existe porque `find_direct_supporting_placements`
+(`rules.stack_levels`), al recibir un índice espacial, necesitaba
+igualmente traducir el subconjunto barato de `sequence_number` cercanos
+de vuelta a objetos `Placement` filtrando `existing_placements`
+completo (`O(n)` por candidato pese al índice) — con este mapa, esa
+traducción es `O(k)` sobre el subconjunto cercano. Cuando no se
+proporciona (`None`), el comportamiento es exactamente el de antes:
+filtrar `existing_placements` completo.
+
+`precomputed_total_weight_kg` (fase OPT-16) es el peso bruto total ya
+acumulado por los `Placement` existentes (`sum(unit.weight_kg for ...)`),
+mantenido incrementalmente por `PackingState` en el mismo momento en
+que acepta cada `Placement` — nunca una cifra de peso soportado por eje
+ni por caja individual (eso sigue sin existir, ver ADR de la fase
+OPT-13). Antes de esta fase, `rules.weight_rules.evaluate_loading_space_weight`
+recorría `existing_placements` completo (`O(n)`) en cada candidato
+evaluado para sumar este mismo total una y otra vez. Cuando no se
+proporciona (`None`), el comportamiento es exactamente el de antes:
+sumar `existing_placements` completo.
 """
 
 from __future__ import annotations
@@ -92,6 +116,8 @@ class PlacementRuleContext:
     precomputed_spatial_index: SpatialIndex | None = None
     precomputed_box_by_sequence_number: Mapping[int, AxisAlignedBox] | None = None
     precomputed_stack_level_by_sequence_number: Mapping[int, int] | None = None
+    precomputed_placement_by_sequence_number: Mapping[int, Placement] | None = None
+    precomputed_total_weight_kg: float | None = None
 
     @property
     def nearby_sequence_numbers(self) -> frozenset[int] | None:
@@ -117,15 +143,21 @@ class PlacementRuleContext:
         nunca apilamiento/peso, que sí recorren distintas cajas
         candidatas en cada paso y necesitan volver a consultar el
         índice — ver `rules.stacking_rules`).
+
+        Fase OPT-16: antes de esta fase, filtraba `existing_placements`
+        completo (`O(n)`, ver `docs/OptimizerPerformance.md`) comparando
+        cada `sequence_number` contra `nearby` uno a uno, pese a que
+        `nearby` ya es el subconjunto pequeño que hacía falta — el
+        índice espacial reducía cuántas cajas se comparaban
+        geométricamente, pero no cuántas se recorrían para encontrarlas.
+        Ahora traduce `nearby` directamente vía `box_by_sequence_number`
+        (`O(k)`, `k = len(nearby)`), con el mismo resultado exacto.
         """
         nearby = self.nearby_sequence_numbers
         if nearby is None:
             return self.existing_boxes
-        return tuple(
-            box
-            for placement, box in zip(self.existing_placements, self.existing_boxes, strict=True)
-            if placement.sequence_number in nearby
-        )
+        box_by_sequence_number = self.box_by_sequence_number
+        return tuple(box_by_sequence_number[sequence_number] for sequence_number in nearby)
 
     @property
     def candidate_box(self) -> AxisAlignedBox:

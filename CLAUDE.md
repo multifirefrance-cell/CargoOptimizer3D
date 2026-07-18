@@ -450,7 +450,46 @@ conservado como historial).
   espacial dentro de `rules`/`geometry`, fuera del alcance de la fase
   4.2 (implementada después, fase OPT-11). No prometer rendimiento
   distinto al documentado en `docs/OptimizerPerformance.md` sin haber
-  medido la estructura real, con ADR explícito.
+  medido la estructura real, con ADR explícito. **Actualizado
+  parcialmente por la fase OPT-16** (ver más abajo): el índice espacial
+  de OPT-11 sí reduce ahora la mayoría de ese coste real, tras corregir
+  varios puntos que no lo aprovechaban correctamente.
+- **Fase OPT-16 (2026-07-18, caso real de 2000 unidades: ~2973 s →
+  ~552-960 s, mismo resultado exacto, ver `docs/OptimizerPerformance.md`)**:
+  el índice espacial de OPT-11 existía pero varias reglas no lo
+  aprovechaban — cada una filtraba `existing_placements` completo
+  (`O(n)`) para traducir el subconjunto barato del índice de vuelta a
+  `Placement`/caja, en vez de indexar directamente. Corregidos:
+  `rules/fragility_rules.py::evaluate_fragility` (el más grave: ni
+  siquiera recibía el índice ni `box_by_sequence_number`, así que
+  siempre recorría **todos** los placements existentes reconstruyendo
+  su caja desde cero); `rules/context.py::nearby_existing_boxes` y
+  `rules/spatial_rules.py::evaluate_collision` (zip+filtro sobre listas
+  completas en vez de indexar por `sequence_number`);
+  `rules/stack_levels.py::find_direct_supporting_placements` (mismo
+  patrón, nuevo campo `PackingState.placement_by_sequence_number`
+  mantenido incrementalmente, igual criterio que
+  `box_by_sequence_number`); `rules/weight_rules.py::evaluate_loading_space_weight`
+  (sumaba `existing_placements` completo por candidato; ahora usa
+  `PackingState._packed_weight_kg`, incremental, vía
+  `precomputed_total_weight_kg`). Además, `GreedyExtremePointStrategy._search_best_candidate`
+  corta la búsqueda en cuanto encuentra un candidato válido en una
+  posición (probadas todas sus orientaciones), porque `positions` ya
+  llega ordenado por `(z, x, y)` — los mismos tres campos que dominan
+  `score_candidate` lexicográficamente — así que ninguna posición
+  posterior puede ganar; no es la heurística de "punto dominado" que
+  el bullet de `pruning.py` de arriba prohíbe (es una consecuencia
+  exacta del orden del score, verificada porque el resultado no cambió
+  en ningún caso probado). `PackingState.cached_pruned_candidate_positions`
+  memoiza `generate_candidate_positions`/`prune_candidate_positions`
+  mientras `len(_placements)` no cambie (dos intentos consecutivos sin
+  ninguna aceptación de por medio, frecuente en la ronda 2, producían
+  antes exactamente el mismo resultado). Ninguno de estos cambios altera
+  ninguna decisión del algoritmo — solo su coste. Se probó también
+  (experimento descartado, sin tocar el código) un
+  `select_preferred_orientation` que teselara los 3 ejes en vez de solo
+  XY: empeoró el resultado real (−26 unidades) — no cambiar esa función
+  basándose en esa intuición sin volver a medir.
 - **Fase OPT-02 (rendimiento, backlog)**: `PlacementRuleContext`
   (`rules/context.py`) acepta un `precomputed_existing_boxes` opcional
   (y expone `box_by_sequence_number`) para que `optimization` le pase

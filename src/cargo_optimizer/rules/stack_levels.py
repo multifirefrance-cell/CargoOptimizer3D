@@ -43,15 +43,38 @@ def _nearby_placements(
     candidate_box: AxisAlignedBox,
     existing_placements: Sequence[Placement],
     spatial_index: SpatialIndex | None,
+    placement_by_sequence_number: Mapping[int, Placement] | None = None,
 ) -> Sequence[Placement]:
     """`existing_placements`, filtrados vía índice espacial cuando está disponible.
 
     Sin índice (`None`), devuelve `existing_placements` completo —
     idéntico al comportamiento anterior a la fase OPT-11.
+
+    Fase OPT-16: con índice pero sin `placement_by_sequence_number`,
+    seguía filtrando `existing_placements` completo (`O(n)`) para
+    traducir `nearby` de vuelta a objetos `Placement` — el índice
+    reducía cuántos placements se comparaban geométricamente, pero no
+    cuántos se recorrían para encontrarlos. Con `placement_by_sequence_number`
+    disponible (mantenido incrementalmente por `PackingState`), la
+    traducción es `O(k)` directa (`k = len(nearby)`). Mismo resultado
+    en ambos casos.
     """
     if spatial_index is None:
         return existing_placements
     nearby = spatial_index.query_box(candidate_box)
+    if placement_by_sequence_number is not None:
+        # `nearby` puede incluir el propio candidato cuando se llama
+        # desde `PackingState.accept_placement` (su caja ya está en el
+        # índice espacial en ese punto, antes de calcular sus propios
+        # soportes) — `placement_by_sequence_number` deliberadamente
+        # todavía no lo contiene entonces, así que el filtro `in`
+        # lo excluye de forma natural, igual que hacía el filtrado
+        # completo de `existing_placements` de antes de esta fase.
+        return [
+            placement_by_sequence_number[sequence_number]
+            for sequence_number in nearby
+            if sequence_number in placement_by_sequence_number
+        ]
     return [p for p in existing_placements if p.sequence_number in nearby]
 
 
@@ -60,17 +83,20 @@ def find_direct_supporting_placements(
     existing_placements: Sequence[Placement],
     box_by_sequence_number: Mapping[int, AxisAlignedBox] | None = None,
     spatial_index: SpatialIndex | None = None,
+    placement_by_sequence_number: Mapping[int, Placement] | None = None,
 ) -> tuple[Placement, ...]:
     """Placements cuya cara superior toca la base de `candidate_box` con solape positivo."""
     result: list[Placement] = []
-    for placement in _nearby_placements(candidate_box, existing_placements, spatial_index):
+    for placement in _nearby_placements(
+        candidate_box, existing_placements, spatial_index, placement_by_sequence_number
+    ):
         box = _box_of(placement, box_by_sequence_number)
         if abs(box.max_z - candidate_box.min_z) > GEOMETRY_EPSILON_CM:
             continue
         if horizontal_overlap_area_cm2(candidate_box, box) <= GEOMETRY_EPSILON_CM:
             continue
         result.append(placement)
-    return tuple(result)
+    return tuple(sorted(result, key=lambda p: p.sequence_number))
 
 
 def stack_level_of(

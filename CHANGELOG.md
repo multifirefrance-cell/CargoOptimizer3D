@@ -8,10 +8,12 @@ menores sin aviso adicional.
 
 ## [Unreleased]
 
-Correcciones de calidad de cubicaje sobre un caso real reportado
-(162/300 unidades cargadas por `max_stack_count=1` accidental en ambos
-SKU del escenario): sin cambios en el algoritmo de cubicaje
-(`optimization`/`geometry`) en ninguna de las dos fases.
+Correcciones sobre dos casos reales reportados: cubicaje deficiente
+(162/300 unidades cargadas por `max_stack_count=1` accidental) y un
+caso lento de 2000 unidades (~50 min). Fases OPT-14/OPT-15: sin
+cambios en el algoritmo de cubicaje. Fase OPT-16: cambios solo de
+rendimiento en `optimization`/`rules`, mismo resultado exacto
+verificado en el caso real (1397/2000, 84,46 % de utilización).
 
 ### Changed
 
@@ -31,6 +33,24 @@ SKU del escenario): sin cambios en el algoritmo de cubicaje
   su propio SKU, igual que cualquier otro `LoadUnit`. La regla de
   horizontalidad de estos extintores (no vertical) no se toca. Ver
   ADR-0014 y `docs/OptimizerPerformance.md`, "Fase OPT-15".
+- **Fase OPT-16**: caso real de 2000 unidades, de ~2973 s a ~552-960 s
+  (3,1×-5,4× según carga de la máquina), mismo resultado exacto
+  (1397/2000 cargadas). El índice espacial de la fase OPT-11 existía
+  pero varias reglas no lo aprovechaban correctamente: `evaluate_fragility`
+  no recibía ni el índice ni `box_by_sequence_number` (recorría todos
+  los placements existentes reconstruyendo su caja en cada candidato,
+  el cuello de botella dominante); `evaluate_collision`/
+  `nearby_existing_boxes`/`find_direct_supporting_placements` seguían
+  filtrando `existing_placements` completo pese a tener el índice;
+  `evaluate_loading_space_weight` sumaba el peso de todos los
+  placements en cada candidato. Además, corte temprano exacto (no
+  heurístico) en la búsqueda de candidatos aprovechando que el score
+  ya ordena por `(z, x, y)` igual que las posiciones, y memoización de
+  la generación/poda de puntos candidatos mientras el layout no
+  cambie. Sin cambios de comportamiento: cero colisiones, cero cajas
+  fuera de espacio, cero cajas flotantes, `max_stack_count`,
+  orientaciones permitidas y peso máximo del espacio siguen exactamente
+  igual. Ver `docs/OptimizerPerformance.md`, "Fase OPT-16".
 
 ## [1.0.0b2] - 2026-07-16
 

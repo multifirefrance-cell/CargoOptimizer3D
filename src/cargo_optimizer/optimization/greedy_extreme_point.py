@@ -19,7 +19,6 @@ from cargo_optimizer.domain.packing_result import PackingResult
 from cargo_optimizer.domain.placement import Placement
 from cargo_optimizer.domain.position import Position3D
 from cargo_optimizer.geometry.box import AxisAlignedBox
-from cargo_optimizer.geometry.candidate_points import generate_candidate_positions
 from cargo_optimizer.optimization.cancellation import CancellationToken
 from cargo_optimizer.optimization.candidates import (
     build_candidate,
@@ -35,7 +34,6 @@ from cargo_optimizer.optimization.models import (
     PhysicalLoadInstance,
 )
 from cargo_optimizer.optimization.ordering import order_instances
-from cargo_optimizer.optimization.pruning import prune_candidate_positions
 from cargo_optimizer.optimization.result_builder import ALGORITHM_NAME, build_packing_result
 from cargo_optimizer.optimization.state import PackingState
 from cargo_optimizer.optimization.strategy import StrategyCapabilities
@@ -254,13 +252,8 @@ class GreedyExtremePointStrategy:
         existing_placements = state.placements
         existing_boxes = state.accepted_boxes
         existing_bounding_dimensions = state.bounding_dimensions
-        raw_positions = generate_candidate_positions(existing_placements)
-        positions, pruned_violation_codes = prune_candidate_positions(
-            raw_positions,
-            request.loading_space,
-            existing_boxes,
-            spatial_index=state.spatial_index,
-            box_by_sequence_number=state.box_by_sequence_number,
+        positions, pruned_violation_codes = state.cached_pruned_candidate_positions(
+            request.loading_space
         )
 
         violation_codes_seen: set[str] = set(pruned_violation_codes)
@@ -323,9 +316,37 @@ class GreedyExtremePointStrategy:
         desde donde lo dejó la llamada anterior, para que
         `generation_index` (desempate final del score) siga siendo
         consistente entre ambas pasadas.
+
+        Corte temprano por posición (fase OPT-16, ver
+        `docs/OptimizerPerformance.md`): `positions` ya llega ordenado
+        ascendentemente por `(z, x, y)` (`geometry.candidate_points.
+        generate_candidate_positions`), y `score_candidate` compara
+        exactamente `(z, x, y, ...)` en ese mismo orden como los tres
+        primeros componentes del score (ver `optimization/scoring.py`).
+        Como las posiciones, ya sin duplicados, son estrictamente
+        crecientes en ese orden, ningún candidato en una posición
+        posterior puede tener un score menor que el mejor candidato ya
+        encontrado en una posición anterior — se compara primero
+        `(z, x, y)`, y toda posición posterior tiene ese prefijo
+        estrictamente mayor. Por eso, en cuanto **alguna** orientación
+        resulta válida en una posición (probadas todas las de
+        `orientation_options` para esa posición, que sí pueden
+        desempatar entre sí por soporte/volumen/residual/orientación),
+        se puede dejar de recorrer posiciones posteriores: no es una
+        heurística de "punto dominado" (la que el diseño original de
+        `pruning.py` descarta explícitamente) sino una consecuencia
+        matemática exacta y determinista del propio orden lexicográfico
+        del score, nunca una aproximación — mismo resultado exacto que
+        recorrer todas las posiciones y quedarse con el score mínimo,
+        confirmado por `tests/optimization/test_regression_greedy_extreme_point.py`
+        (conteos de referencia sin cambios). Cuando ninguna posición
+        resulta válida, se recorren todas igual que antes, así que
+        `violation_codes_seen` sigue recogiendo exactamente los mismos
+        códigos que antes de esta fase.
         """
         best: CandidatePlacement | None = None
         for position in positions:
+            position_best: CandidatePlacement | None = None
             for orientation_index, orientation in orientation_options:
                 candidate = build_candidate(
                     instance=instance,
@@ -343,15 +364,21 @@ class GreedyExtremePointStrategy:
                     spatial_index=state.spatial_index,
                     box_by_sequence_number=state.box_by_sequence_number,
                     stack_level_by_sequence_number=state.stack_level_by_sequence_number,
+                    placement_by_sequence_number=state.placement_by_sequence_number,
+                    total_weight_kg=state.packed_weight_kg,
                 )
                 state.record_candidate_generated()
                 generation_index += 1
 
                 if candidate.evaluation.is_allowed:
-                    if best is None or candidate.score < best.score:
-                        best = candidate
+                    if position_best is None or candidate.score < position_best.score:
+                        position_best = candidate
                 else:
                     violation_codes_seen.update(v.code for v in candidate.evaluation.violations)
+
+            if position_best is not None:
+                best = position_best
+                break
 
         return best, generation_index
 

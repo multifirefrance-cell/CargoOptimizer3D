@@ -48,12 +48,31 @@ def current_loaded_weight_kg(
 
 
 def evaluate_loading_space_weight(context: PlacementRuleContext) -> RuleEvaluation:
-    """Rechaza si el peso total (existente + candidato) supera `loading_space.max_weight_kg`."""
+    """Rechaza si el peso total (existente + candidato) supera `loading_space.max_weight_kg`.
+
+    Fase OPT-16 (ver `docs/OptimizerPerformance.md`): cuando
+    `context.precomputed_total_weight_kg` está disponible
+    (`PackingState` lo mantiene incrementalmente, sumando el peso de
+    cada `Placement` en el mismo momento en que lo acepta), se usa
+    directamente en vez de recorrer `existing_placements` completo
+    (`current_loaded_weight_kg`, `O(n)`) en cada candidato evaluado —
+    antes de esta fase, ese recorrido se repetía sin excepción para
+    cada candidato, con `existing_placements` creciendo hasta el
+    tamaño final del layout. Sin el valor precalculado (`None`, el caso
+    de toda prueba unitaria que construye un `PlacementRuleContext` a
+    mano), el comportamiento es exactamente el de antes: sumar
+    `existing_placements` completo. Mismo resultado en ambos casos,
+    nunca una aproximación: esto sigue siendo únicamente el peso bruto
+    total acumulado, nunca peso por eje ni centro de gravedad.
+    """
     max_weight = context.loading_space.max_weight_kg
     if max_weight is None:
         return RuleEvaluation.allowed()
 
-    total = current_loaded_weight_kg(context.existing_placements, context.load_units_by_id)
+    if context.precomputed_total_weight_kg is not None:
+        total = context.precomputed_total_weight_kg
+    else:
+        total = current_loaded_weight_kg(context.existing_placements, context.load_units_by_id)
     total += context.load_unit.weight_kg
 
     if total <= max_weight + WEIGHT_TOLERANCE_KG:

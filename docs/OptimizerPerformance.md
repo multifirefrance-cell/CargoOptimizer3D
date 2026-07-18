@@ -471,6 +471,150 @@ esa estructura — ver `docs/Roadmap.md` y `docs/ProductBacklog.md`,
 paso real y verificado en esa dirección, no el cierre completo del
 ítem).
 
+## Fase OPT-16 (2026-07-18): caso real de 2000 unidades — de ~2973 s a ~552-960 s, mismo resultado exacto
+
+Caso real reportado: contenedor 20' (589×235×239 cm, 28180 kg), un
+único SKU "111107" (50×20×20 cm, 1 kg, `quantity=2000`,
+`max_stack_count=30`). Resultado previo a esta fase: 1397/2000
+cargadas (84,46 % de utilización), 2972,83 s (~49,5 min).
+
+### Pregunta 1: ¿1397 es la capacidad máxima razonable?
+
+Capacidad teórica por volumen puro (sin geometría): 33 081 185 cm³ /
+20 000 cm³ ≈ 1654 unidades — un límite que ninguna heurística de
+bin-packing real alcanza (problema NP-duro). Mejor rejilla regular de
+una sola orientación calculada a mano (las 3 permutaciones de
+50×20×20 sobre 589×235×239): 1331 (orientación con 50 cm sobre X, 11
+niveles de 20 cm de alto). El resultado real (1397) **ya supera esa
+rejilla regular** gracias al empaquetado en dos rondas con orientación
+preferida (fase previa, 2026-07-17): la ronda 1 tesela con la
+orientación que `select_preferred_orientation` elige — maximizar
+`floor(largo/x) × floor(ancho/y)` de una sola capa (footprint
+20×20, 319 unidades/capa × 4 capas de 50 cm = 1276) — y la ronda 2
+añade ~121 unidades más en el hueco vertical residual (~39 cm) con
+otra orientación (50×20 de footprint, 20 cm de alto). 1397/1654 ≈
+84,4 % del límite volumétrico absoluto: un resultado sólido para una
+heurística greedy real, no un error.
+
+**Experimento realizado (rechazado, sin tocar el código fuente):**
+se probó un `select_preferred_orientation` alternativo que maximiza
+la teselación completa en 3 ejes (`floor(largo/x) × floor(ancho/y) ×
+floor(alto/z)`, no solo XY) sobre este mismo caso real —
+`docs/OptimizerPerformance.md` documenta el resultado para que ninguna
+sesión futura repita el experimento sin necesidad: **1371/2000
+cargadas, 26 unidades MENOS que la heurística actual.** La intuición
+de que "maximizar la teselación en los 3 ejes debería ser siempre
+mejor" es incorrecta en la práctica: la heurística actual (solo XY) +
+la ronda 2 (todas las orientaciones sobre el remanente) ya superan al
+cálculo XYZ "más informado" para este caso real. **No se modifica
+`select_preferred_orientation`.**
+
+### Pregunta 2: ¿por qué tardaba ~50 minutos?
+
+Perfilado real (`cProfile`) a escala reducida (100/200/400/800
+unidades) reveló un patrón sistemático: **el índice espacial de la
+fase OPT-11 existía, pero varias reglas no lo aprovechaban
+correctamente**, cada una con una variante del mismo antipatrón —
+"traducir el subconjunto barato de `sequence_number` que devuelve el
+índice de vuelta a objetos `Placement`/caja filtrando la lista
+completa de `existing_placements`" (`O(n)` por candidato, pese a
+tener el índice):
+
+1. **`rules/fragility_rules.py::evaluate_fragility`** — el hallazgo
+   más grave: llamaba a `find_direct_supporting_placements` **sin
+   pasar el índice espacial ni el mapa `box_by_sequence_number`**,
+   así que reconstruía la caja de **todos** los `Placement`
+   existentes (`box_from_placement`, geometría real) en cada
+   candidato evaluado, sin excepción. Con el SKU de este caso real
+   (`fragile=False`), la regla nunca rechazaba nada — todo ese
+   recorrido era 100 % trabajo desperdiciado. Corregido: ahora recibe
+   los mismos argumentos que `evaluate_stack_count`.
+2. **`rules/context.py::nearby_existing_boxes`** y
+   **`rules/spatial_rules.py::evaluate_collision`** — con índice
+   disponible, seguían haciendo `zip(existing_placements,
+   existing_boxes)` + filtro por pertenencia a `nearby` (`O(n)`) para
+   traducir el subconjunto barato, en vez de indexar directamente vía
+   `box_by_sequence_number` (`O(k)`, `k = len(nearby)`).
+3. **`rules/stack_levels.py::find_direct_supporting_placements`** —
+   mismo patrón: `_nearby_placements` filtraba `existing_placements`
+   completo en vez de traducir `nearby` vía un mapa
+   `placement_by_sequence_number` (campo nuevo, mantenido
+   incrementalmente por `PackingState`, igual que
+   `box_by_sequence_number`).
+4. **`rules/weight_rules.py::current_loaded_weight_kg`** — sumaba el
+   peso de `existing_placements` completo en cada candidato, sin
+   ningún índice posible (el peso no es espacial): se sustituyó por un
+   total incremental (`PackingState._packed_weight_kg`, actualizado en
+   `accept_placement`), pasado como `precomputed_total_weight_kg`.
+5. **Corte temprano exacto en `GreedyExtremePointStrategy._search_best_candidate`**:
+   `positions` ya llega ordenado ascendentemente por `(z, x, y)`
+   (`geometry/candidate_points.py`), y `score_candidate` compara
+   exactamente `(z, x, y, ...)` en ese mismo orden como sus tres
+   primeros componentes (`optimization/scoring.py`). Como las
+   posiciones son estrictamente crecientes en ese orden tras el
+   deduplicado, ningún candidato en una posición posterior puede
+   ganarle en score a un candidato ya válido en una posición anterior
+   — se prueban todas las orientaciones de la posición actual (que sí
+   pueden desempatar entre sí) y, en cuanto alguna resulta válida, se
+   deja de recorrer posiciones posteriores. No es la heurística de
+   "punto dominado" que `pruning.py` descarta explícitamente (esa
+   comparaba candidatos entre sí de forma aproximada); es una
+   consecuencia matemática exacta del propio orden del score, sin
+   ninguna aproximación — confirmado porque el resultado final
+   (1397/2000, mismo peso, misma utilización) no cambió en ninguna
+   escala probada.
+6. **Memoización de puntos candidatos** (`PackingState.cached_pruned_candidate_positions`):
+   `generate_candidate_positions` + `prune_candidate_positions` solo
+   pueden cambiar de resultado cuando cambia el conjunto de placements
+   aceptados — dos intentos de colocación consecutivos sin ninguna
+   aceptación de por medio (todo el tramo final de la ronda 2, cuando
+   la mayoría de las 603 unidades pendientes fallan una tras otra sin
+   que nada cambie) recalculaban antes exactamente los mismos puntos.
+   Se invalida comparando `len(_placements)` con la última versión
+   calculada.
+
+### Resultado medido
+
+Mismo resultado exacto en las tres repeticiones del caso real
+(1397/2000 cargadas, 1397 kg, 84,46 % de utilización,
+`unpacked reasons: {'no_feasible_position': 603}` en las tres) —
+confirma que ninguna de las correcciones anteriores cambió ninguna
+decisión del algoritmo, solo su coste:
+
+| Ejecución | Tiempo |
+|---|---|
+| Antes de esta fase | 2972,83 s (~49,5 min) |
+| Después (máquina sin otra carga) | 552,30 s (~9,2 min) — **5,4×** |
+| Después (máquina con otras pruebas en paralelo) | 872,90 s / 962,81 s (~14-16 min) — **3,1-3,4×** |
+
+El nuevo cuello de botella dominante (perfilado a escala reducida tras
+todas las correcciones) es `rules/spatial_rules.py::evaluate_collision`
+(~45 % del tiempo total) — geometría de colisión real
+(`geometry.collision.boxes_overlap`) contra el subconjunto ya acotado
+por el índice espacial, no un recorrido `O(n)` oculto. Es trabajo
+genuino de verificación geométrica (imprescindible para garantizar
+cero colisiones), correctamente localizado — no queda ningún
+antipatrón conocido de los descritos arriba. Reducirlo más allá exige
+tocar cuántos candidatos se generan por instancia (no cuánto cuesta
+evaluar cada uno), un cambio de mayor alcance sobre el propio algoritmo
+de búsqueda de `GreedyExtremePointStrategy`, fuera del alcance de esta
+fase.
+
+### Invariantes verificados sin excepción
+
+Las tres ejecuciones completas del caso real terminaron sin lanzar
+`OptimizationInternalError` — la validación final de
+`PackingEngine.optimize()` (`geometry.layout_validation`, invocada
+siempre al final, nunca omitida) es la garantía estándar de este
+proyecto de que el layout resultante tiene cero colisiones, cero cajas
+fuera del `LoadingSpace` y cero cajas sin soporte válido; no se
+desactivó ni se relajó en ningún momento de esta fase. `max_stack_count`
+del SKU (30), las 6 orientaciones permitidas y el peso máximo del
+espacio (28180 kg, muy por encima de los 1397 kg reales) se siguieron
+respetando exactamente igual que antes — no se reintrodujo peso
+soportado acumulado, apilamiento recursivo, peso por eje ni centro de
+gravedad en ningún punto.
+
 ## Fase OPT-15 (2026-07-18): eliminación de la excepción automática de apilamiento para extintores
 
 No es un cambio de rendimiento: es la eliminación completa, a petición

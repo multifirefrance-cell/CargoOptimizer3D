@@ -21,9 +21,26 @@ def evaluate_fragility(context: PlacementRuleContext) -> RuleEvaluation:
     junto a otra sin que eso implique que la soporta. Una LoadUnit
     frágil sí puede colocarse *sobre* otra (esta regla solo restringe
     qué se coloca encima de ella, no dónde se coloca ella misma).
+
+    Fase OPT-16 (ver `docs/OptimizerPerformance.md`): antes de esta
+    fase, esta llamada no pasaba ni el índice espacial ni los mapas
+    precalculados de `context` — pese a que `PackingState` ya los
+    mantenía incrementalmente para el resto de reglas espaciales
+    (colisión, soporte, apilamiento). El efecto real: cada candidato
+    evaluado reconstruía `AxisAlignedBox` desde cero
+    (`box_from_placement`) para **todos** los `Placement` existentes,
+    sin excepción, fuera cual fuera el tamaño real del vecindario
+    geométrico — el cuello de botella dominante medido en el caso real
+    de 2000 unidades (~50 min para 1397 cargadas). Con estos argumentos,
+    el recorrido se acota al mismo subconjunto barato que ya usan
+    `evaluate_collision`/`evaluate_support`/`evaluate_stack_count`.
     """
     supporters = find_direct_supporting_placements(
-        context.candidate_box, context.existing_placements
+        context.candidate_box,
+        context.existing_placements,
+        context.box_by_sequence_number,
+        context.precomputed_spatial_index,
+        context.precomputed_placement_by_sequence_number,
     )
     violations = [
         RuleViolation(

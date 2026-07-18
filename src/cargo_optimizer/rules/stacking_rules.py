@@ -67,6 +67,7 @@ def evaluate_stack_count(context: PlacementRuleContext) -> RuleEvaluation:
         context.existing_placements,
         context.box_by_sequence_number,
         context.precomputed_spatial_index,
+        context.precomputed_placement_by_sequence_number,
     )
     level = stack_level_of(
         context.candidate_box, supporters, context.stack_level_by_sequence_number

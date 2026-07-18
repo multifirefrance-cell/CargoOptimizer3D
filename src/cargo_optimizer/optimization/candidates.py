@@ -112,6 +112,8 @@ def build_candidate(
     spatial_index: SpatialIndex | None = None,
     box_by_sequence_number: Mapping[int, AxisAlignedBox] | None = None,
     stack_level_by_sequence_number: Mapping[int, int] | None = None,
+    placement_by_sequence_number: Mapping[int, Placement] | None = None,
+    total_weight_kg: float | None = None,
 ) -> CandidatePlacement:
     """Construye y evalúa un único candidato.
 
@@ -144,6 +146,15 @@ def build_candidate(
     ver `optimization/state.py`), y se pasa aquí para que
     `evaluate_stack_count` no tenga que recorrer la cadena de soporte.
 
+    Desde la fase OPT-16, `placement_by_sequence_number` y
+    `total_weight_kg` siguen el mismo patrón: `PackingState` los
+    mantiene incrementalmente (ver `optimization/state.py`) para que
+    `evaluate_collision`/`evaluate_fragility`/`evaluate_stack_count` no
+    tengan que filtrar `existing_placements` completo para traducir el
+    subconjunto barato del índice espacial de vuelta a `Placement`, y
+    para que `evaluate_loading_space_weight` no tenga que sumar
+    `existing_placements` completo en cada candidato.
+
     El *score* (soporte, incremento de bounding volume, espacio
     residual) solo se calcula si la colocación resulta permitida: un
     candidato rechazado nunca se compara por *score* (ver
@@ -162,6 +173,8 @@ def build_candidate(
         precomputed_spatial_index=spatial_index,
         precomputed_box_by_sequence_number=box_by_sequence_number,
         precomputed_stack_level_by_sequence_number=stack_level_by_sequence_number,
+        precomputed_placement_by_sequence_number=placement_by_sequence_number,
+        precomputed_total_weight_kg=total_weight_kg,
     )
     evaluation = rules_engine.evaluate_placement(
         context, minimum_support_ratio=minimum_support_ratio
