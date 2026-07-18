@@ -7,7 +7,7 @@ No duplica lógica geométrica ni de negocio: delega siempre en
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from uuid import UUID
 
 from cargo_optimizer.domain.load_unit import LoadUnit
@@ -42,6 +42,45 @@ def orientation_fits_loading_space(orientation: Orientation, loading_space: Load
         and orientation.y_size_cm <= dims.width_cm
         and orientation.z_size_cm <= dims.height_cm
     )
+
+
+def select_preferred_orientation(
+    feasible_orientations: Sequence[tuple[int, Orientation]],
+    loading_space: LoadingSpace,
+) -> tuple[int, Orientation]:
+    """Elige, entre las orientaciones factibles de un Load Unit, la que mejor tesela el piso.
+
+    "Mejor tesela" = maximiza cuántas unidades caben en una sola capa
+    repitiendo esa orientación en una rejilla regular
+    (`floor(largo / x) * floor(ancho / y)`), no un cálculo real de
+    aprovechamiento (no considera alturas ni espacio residual entre
+    filas). Empate: se conserva la primera orientación en el orden ya
+    declarado (`orientation_order_index` más bajo), igual que hace el
+    resto del desempate de `score_candidate`.
+
+    Todas las instancias de un mismo Load Unit fijan esta orientación
+    como preferida (ver `GreedyExtremePointStrategy._process_instance`):
+    intentarlas todas de forma independiente, instancia a instancia,
+    permitía que el algoritmo alternara de orientación sin ningún
+    criterio de conjunto, generando una geometría irregular (alturas de
+    caja distintas en el mismo nivel) que fragmentaba los puntos
+    candidatos generados para capas posteriores — el motivo raíz de los
+    "muros"/columnas aisladas observados antes de esta fase (ver
+    `docs/OptimizationEngine.md`). Solo se abandona esta orientación
+    preferida, para una instancia concreta, cuando ninguna posición
+    resulta válida con ella (fallback en `_process_instance`).
+    """
+    dims = loading_space.internal_dimensions
+    best_index, best_orientation = feasible_orientations[0]
+    best_capacity = -1
+    for index, orientation in feasible_orientations:
+        capacity = int(dims.length_cm // orientation.x_size_cm) * int(
+            dims.width_cm // orientation.y_size_cm
+        )
+        if capacity > best_capacity:
+            best_capacity = capacity
+            best_index, best_orientation = index, orientation
+    return best_index, best_orientation
 
 
 _REJECTED_CANDIDATE_SCORE: tuple[float, float, float, float, float, float, int, int] = (

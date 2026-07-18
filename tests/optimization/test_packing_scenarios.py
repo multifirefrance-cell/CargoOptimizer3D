@@ -20,6 +20,14 @@ from cargo_optimizer.optimization.models import PackingProgress, PackingRequest
 from tests.optimization._helpers import DEFAULT_SPACE, make_individual_extinguisher, make_load_unit
 
 _DIMS = Dimensions3D(40.0, 30.0, 20.0)
+# Caja cúbica: la misma huella de piso (30x30) en cualquiera de las 6
+# orientaciones, así un "tight_space" de 30x30xN fuerza capacidad 1 por
+# piso sin importar qué orientación elija el motor — a diferencia de
+# `_DIMS` (40x30x20), donde una orientación rotada (20x30 de huella)
+# puede duplicar la capacidad de piso y abrir espacio junto a la
+# primera caja. Se usa en las pruebas de apilamiento/fragilidad de más
+# abajo, que necesitan aislar "no cabe nada más al lado" de verdad.
+_CUBE_DIMS = Dimensions3D(30.0, 30.0, 30.0)
 
 
 def _space(length: float, width: float, height: float, **overrides: object) -> LoadingSpace:
@@ -80,17 +88,30 @@ def test_two_boxes_aligned_in_x_when_y_has_no_room() -> None:
     result = PackingEngine().optimize(request)
     assert result.packed_count == 2
     positions = sorted((p.x_cm, p.y_cm, p.z_cm) for p in result.placements)
-    assert positions == [(0.0, 0.0, 0.0), (40.0, 0.0, 0.0)]
+    # La orientación preferida ya no es necesariamente LWH_XYZ (huella
+    # 40x30): `select_preferred_orientation` fija, una vez por Load
+    # Unit, la orientación que maximiza cuántas unidades caben por piso
+    # (ver docs/OptimizationEngine.md) — en este espacio de 30 cm de
+    # ancho, HWL_XYZ (huella 20x30) tesela el doble de veces en los 200
+    # cm de largo (10 huecos de 20 cm frente a 5 de 40 cm), así que las
+    # dos cajas quedan alineadas en X cada 20 cm, no 40.
+    assert positions == [(0.0, 0.0, 0.0), (20.0, 0.0, 0.0)]
 
 
 def test_two_boxes_stacked_in_z_when_no_room_beside() -> None:
-    tight_space = _space(40.0, 30.0, 100.0)
-    unit = make_load_unit(dimensions=_DIMS, quantity=2, max_stack_count=2)
+    # Caja cúbica (ver `_CUBE_DIMS`): con `_DIMS` (40x30x20), una
+    # orientación rotada (huella 20x30) cabría dos veces en un
+    # tight_space de 40 cm de largo, contradiciendo el propio nombre de
+    # esta prueba ("no room beside") — la huella cúbica no cambia con la
+    # orientación, así que "no hay sitio al lado" sigue siendo cierto
+    # sea cual sea la orientación elegida.
+    tight_space = _space(30.0, 30.0, 100.0)
+    unit = make_load_unit(dimensions=_CUBE_DIMS, quantity=2, max_stack_count=2)
     request = PackingRequest(loading_space=tight_space, load_units=(unit,))
     result = PackingEngine().optimize(request)
     assert result.packed_count == 2
     positions = sorted((p.x_cm, p.y_cm, p.z_cm) for p in result.placements)
-    assert positions == [(0.0, 0.0, 0.0), (0.0, 0.0, 20.0)]
+    assert positions == [(0.0, 0.0, 0.0), (0.0, 0.0, 30.0)]
 
 
 def test_contact_between_boxes_is_not_treated_as_collision() -> None:
@@ -132,8 +153,12 @@ def test_loading_space_weight_limit_partial_pack() -> None:
 
 
 def test_max_stack_count_is_respected() -> None:
-    tight_space = _space(40.0, 30.0, 100.0)
-    unit = make_load_unit(dimensions=_DIMS, quantity=2, max_stack_count=1)
+    # Caja cúbica (ver `_CUBE_DIMS`, mismo motivo que
+    # `test_two_boxes_stacked_in_z_when_no_room_beside`): con `_DIMS`
+    # una orientación rotada abriría sitio junto a la primera caja y
+    # esta prueba dejaría de aislar la regla de apilamiento.
+    tight_space = _space(30.0, 30.0, 100.0)
+    unit = make_load_unit(dimensions=_CUBE_DIMS, quantity=2, max_stack_count=1)
     request = PackingRequest(loading_space=tight_space, load_units=(unit,))
     result = PackingEngine().optimize(request)
     assert result.packed_count == 1
@@ -141,12 +166,17 @@ def test_max_stack_count_is_respected() -> None:
 
 
 def test_fragility_prevents_stacking_on_top() -> None:
-    tight_space = _space(40.0, 30.0, 100.0)
+    tight_space = _space(30.0, 30.0, 100.0)
     fragile_unit = make_load_unit(
-        sku="FRAGILE", dimensions=_DIMS, weight_kg=50.0, fragile=True, max_stack_count=2, quantity=1
+        sku="FRAGILE",
+        dimensions=_CUBE_DIMS,
+        weight_kg=50.0,
+        fragile=True,
+        max_stack_count=2,
+        quantity=1,
     )
     normal_unit = make_load_unit(
-        sku="NORMAL", dimensions=_DIMS, weight_kg=5.0, max_stack_count=2, quantity=1
+        sku="NORMAL", dimensions=_CUBE_DIMS, weight_kg=5.0, max_stack_count=2, quantity=1
     )
     request = PackingRequest(loading_space=tight_space, load_units=(fragile_unit, normal_unit))
     result = PackingEngine().optimize(request)
