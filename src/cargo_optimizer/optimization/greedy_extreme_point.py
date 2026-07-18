@@ -256,7 +256,11 @@ class GreedyExtremePointStrategy:
         existing_bounding_dimensions = state.bounding_dimensions
         raw_positions = generate_candidate_positions(existing_placements)
         positions, pruned_violation_codes = prune_candidate_positions(
-            raw_positions, request.loading_space, existing_boxes
+            raw_positions,
+            request.loading_space,
+            existing_boxes,
+            spatial_index=state.spatial_index,
+            box_by_sequence_number=state.box_by_sequence_number,
         )
 
         violation_codes_seen: set[str] = set(pruned_violation_codes)
@@ -336,6 +340,9 @@ class GreedyExtremePointStrategy:
                     rules_engine=rules_engine,
                     minimum_support_ratio=request.minimum_support_ratio,
                     generation_index=generation_index,
+                    spatial_index=state.spatial_index,
+                    box_by_sequence_number=state.box_by_sequence_number,
+                    stack_level_by_sequence_number=state.stack_level_by_sequence_number,
                 )
                 state.record_candidate_generated()
                 generation_index += 1

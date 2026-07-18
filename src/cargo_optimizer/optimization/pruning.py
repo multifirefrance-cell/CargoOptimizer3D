@@ -33,16 +33,32 @@ hacer que el conjunto pareciera compuesto únicamente por
 `LOADING_SPACE_WEIGHT_EXCEEDED` cuando en realidad no lo es. Por eso
 `prune_candidate_positions` devuelve también los códigos garantizados
 de los puntos podados.
+
+`_is_strictly_inside_any_box` (fase OPT-12, optimización de rendimiento
+pura — ver `docs/OptimizerPerformance.md`) recorría originalmente
+`existing_boxes` completo por cada punto candidato: O(n) por punto,
+O(n) puntos por instancia, uno de los cuellos de botella cúbicos
+identificados. Con `spatial_index` disponible, restringe esa
+comprobación al superconjunto pequeño que devuelve
+`SpatialIndex.query_point` — mismo criterio "sin falsos negativos" que
+`geometry.spatial_index`, la decisión final ("¿está estrictamente
+dentro?") sigue siendo exactamente la misma comparación exacta de
+antes, solo sobre menos cajas. Sin índice (`None`, el valor por
+defecto — el caso de toda prueba unitaria que llama a
+`prune_candidate_positions` directamente), el comportamiento es
+exactamente el de antes de esta fase: recorrer `existing_boxes`
+completo.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from cargo_optimizer.domain.loading_space import LoadingSpace
 from cargo_optimizer.domain.position import Position3D
 from cargo_optimizer.geometry.box import AxisAlignedBox
 from cargo_optimizer.geometry.constants import GEOMETRY_EPSILON_CM
+from cargo_optimizer.geometry.spatial_index import SpatialIndex
 from cargo_optimizer.rules.codes import COLLISION, OUT_OF_BOUNDS
 
 
@@ -55,23 +71,34 @@ def _is_outside_loading_space(position: Position3D, loading_space: LoadingSpace)
     )
 
 
+def _contains_strictly(box: AxisAlignedBox, position: Position3D) -> bool:
+    return (
+        box.min_x + GEOMETRY_EPSILON_CM < position.x_cm < box.max_x - GEOMETRY_EPSILON_CM
+        and box.min_y + GEOMETRY_EPSILON_CM < position.y_cm < box.max_y - GEOMETRY_EPSILON_CM
+        and box.min_z + GEOMETRY_EPSILON_CM < position.z_cm < box.max_z - GEOMETRY_EPSILON_CM
+    )
+
+
 def _is_strictly_inside_any_box(
-    position: Position3D, existing_boxes: Sequence[AxisAlignedBox]
+    position: Position3D,
+    existing_boxes: Sequence[AxisAlignedBox],
+    spatial_index: SpatialIndex | None,
+    box_by_sequence_number: Mapping[int, AxisAlignedBox] | None,
 ) -> bool:
-    for box in existing_boxes:
-        if (
-            box.min_x + GEOMETRY_EPSILON_CM < position.x_cm < box.max_x - GEOMETRY_EPSILON_CM
-            and box.min_y + GEOMETRY_EPSILON_CM < position.y_cm < box.max_y - GEOMETRY_EPSILON_CM
-            and box.min_z + GEOMETRY_EPSILON_CM < position.z_cm < box.max_z - GEOMETRY_EPSILON_CM
-        ):
-            return True
-    return False
+    if spatial_index is None or box_by_sequence_number is None:
+        return any(_contains_strictly(box, position) for box in existing_boxes)
+    nearby = spatial_index.query_point(position.x_cm, position.y_cm, position.z_cm)
+    return any(
+        _contains_strictly(box_by_sequence_number[identifier], position) for identifier in nearby
+    )
 
 
 def prune_candidate_positions(
     positions: Sequence[Position3D],
     loading_space: LoadingSpace,
     existing_boxes: Sequence[AxisAlignedBox],
+    spatial_index: SpatialIndex | None = None,
+    box_by_sequence_number: Mapping[int, AxisAlignedBox] | None = None,
 ) -> tuple[tuple[Position3D, ...], frozenset[str]]:
     """Elimina puntos candidatos que nunca podrán producir una colocación válida.
 
@@ -92,7 +119,9 @@ def prune_candidate_positions(
         if _is_outside_loading_space(position, loading_space):
             pruned_codes.add(OUT_OF_BOUNDS)
             continue
-        if _is_strictly_inside_any_box(position, existing_boxes):
+        if _is_strictly_inside_any_box(
+            position, existing_boxes, spatial_index, box_by_sequence_number
+        ):
             pruned_codes.add(COLLISION)
             continue
         kept.append(position)

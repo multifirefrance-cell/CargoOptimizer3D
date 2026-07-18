@@ -16,6 +16,7 @@ from cargo_optimizer.domain.orientation import Orientation
 from cargo_optimizer.domain.placement import Placement
 from cargo_optimizer.domain.position import Position3D
 from cargo_optimizer.geometry.box import AxisAlignedBox
+from cargo_optimizer.geometry.spatial_index import SpatialIndex
 from cargo_optimizer.geometry.support import support_ratio as compute_support_ratio
 from cargo_optimizer.optimization.models import CandidatePlacement, PhysicalLoadInstance
 from cargo_optimizer.optimization.scoring import (
@@ -108,6 +109,9 @@ def build_candidate(
     rules_engine: RulesEngine,
     minimum_support_ratio: float,
     generation_index: int,
+    spatial_index: SpatialIndex | None = None,
+    box_by_sequence_number: Mapping[int, AxisAlignedBox] | None = None,
+    stack_level_by_sequence_number: Mapping[int, int] | None = None,
 ) -> CandidatePlacement:
     """Construye y evalúa un único candidato.
 
@@ -127,6 +131,19 @@ def build_candidate(
     dentro de las reglas de apilamiento/peso soportado. Ver
     `docs/OptimizerPerformance.md`.
 
+    Desde la fase OPT-12, `box_by_sequence_number` sigue el mismo
+    patrón: quien llama (`GreedyExtremePointStrategy`, una vez por
+    instancia, nunca por candidato) puede calcularlo y pasarlo aquí
+    para que `PlacementRuleContext.box_by_sequence_number` no lo
+    reconstruya (`dict(zip(...))`, O(n)) en cada acceso — antes
+    `evaluate_stack_count` lo reconstruía para cada candidato.
+
+    Desde la fase OPT-13, `stack_level_by_sequence_number` sigue el
+    mismo patrón: `PackingState` lo mantiene incrementalmente (un nivel
+    por `Placement` aceptado, calculado una única vez, sin recursión —
+    ver `optimization/state.py`), y se pasa aquí para que
+    `evaluate_stack_count` no tenga que recorrer la cadena de soporte.
+
     El *score* (soporte, incremento de bounding volume, espacio
     residual) solo se calcula si la colocación resulta permitida: un
     candidato rechazado nunca se compara por *score* (ver
@@ -142,6 +159,9 @@ def build_candidate(
         existing_placements=existing_placements,
         load_units_by_id=load_units_by_id,
         precomputed_existing_boxes=existing_boxes,
+        precomputed_spatial_index=spatial_index,
+        precomputed_box_by_sequence_number=box_by_sequence_number,
+        precomputed_stack_level_by_sequence_number=stack_level_by_sequence_number,
     )
     evaluation = rules_engine.evaluate_placement(
         context, minimum_support_ratio=minimum_support_ratio
@@ -150,7 +170,7 @@ def build_candidate(
     candidate_box = AxisAlignedBox(position=position, dimensions=orientation.dimensions)
 
     if evaluation.is_allowed:
-        support = compute_support_ratio(candidate_box, existing_boxes)
+        support = compute_support_ratio(candidate_box, context.nearby_existing_boxes)
         volume_increment = bounding_volume_increment_from_dimensions(
             existing_bounding_dimensions,
             candidate_box.max_x,

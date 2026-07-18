@@ -24,6 +24,33 @@ recorría todos los placements aceptados por cada candidato, no por
 instancia. Aquí sí hay una única fuente de verdad: se actualizan
 exclusivamente dentro de `accept_placement`, en el mismo momento en que
 `_placements` cambia, así que no pueden desincronizarse.
+
+`_spatial_index` (fase OPT-11, índice espacial — ver
+`docs/OptimizerPerformance.md`) es la misma idea llevada a `rules`: un
+`SpatialIndex` mantenido incrementalmente, insertando cada caja
+aceptada exactamente una vez dentro de `accept_placement` (nunca
+reconstruido desde cero), para que `rules` pueda restringir sus
+comprobaciones de colisión/soporte/apilamiento a un superconjunto
+pequeño de candidatos cercanos en vez de recorrer siempre todos los
+placements existentes.
+
+`_box_by_sequence_number` (fase OPT-12) es la misma familia de caché
+incremental: antes, `PlacementRuleContext.box_by_sequence_number`
+reconstruía este mismo mapa completo (`dict(zip(...))`, O(n)) en cada
+acceso. Aquí se mantiene con una sola entrada añadida por aceptación
+(O(1)), y se pasa ya construido a cada candidato de la misma
+instancia — nunca se reconstruye desde cero salvo por la propia
+mutación de este estado.
+
+`_stack_level_by_sequence_number` (fase OPT-13, ver
+`docs/OptimizerPerformance.md`) es la misma idea aplicada al nivel de
+apilamiento: en vez de recorrer recursivamente la cadena de soporte en
+cada evaluación de candidato (el diseño anterior a esta fase,
+eliminado por completo, no solo optimizado), el nivel de cada
+`Placement` se calcula **una única vez**, en el momento de aceptarlo,
+a partir del nivel ya conocido de sus soportes directos — que, al
+haberse aceptado antes, ya está en este mismo diccionario. Nunca hace
+falta volver a subir por la cadena de soporte.
 """
 
 from __future__ import annotations
@@ -36,7 +63,9 @@ from cargo_optimizer.domain.load_unit import LoadUnit
 from cargo_optimizer.domain.placement import Placement
 from cargo_optimizer.domain.unpacked_unit import UnpackedUnit
 from cargo_optimizer.geometry.box import AxisAlignedBox, box_from_placement
+from cargo_optimizer.geometry.spatial_index import SpatialIndex
 from cargo_optimizer.optimization.models import CandidatePlacement, PhysicalLoadInstance
+from cargo_optimizer.rules.stack_levels import find_direct_supporting_placements, stack_level_of
 
 
 @dataclass(slots=True)
@@ -54,6 +83,9 @@ class PackingState:
     _bounding_max_x: float = 0.0
     _bounding_max_y: float = 0.0
     _bounding_max_z: float = 0.0
+    _spatial_index: SpatialIndex = field(default_factory=SpatialIndex)
+    _box_by_sequence_number: dict[int, AxisAlignedBox] = field(default_factory=dict)
+    _stack_level_by_sequence_number: dict[int, int] = field(default_factory=dict)
 
     @property
     def placements(self) -> tuple[Placement, ...]:
@@ -63,6 +95,21 @@ class PackingState:
     def accepted_boxes(self) -> tuple[AxisAlignedBox, ...]:
         """Cajas de los placements aceptados, en el mismo orden, cacheadas incrementalmente."""
         return tuple(self._accepted_boxes)
+
+    @property
+    def spatial_index(self) -> SpatialIndex:
+        """Índice espacial de las cajas aceptadas hasta ahora, mantenido incrementalmente."""
+        return self._spatial_index
+
+    @property
+    def box_by_sequence_number(self) -> Mapping[int, AxisAlignedBox]:
+        """Cajas aceptadas indexadas por `sequence_number`, mantenido incrementalmente."""
+        return self._box_by_sequence_number
+
+    @property
+    def stack_level_by_sequence_number(self) -> Mapping[int, int]:
+        """Nivel de apilamiento de cada placement aceptado, mantenido incrementalmente."""
+        return self._stack_level_by_sequence_number
 
     @property
     def bounding_dimensions(self) -> tuple[float, float, float]:
@@ -118,6 +165,14 @@ class PackingState:
         self._bounding_max_x = max(self._bounding_max_x, box.max_x)
         self._bounding_max_y = max(self._bounding_max_y, box.max_y)
         self._bounding_max_z = max(self._bounding_max_z, box.max_z)
+        self._spatial_index.insert(placement.sequence_number, box)
+        self._box_by_sequence_number[placement.sequence_number] = box
+        supporters = find_direct_supporting_placements(
+            box, self._placements[:-1], self._box_by_sequence_number, self._spatial_index
+        )
+        self._stack_level_by_sequence_number[placement.sequence_number] = stack_level_of(
+            box, supporters, self._stack_level_by_sequence_number
+        )
         return placement
 
     def reject_instance(

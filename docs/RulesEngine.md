@@ -55,11 +55,12 @@ nunca rechazan. Se construye con `RuleEvaluation.allowed(...)`,
 
 Ver `rules/codes.py` para la lista completa (`OUT_OF_BOUNDS`,
 `COLLISION`, `UNSUPPORTED`, `MAX_STACK_EXCEEDED`, `FRAGILE_SUPPORT`,
-`SUPPORTED_WEIGHT_EXCEEDED`, `LOADING_SPACE_WEIGHT_EXCEEDED`,
-`ORIENTATION_NOT_ALLOWED`, `UNKNOWN_LOAD_UNIT_REFERENCE`, y los tres
-específicos de extintores). Son constantes estables: forman parte del
-contrato de la API igual que los valores de los enums de dominio (ver
-ADR-0005).
+`LOADING_SPACE_WEIGHT_EXCEEDED`, `ORIENTATION_NOT_ALLOWED`,
+`UNKNOWN_LOAD_UNIT_REFERENCE`, y los tres específicos de extintores).
+Son constantes estables: forman parte del contrato de la API igual que
+los valores de los enums de dominio (ver ADR-0005).
+`SUPPORTED_WEIGHT_EXCEEDED` existió hasta la fase OPT-13 y se eliminó
+junto con la regla que lo producía (ver sección "Apilamiento").
 
 ## Orden de evaluación de `evaluate_candidate_placement`
 
@@ -70,14 +71,15 @@ ADR-0005).
 5. Soporte *(omitida si hay colisión)*
 6. Apilamiento *(omitida si hay colisión)*
 7. Fragilidad *(omitida si hay colisión)*
-8. Peso soportado *(omitida si hay colisión)*
-9. Peso máximo del Loading Space
+8. Peso máximo del Loading Space
 
 No se detiene en la primera violación: acumula todas las detectables.
-La única excepción es la omisión de soporte/apilamiento/fragilidad/peso
-soportado cuando ya hay colisión — las cuatro dependen de "qué soporta
-físicamente a la candidata", pregunta sin respuesta consistente sobre
-un volumen en disputa. Ver ADR-0007, Decisión 3.
+La única excepción es la omisión de soporte/apilamiento/fragilidad
+cuando ya hay colisión — las tres dependen de "qué soporta físicamente
+a la candidata", pregunta sin respuesta consistente sobre un volumen en
+disputa. Ver ADR-0007, Decisión 3 (el pipeline tenía originalmente una
+cuarta regla omitida en este caso, peso soportado, eliminada por
+completo en la fase OPT-13 — ver sección "Apilamiento").
 
 ## Reglas de orientación
 
@@ -122,11 +124,27 @@ completa entre `weight_kg`, `extinguisher_nominal_kg`,
 
 ## Apilamiento
 
-`count_stack_level` sigue la convención: una caja en el suelo está en
-nivel 1; una caja apoyada en una o más cajas está en
-`1 + max(nivel de cada soporte directo)` (la convención más
-restrictiva cuando el soporte proviene de niveles distintos).
-`evaluate_stack_count` rechaza si ese nivel supera
+**Fase OPT-13 (ver `docs/OptimizerPerformance.md`): se eliminó por
+completo el peso soportado acumulado y la propagación de peso entre
+cajas** (antes `evaluate_supported_weight`, `_weight_resting_on`,
+`_all_transitive_supporters`), junto con la recursión no acotada que
+implicaban. `stacking_rules` ahora solo controla el número máximo de
+niveles permitido por SKU. No es una limitación temporal: peso por eje
+y centro de gravedad quedan fuera de alcance por decisión explícita.
+
+`stack_level_of` (en `rules.stack_levels`, no recursivo) sigue la
+convención: una caja en el suelo está en nivel 1; una caja apoyada en
+una o más cajas está en `1 + max(nivel de cada soporte directo)` (la
+convención más restrictiva cuando el soporte proviene de niveles
+distintos) — pero asume que el nivel de cada soporte directo ya es
+conocido, nunca lo recalcula subiendo por la cadena. `PackingState`
+mantiene ese nivel de forma incremental (una vez por `Placement`
+aceptado, en el momento de aceptarlo); cuando no hay un mapa
+precalculado (pruebas unitarias que construyen un
+`PlacementRuleContext` a mano), `compute_stack_levels` calcula los
+niveles de todos los placements existentes en una única pasada lineal
+(ordenados por altura ascendente), tampoco recursiva.
+`evaluate_stack_count` rechaza si el nivel resultante supera
 `effective_max_stack_count`. No asume que una pila comparte SKU: el
 nivel se calcula únicamente por geometría de soporte.
 
@@ -142,12 +160,9 @@ de ella.
 ## Soporte
 
 `evaluate_support` delega en `cargo_optimizer.geometry.is_supported`;
-por defecto exige soporte completo (`minimum_support_ratio=1.0`).
-`evaluate_supported_weight` recorre **toda la cadena transitiva** de
-soportes (no solo el directo): si A soporta a B y B soporta al
-candidato, el límite `max_supported_weight_kg` de A también se
-comprueba con el peso acumulado que ya descansa sobre A más el
-candidato.
+por defecto exige soporte completo (`minimum_support_ratio=1.0`). No
+calcula peso soportado (ver sección "Apilamiento" — eliminado por
+completo en la fase OPT-13).
 
 ## Peso
 
@@ -180,15 +195,9 @@ if not result.is_allowed:
 
 ## Limitaciones actuales
 
-- `count_stack_level` y `_weight_resting_on` no memoizan entre llamadas
-  hermanas: para pilas muy profundas o muy ramificadas el coste puede
-  crecer más de lo estrictamente necesario. Aceptable para los
-  volúmenes de esta fase.
-- `_weight_resting_on` no distribuye el peso proporcionalmente entre
-  varios soportes: cada caja aporta su peso completo a cada uno de sus
-  soportes directos (evaluación conservadora, nunca subestima el peso).
-- No se calcula todavía distribución de peso por ejes ni centro de
-  gravedad (fase de optimización o posterior).
+- No se calcula peso soportado acumulado, propagación de peso entre
+  cajas, peso por eje ni centro de gravedad — decisión explícita de
+  alcance (fase OPT-13), no una limitación temporal a resolver después.
 - `RulesEngine` no tiene sistema de plugins, registro dinámico de
   reglas ni reflection: cada método delega en una función fija. Se
   añadirá solo si un caso de uso real lo requiere.

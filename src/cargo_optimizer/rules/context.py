@@ -16,6 +16,48 @@ aprovecharlo. Cuando no se proporciona (p. ej. en pruebas unitarias que
 construyen un `PlacementRuleContext` directamente), el comportamiento
 es exactamente el de antes: recalcular con `box_from_placement`. Mismo
 resultado en ambos casos, nunca una aproximación.
+
+`precomputed_spatial_index` (fase OPT-11, índice espacial — ver
+`docs/OptimizerPerformance.md` y `geometry/spatial_index.py`) es, igual
+que `precomputed_existing_boxes`, un campo opcional puramente aditivo:
+`optimization.state.PackingState` mantiene un `SpatialIndex`
+incremental y lo pasa aquí para que `rules` pueda restringir sus
+recorridos O(n) de `existing_placements` (colisión, soporte,
+apilamiento) a un superconjunto pequeño de candidatos cercanos, en vez
+de recorrer siempre todos los placements existentes. Cuando no se
+proporciona (`None`, el valor por defecto — el caso de toda prueba
+unitaria que construye un `PlacementRuleContext` a mano), el
+comportamiento es exactamente el de antes de esta fase: recorrer
+`existing_placements` completo. Mismo resultado en ambos casos, nunca
+una aproximación — el índice solo reduce cuántas comparaciones hacen
+falta, nunca decide por sí mismo si hay colisión o soporte (ver
+docstring de `SpatialIndex`).
+
+`precomputed_box_by_sequence_number` (fase OPT-12, misma familia de
+optimización pura de rendimiento — ver `docs/OptimizerPerformance.md`)
+existe porque `box_by_sequence_number` se reconstruía por completo
+(`dict(zip(...))`, O(n)) en **cada acceso**, y `evaluate_stack_count`
+accede a él para el mismo candidato — una reconstrucción O(n)
+redundante por candidato, sobre datos (`existing_placements`/
+`existing_boxes`) que no cambian entre candidatos de la misma
+instancia. `optimization` ya calcula `existing_boxes` una vez por
+instancia (nunca por candidato); este campo permite construir el mapa
+una sola vez en ese mismo punto y reutilizarlo para todos los
+candidatos de esa instancia. Cuando no se proporciona (`None`), el
+comportamiento es exactamente el de antes: reconstruir desde
+`existing_boxes`/`existing_placements` en cada acceso. Mismo resultado
+en ambos casos.
+
+`precomputed_stack_level_by_sequence_number` (fase OPT-13, ver
+`docs/OptimizerPerformance.md`) es el nivel de apilamiento ya conocido
+de cada `Placement` existente, indexado por `sequence_number`.
+`optimization.state.PackingState` lo mantiene de forma incremental (un
+nivel calculado una única vez al aceptar cada `Placement`, nunca
+recorriendo la cadena de soporte hacia arriba de forma recursiva — ver
+`rules.stacking_rules`). Cuando no se proporciona (`None`, el caso de
+toda prueba unitaria que construye un `PlacementRuleContext` a mano),
+`stack_level_by_sequence_number` los calcula en una única pasada lineal
+no recursiva (`compute_stack_levels`). Mismo resultado en ambos casos.
 """
 
 from __future__ import annotations
@@ -30,8 +72,10 @@ from cargo_optimizer.domain.orientation import Orientation
 from cargo_optimizer.domain.placement import Placement
 from cargo_optimizer.domain.position import Position3D
 from cargo_optimizer.geometry.box import AxisAlignedBox, box_from_placement
+from cargo_optimizer.geometry.spatial_index import SpatialIndex
 from cargo_optimizer.rules.codes import UNKNOWN_LOAD_UNIT_REFERENCE
 from cargo_optimizer.rules.results import RuleEvaluation, RuleSeverity, RuleViolation
+from cargo_optimizer.rules.stack_levels import compute_stack_levels
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +89,43 @@ class PlacementRuleContext:
     existing_placements: tuple[Placement, ...]
     load_units_by_id: Mapping[UUID, LoadUnit]
     precomputed_existing_boxes: tuple[AxisAlignedBox, ...] | None = None
+    precomputed_spatial_index: SpatialIndex | None = None
+    precomputed_box_by_sequence_number: Mapping[int, AxisAlignedBox] | None = None
+    precomputed_stack_level_by_sequence_number: Mapping[int, int] | None = None
+
+    @property
+    def nearby_sequence_numbers(self) -> frozenset[int] | None:
+        """Superconjunto barato de `sequence_number` cercanos a `candidate_box`, o `None`.
+
+        `None` cuando no hay índice disponible — el llamador debe
+        interpretarlo como "recorre `existing_placements` completo",
+        nunca como "no hay nada cerca" (ver docstring del módulo).
+        """
+        if self.precomputed_spatial_index is None:
+            return None
+        return self.precomputed_spatial_index.query_box(self.candidate_box)
+
+    @property
+    def nearby_existing_boxes(self) -> tuple[AxisAlignedBox, ...]:
+        """`existing_boxes`, filtradas a `nearby_sequence_numbers` cuando hay índice disponible.
+
+        Sin índice (`nearby_sequence_numbers is None`), devuelve
+        `existing_boxes` completo — idéntico al comportamiento anterior
+        a esta fase. Usado por reglas que solo necesitan las cajas (no
+        los `Placement`) para una comprobación geométrica sobre
+        `candidate_box` sin recursión (soporte directo del candidato,
+        nunca apilamiento/peso, que sí recorren distintas cajas
+        candidatas en cada paso y necesitan volver a consultar el
+        índice — ver `rules.stacking_rules`).
+        """
+        nearby = self.nearby_sequence_numbers
+        if nearby is None:
+            return self.existing_boxes
+        return tuple(
+            box
+            for placement, box in zip(self.existing_placements, self.existing_boxes, strict=True)
+            if placement.sequence_number in nearby
+        )
 
     @property
     def candidate_box(self) -> AxisAlignedBox:
@@ -62,19 +143,37 @@ class PlacementRuleContext:
     def box_by_sequence_number(self) -> Mapping[int, AxisAlignedBox]:
         """Cajas existentes indexadas por `Placement.sequence_number`, para búsqueda O(1).
 
-        Usado por `rules.stacking_rules` (soporte directo/transitivo,
-        peso soportado) para no reconstruir la misma caja repetidas
-        veces durante su propia recursión. Se construye una vez por
-        evaluación de candidato (no por sub-llamada recursiva), a
-        partir de `existing_boxes` — que ya es O(1) cuando el llamador
-        proporciona `precomputed_existing_boxes`.
+        Usado por `rules.stacking_rules` (soporte directo) para no
+        reconstruir la misma caja repetidas veces. Devuelve
+        `precomputed_box_by_sequence_number` cuando el llamador lo
+        proporciona (`optimization`, que lo calcula una única vez por
+        instancia — ver docstring del módulo); si no, reconstruye desde
+        `existing_boxes` exactamente como antes de esa optimización.
         """
+        if self.precomputed_box_by_sequence_number is not None:
+            return self.precomputed_box_by_sequence_number
         return dict(
             zip(
                 (p.sequence_number for p in self.existing_placements),
                 self.existing_boxes,
                 strict=True,
             )
+        )
+
+    @property
+    def stack_level_by_sequence_number(self) -> Mapping[int, int]:
+        """Nivel de apilamiento ya conocido de cada `Placement`, indexado por `sequence_number`.
+
+        Devuelve `precomputed_stack_level_by_sequence_number` cuando el
+        llamador lo proporciona (`optimization.state.PackingState`, que
+        lo mantiene incrementalmente — ver docstring del módulo); si
+        no, lo calcula en una única pasada lineal, no recursiva
+        (`rules.stack_levels.compute_stack_levels`).
+        """
+        if self.precomputed_stack_level_by_sequence_number is not None:
+            return self.precomputed_stack_level_by_sequence_number
+        return compute_stack_levels(
+            self.existing_placements, self.box_by_sequence_number, self.precomputed_spatial_index
         )
 
     def load_unit_for_placement(self, placement: Placement) -> LoadUnit | None:

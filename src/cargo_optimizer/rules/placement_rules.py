@@ -2,14 +2,13 @@
 
 Política de evaluación (ver docs/RulesEngine.md): se ejecutan siempre
 la configuración de extintor, la orientación, los límites, la colisión
-y el peso máximo del espacio. Soporte, apilamiento, fragilidad y peso
-soportado se omiten cuando ya hay colisión: esas cuatro reglas
-dependen de "qué soporta físicamente a la candidata", una pregunta sin
-respuesta consistente cuando la candidata ocupa un volumen ya en
-disputa con otra caja. Omitirlas evita una cascada de errores
-irrelevantes derivados únicamente de la colisión, sin dejar de
-reportar límites, orientación o peso, que son independientes de si el
-volumen está disputado.
+y el peso máximo del espacio. Soporte, apilamiento y fragilidad se
+omiten cuando ya hay colisión: las tres dependen de "qué soporta
+físicamente a la candidata", una pregunta sin respuesta consistente
+cuando la candidata ocupa un volumen ya en disputa con otra caja.
+Omitirlas evita una cascada de errores irrelevantes derivados
+únicamente de la colisión, sin dejar de reportar límites, orientación o
+peso, que son independientes de si el volumen está disputado.
 """
 
 from __future__ import annotations
@@ -24,7 +23,7 @@ from cargo_optimizer.rules.spatial_rules import (
     evaluate_collision,
     evaluate_support,
 )
-from cargo_optimizer.rules.stacking_rules import evaluate_stack_count, evaluate_supported_weight
+from cargo_optimizer.rules.stacking_rules import evaluate_stack_count
 from cargo_optimizer.rules.weight_rules import evaluate_loading_space_weight
 
 
@@ -32,7 +31,7 @@ def evaluate_candidate_placement(
     context: PlacementRuleContext,
     minimum_support_ratio: float = 1.0,
 ) -> RuleEvaluation:
-    """Evalúa una colocación candidata combinando las 9 reglas, en orden determinista.
+    """Evalúa una colocación candidata combinando las 8 reglas, en orden determinista.
 
     1. configuración de extintor
     2. orientación
@@ -41,8 +40,7 @@ def evaluate_candidate_placement(
     5. soporte (omitida si hay colisión)
     6. apilamiento (omitida si hay colisión)
     7. fragilidad (omitida si hay colisión)
-    8. peso soportado (omitida si hay colisión)
-    9. peso máximo del LoadingSpace
+    8. peso máximo del LoadingSpace
 
     No se detiene en la primera violación: devuelve todas las
     detectables razonablemente, salvo la excepción documentada arriba.
@@ -61,7 +59,6 @@ def evaluate_candidate_placement(
         evaluations.append(evaluate_support(context, minimum_support_ratio=minimum_support_ratio))
         evaluations.append(evaluate_stack_count(context))
         evaluations.append(evaluate_fragility(context))
-        evaluations.append(evaluate_supported_weight(context))
 
     evaluations.append(evaluate_loading_space_weight(context))
 

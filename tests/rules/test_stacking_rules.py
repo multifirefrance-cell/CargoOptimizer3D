@@ -1,16 +1,22 @@
-"""Pruebas de apilamiento: count_stack_level, evaluate_stack_count, evaluate_supported_weight."""
+"""Pruebas de apilamiento: find_direct_supporting_placements, stack_level_of,
+compute_stack_levels, evaluate_stack_count.
+
+No hay peso soportado ni propagación de peso entre cajas (eliminado por
+completo, fase OPT-13): este módulo solo controla el número máximo de
+niveles permitido por SKU.
+"""
 
 from __future__ import annotations
 
 from cargo_optimizer.domain.dimensions import Dimensions3D
 from cargo_optimizer.domain.position import Position3D
 from cargo_optimizer.geometry.box import box_from_placement
-from cargo_optimizer.rules.codes import MAX_STACK_EXCEEDED, SUPPORTED_WEIGHT_EXCEEDED
+from cargo_optimizer.rules.codes import MAX_STACK_EXCEEDED
 from cargo_optimizer.rules.stacking_rules import (
-    count_stack_level,
+    compute_stack_levels,
     evaluate_stack_count,
-    evaluate_supported_weight,
     find_direct_supporting_placements,
+    stack_level_of,
 )
 from tests.rules._helpers import (
     make_context,
@@ -26,7 +32,7 @@ def test_level_1_on_ground() -> None:
     unit = make_load_unit(dimensions=_DIMS)
     placement = make_placement(unit, Position3D(0.0, 0.0, 0.0))
     box = box_from_placement(placement)
-    assert count_stack_level(box, ()) == 1
+    assert stack_level_of(box, (), {}) == 1
 
 
 def test_level_2_directly_above() -> None:
@@ -35,7 +41,9 @@ def test_level_2_directly_above() -> None:
     upper_unit = make_load_unit(sku="UPPER", dimensions=_DIMS)
     upper = make_placement(upper_unit, Position3D(0.0, 0.0, 20.0), sequence_number=2)
     upper_box = box_from_placement(upper)
-    assert count_stack_level(upper_box, (lower,)) == 2
+    levels = compute_stack_levels((lower, upper))
+    supporters = find_direct_supporting_placements(upper_box, (lower,))
+    assert stack_level_of(upper_box, supporters, levels) == 2
 
 
 def test_limit_reached_is_allowed() -> None:
@@ -86,7 +94,9 @@ def test_stack_with_different_skus() -> None:
     upper_unit = make_load_unit(sku="SKU-B", dimensions=_DIMS)
     upper = make_placement(upper_unit, Position3D(0.0, 0.0, 20.0), sequence_number=2)
     upper_box = box_from_placement(upper)
-    assert count_stack_level(upper_box, (lower,)) == 2
+    levels = compute_stack_levels((lower, upper))
+    supporters = find_direct_supporting_placements(upper_box, (lower,))
+    assert stack_level_of(upper_box, supporters, levels) == 2
 
 
 def test_multiple_support_uses_most_restrictive_level() -> None:
@@ -100,7 +110,10 @@ def test_multiple_support_uses_most_restrictive_level() -> None:
     candidate_unit = make_load_unit(sku="CANDIDATE", dimensions=Dimensions3D(40.0, 30.0, 10.0))
     candidate = make_placement(candidate_unit, Position3D(0.0, 0.0, 40.0), sequence_number=4)
     candidate_box = box_from_placement(candidate)
-    level = count_stack_level(candidate_box, (tall, short_lower, short_upper))
+    existing = (tall, short_lower, short_upper)
+    levels = compute_stack_levels(existing)
+    supporters = find_direct_supporting_placements(candidate_box, existing)
+    level = stack_level_of(candidate_box, supporters, levels)
     assert level == 3  # 1 + max(nivel(tall)=1, nivel(short_upper)=2)
 
 
@@ -110,120 +123,23 @@ def test_determinism() -> None:
     upper_unit = make_load_unit(sku="UPPER", dimensions=_DIMS)
     upper = make_placement(upper_unit, Position3D(0.0, 0.0, 20.0), sequence_number=2)
     box = box_from_placement(upper)
-    level_1 = count_stack_level(box, (lower,))
-    level_2 = count_stack_level(box, (lower,))
-    assert level_1 == level_2
+    levels_1 = compute_stack_levels((lower, upper))
+    levels_2 = compute_stack_levels((lower, upper))
+    assert levels_1 == levels_2
+    supporters = find_direct_supporting_placements(box, (lower,))
+    assert stack_level_of(box, supporters, levels_1) == stack_level_of(box, supporters, levels_2)
 
 
-# --- Peso soportado --------------------------------------------------------------
-
-
-def test_supported_weight_without_limit() -> None:
-    lower_unit = make_load_unit(dimensions=_DIMS, max_supported_weight_kg=None)
-    lower = make_placement(lower_unit, Position3D(0.0, 0.0, 0.0))
-    candidate_unit = make_load_unit(sku="CANDIDATE", dimensions=_DIMS, weight_kg=1000.0)
-    context = make_context(
-        candidate_unit,
-        position=Position3D(0.0, 0.0, 20.0),
-        existing_placements=(lower,),
-        load_units_by_id={candidate_unit.id: candidate_unit, lower_unit.id: lower_unit},
-    )
-    assert evaluate_supported_weight(context).is_allowed
-
-
-def test_supported_weight_within_limit() -> None:
-    lower_unit = make_load_unit(dimensions=_DIMS, max_supported_weight_kg=50.0)
-    lower = make_placement(lower_unit, Position3D(0.0, 0.0, 0.0))
-    candidate_unit = make_load_unit(sku="CANDIDATE", dimensions=_DIMS, weight_kg=30.0)
-    context = make_context(
-        candidate_unit,
-        position=Position3D(0.0, 0.0, 20.0),
-        existing_placements=(lower,),
-        load_units_by_id={candidate_unit.id: candidate_unit, lower_unit.id: lower_unit},
-    )
-    assert evaluate_supported_weight(context).is_allowed
-
-
-def test_supported_weight_exactly_at_limit() -> None:
-    lower_unit = make_load_unit(dimensions=_DIMS, max_supported_weight_kg=30.0)
-    lower = make_placement(lower_unit, Position3D(0.0, 0.0, 0.0))
-    candidate_unit = make_load_unit(sku="CANDIDATE", dimensions=_DIMS, weight_kg=30.0)
-    context = make_context(
-        candidate_unit,
-        position=Position3D(0.0, 0.0, 20.0),
-        existing_placements=(lower,),
-        load_units_by_id={candidate_unit.id: candidate_unit, lower_unit.id: lower_unit},
-    )
-    assert evaluate_supported_weight(context).is_allowed
-
-
-def test_supported_weight_exceeded() -> None:
-    lower_unit = make_load_unit(dimensions=_DIMS, max_supported_weight_kg=10.0)
-    lower = make_placement(lower_unit, Position3D(0.0, 0.0, 0.0))
-    candidate_unit = make_load_unit(sku="CANDIDATE", dimensions=_DIMS, weight_kg=30.0)
-    context = make_context(
-        candidate_unit,
-        position=Position3D(0.0, 0.0, 20.0),
-        existing_placements=(lower,),
-        load_units_by_id={candidate_unit.id: candidate_unit, lower_unit.id: lower_unit},
-    )
-    result = evaluate_supported_weight(context)
-    assert not result.is_allowed
-    assert result.violations[0].code == SUPPORTED_WEIGHT_EXCEEDED
-
-
-def test_supported_weight_accumulates_from_existing_load() -> None:
-    lower_unit = make_load_unit(dimensions=_DIMS, max_supported_weight_kg=25.0)
-    lower = make_placement(lower_unit, Position3D(0.0, 0.0, 0.0))
-    already_stacked_unit = make_load_unit(sku="ALREADY", dimensions=_DIMS, weight_kg=20.0)
-    already_stacked = make_placement(
-        already_stacked_unit, Position3D(0.0, 0.0, 20.0), sequence_number=2
-    )
-    candidate_unit = make_load_unit(sku="CANDIDATE", dimensions=_DIMS, weight_kg=10.0)
-    context = make_context(
-        candidate_unit,
-        position=Position3D(0.0, 0.0, 40.0),
-        existing_placements=(lower, already_stacked),
-        load_units_by_id={
-            candidate_unit.id: candidate_unit,
-            lower_unit.id: lower_unit,
-            already_stacked_unit.id: already_stacked_unit,
-        },
-    )
-    # lower ya soporta 20 kg (already_stacked) + 10 kg del candidato = 30 kg > 25 kg.
-    result = evaluate_supported_weight(context)
-    assert not result.is_allowed
-
-
-def test_multiple_boxes_on_top() -> None:
-    lower_unit = make_load_unit(
-        dimensions=Dimensions3D(80.0, 30.0, 20.0), max_supported_weight_kg=100.0
-    )
-    lower = make_placement(lower_unit, Position3D(0.0, 0.0, 0.0))
-    candidate_unit = make_load_unit(
-        sku="CANDIDATE", dimensions=Dimensions3D(40.0, 30.0, 20.0), weight_kg=20.0
-    )
-    context = make_context(
-        candidate_unit,
-        position=Position3D(0.0, 0.0, 20.0),
-        existing_placements=(lower,),
-        load_units_by_id={candidate_unit.id: candidate_unit, lower_unit.id: lower_unit},
-    )
-    assert evaluate_supported_weight(context).is_allowed
-
-
-def test_supported_weight_is_not_confused_with_max_stack_count() -> None:
-    # max_stack_count alto no debe eximir del límite de peso soportado.
-    lower_unit = make_load_unit(dimensions=_DIMS, max_supported_weight_kg=5.0, max_stack_count=10)
-    lower = make_placement(lower_unit, Position3D(0.0, 0.0, 0.0))
-    candidate_unit = make_load_unit(sku="CANDIDATE", dimensions=_DIMS, weight_kg=50.0)
-    context = make_context(
-        candidate_unit,
-        position=Position3D(0.0, 0.0, 20.0),
-        existing_placements=(lower,),
-        load_units_by_id={candidate_unit.id: candidate_unit, lower_unit.id: lower_unit},
-    )
-    assert not evaluate_supported_weight(context).is_allowed
+def test_compute_stack_levels_processes_bottom_up_without_recursion() -> None:
+    """Tres niveles: `compute_stack_levels` calcula todo en una sola pasada."""
+    base_unit = make_load_unit(sku="BASE", dimensions=_DIMS)
+    base = make_placement(base_unit, Position3D(0.0, 0.0, 0.0), sequence_number=1)
+    mid_unit = make_load_unit(sku="MID", dimensions=_DIMS)
+    mid = make_placement(mid_unit, Position3D(0.0, 0.0, 20.0), sequence_number=2)
+    top_unit = make_load_unit(sku="TOP", dimensions=_DIMS)
+    top = make_placement(top_unit, Position3D(0.0, 0.0, 40.0), sequence_number=3)
+    levels = compute_stack_levels((base, mid, top))
+    assert levels == {1: 1, 2: 2, 3: 3}
 
 
 def test_find_direct_supporting_placements() -> None:

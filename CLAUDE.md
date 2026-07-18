@@ -341,9 +341,14 @@ Ver `docs/RulesEngine.md` para el detalle completo.
   `.rejected()` o `.combine()`, nunca directamente.
 - `evaluate_candidate_placement` no se detiene en la primera
   violación, salvo que haya colisión: en ese caso se omiten soporte,
-  apilamiento, fragilidad y peso soportado (derivados de un volumen en
-  disputa), pero límites, orientación, configuración de extintor y
-  peso del espacio se evalúan siempre. Ver ADR-0007, Decisión 3.
+  apilamiento y fragilidad (derivados de un volumen en disputa), pero
+  límites, orientación, configuración de extintor y peso del espacio se
+  evalúan siempre. Ver ADR-0007, Decisión 3. (Peso soportado
+  acumulado/propagado entre cajas existió hasta un encargo posterior a
+  esta fase, que lo eliminó por completo del motor junto con el
+  apilamiento recursivo — ver `docs/OptimizerPerformance.md`,
+  "Fase OPT-13"; `stacking_rules` ahora solo controla el número máximo
+  de niveles por SKU.)
 - Ninguna función de `rules` modifica entidades de dominio ni tiene
   efectos secundarios: siempre devuelve un `RuleEvaluation` explícito.
 
@@ -418,23 +423,27 @@ conservado como historial).
   la instancia, para no alterar `_classify_unpacked_reason`. No relajar
   esta garantía sin releer la prueba de corrección en el docstring del
   propio módulo.
-- No filtrar `existing_placements` por proximidad espacial antes de
-  pasarlo a `PlacementRuleContext`: se evaluó explícitamente en la fase
-  4.2 y se descartó porque `stacking_rules.evaluate_supported_weight`
-  necesita conocer todo lo que descansa, directa o transitivamente,
-  sobre cada soporte en cualquier parte del layout, no solo lo cercano
-  al candidato.
+- No filtrar `existing_placements` a mano por proximidad espacial antes
+  de pasarlo a `PlacementRuleContext`: en la fase 4.2 esto se descartó
+  porque la entonces existente `stacking_rules.evaluate_supported_weight`
+  necesitaba conocer todo lo que descansaba, directa o
+  transitivamente, sobre cada soporte en cualquier parte del layout —
+  esa función se eliminó por completo en una fase posterior (ver
+  "Fase OPT-13" más abajo), pero el filtrado real de candidatos
+  cercanos sigue existiendo igualmente, vía el índice espacial de la
+  fase OPT-11 (`SpatialIndex`), no vía un filtrado manual de la lista
+  completa de `existing_placements`.
 - **Rendimiento real sigue siendo O(n³)-ish tras la fase 4.2** (~80 s
   para 100 instancias con el escenario mixto de referencia, ~1.3x más
   rápido que antes de esa fase, no el 5x que era el objetivo
   obligatorio). No es un bug de `optimization`: el perfilado real
   (`docs/OptimizerPerformance.md`) muestra que el coste restante vive
   dentro de `RulesEngine.evaluate_placement` (soporte, apilamiento,
-  peso soportado, colisión) — reducirlo de raíz exigiría una
-  estructura de datos espacial dentro de `rules`/`geometry`, fuera del
-  alcance de la fase 4.2. No prometer rendimiento distinto al
-  documentado en `docs/OptimizerPerformance.md` sin haber implementado
-  esa estructura, con ADR explícito.
+  colisión) — reducirlo de raíz exigiría una estructura de datos
+  espacial dentro de `rules`/`geometry`, fuera del alcance de la fase
+  4.2 (implementada después, fase OPT-11). No prometer rendimiento
+  distinto al documentado en `docs/OptimizerPerformance.md` sin haber
+  medido la estructura real, con ADR explícito.
 - **Fase OPT-02 (rendimiento, backlog)**: `PlacementRuleContext`
   (`rules/context.py`) acepta un `precomputed_existing_boxes` opcional
   (y expone `box_by_sequence_number`) para que `optimization` le pase

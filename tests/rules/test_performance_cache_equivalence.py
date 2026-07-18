@@ -21,22 +21,15 @@ from cargo_optimizer.domain.dimensions import Dimensions3D
 from cargo_optimizer.domain.position import Position3D
 from cargo_optimizer.geometry.box import box_from_placement
 from cargo_optimizer.rules.placement_rules import evaluate_candidate_placement
-from cargo_optimizer.rules.stacking_rules import (
-    evaluate_stack_count,
-    evaluate_supported_weight,
-)
+from cargo_optimizer.rules.stacking_rules import evaluate_stack_count
 from tests.rules._helpers import make_context, make_load_unit, make_placement
 
 _DIMS = Dimensions3D(40.0, 30.0, 20.0)
 
 
 def _three_level_stack_placements() -> tuple:
-    base_unit = make_load_unit(
-        sku="BASE", dimensions=_DIMS, weight_kg=10.0, max_supported_weight_kg=50.0
-    )
-    mid_unit = make_load_unit(
-        sku="MID", dimensions=_DIMS, weight_kg=8.0, max_supported_weight_kg=50.0
-    )
+    base_unit = make_load_unit(sku="BASE", dimensions=_DIMS, weight_kg=10.0)
+    mid_unit = make_load_unit(sku="MID", dimensions=_DIMS, weight_kg=8.0)
     base = make_placement(base_unit, Position3D(0.0, 0.0, 0.0), sequence_number=1)
     mid = make_placement(mid_unit, Position3D(0.0, 0.0, 20.0), sequence_number=2)
     top_unit = make_load_unit(sku="TOP", dimensions=_DIMS, weight_kg=6.0)
@@ -79,28 +72,3 @@ def test_evaluate_stack_count_identical_with_and_without_box_cache() -> None:
         Position3D(0.0, 0.0, 60.0)
     )
     assert evaluate_stack_count(context_with_cache) == evaluate_stack_count(context_without_cache)
-
-
-def test_evaluate_supported_weight_identical_with_and_without_box_cache() -> None:
-    # Peso deliberadamente alto para forzar una violación real y comparar
-    # también el contenido de las violaciones, no solo `is_allowed`.
-    existing_placements, units_by_id = _three_level_stack_placements()
-    heavy_unit = make_load_unit(sku="HEAVY", dimensions=_DIMS, weight_kg=100.0)
-    units_by_id = {**units_by_id, heavy_unit.id: heavy_unit}
-
-    context_without_cache = make_context(
-        heavy_unit,
-        position=Position3D(0.0, 0.0, 60.0),
-        existing_placements=existing_placements,
-        load_units_by_id=units_by_id,
-    )
-    precomputed_boxes = tuple(box_from_placement(p) for p in existing_placements)
-    context_with_cache = replace(
-        context_without_cache, precomputed_existing_boxes=precomputed_boxes
-    )
-
-    result_with_cache = evaluate_supported_weight(context_with_cache)
-    result_without_cache = evaluate_supported_weight(context_without_cache)
-
-    assert result_with_cache == result_without_cache
-    assert not result_with_cache.is_allowed

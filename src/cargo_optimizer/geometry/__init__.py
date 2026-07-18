@@ -33,12 +33,15 @@ from cargo_optimizer.geometry.layout_validation import (
     LayoutValidationResult,
     validate_layout,
 )
+from cargo_optimizer.geometry.spatial_index import DEFAULT_CELL_SIZE_CM, SpatialIndex
 from cargo_optimizer.geometry.support import is_supported, support_ratio
 
 __all__ = [
+    "DEFAULT_CELL_SIZE_CM",
     "AxisAlignedBox",
     "LayoutValidationIssue",
     "LayoutValidationResult",
+    "SpatialIndex",
     "box_from_placement",
     "boxes_overlap",
     "find_overlapping_placements",

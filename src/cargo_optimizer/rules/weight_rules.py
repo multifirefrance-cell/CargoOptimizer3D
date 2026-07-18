@@ -1,8 +1,10 @@
 """Reglas de peso total del Loading Space.
 
-No calcula todavía peso por ejes ni centro de gravedad (fases
-posteriores): solo el peso bruto total acumulado frente al máximo
-declarado del Loading Space.
+No calcula peso por ejes ni centro de gravedad: queda fuera de alcance
+por decisión explícita (fase OPT-13, ver `docs/OptimizerPerformance.md`),
+no es una limitación temporal. Solo el peso bruto total acumulado
+frente al máximo declarado del Loading Space (obligatorio, nunca se
+elimina).
 """
 
 from __future__ import annotations
@@ -15,7 +17,16 @@ from cargo_optimizer.domain.placement import Placement
 from cargo_optimizer.rules.codes import LOADING_SPACE_WEIGHT_EXCEEDED
 from cargo_optimizer.rules.context import PlacementRuleContext
 from cargo_optimizer.rules.results import RuleEvaluation, RuleSeverity, RuleViolation
-from cargo_optimizer.rules.stacking_rules import WEIGHT_TOLERANCE_KG
+
+WEIGHT_TOLERANCE_KG = 1e-6
+"""Tolerancia numérica para sumas de peso acumulado, en kilogramos.
+
+Absorbe errores de redondeo de coma flotante al sumar muchos pesos; no
+está pensada para permitir sobrepeso real (1e-6 kg es imperceptible en
+cualquier báscula real). Antes de la fase OPT-13 vivía en
+`stacking_rules` y se compartía con la (ya eliminada) regla de peso
+soportado; ahora es exclusiva de esta regla, la única que queda.
+"""
 
 
 def current_loaded_weight_kg(
