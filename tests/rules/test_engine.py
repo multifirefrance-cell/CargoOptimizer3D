@@ -5,12 +5,7 @@ from __future__ import annotations
 from cargo_optimizer.domain.dimensions import Dimensions3D
 from cargo_optimizer.domain.position import Position3D
 from cargo_optimizer.rules.engine import RulesEngine
-from tests.rules._helpers import (
-    DEFAULT_SPACE,
-    make_context,
-    make_individual_extinguisher,
-    make_load_unit,
-)
+from tests.rules._helpers import DEFAULT_SPACE, make_context, make_load_unit
 
 _DIMS = Dimensions3D(40.0, 30.0, 20.0)
 
@@ -34,12 +29,6 @@ def test_facade_delegates_evaluate_placement() -> None:
     context = make_context(unit, position=Position3D(0.0, 0.0, 0.0))
     result = engine.evaluate_placement(context)
     assert result.is_allowed
-
-
-def test_facade_delegates_effective_max_stack_count() -> None:
-    engine = RulesEngine()
-    extinguisher = make_individual_extinguisher(nominal_kg=3.0, max_stack_count=5)
-    assert engine.effective_max_stack_count(extinguisher) == 1
 
 
 def test_engine_has_no_mutable_state() -> None:

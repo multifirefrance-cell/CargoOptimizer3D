@@ -7,7 +7,7 @@ import pytest
 from cargo_optimizer.domain.dimensions import Dimensions3D
 from cargo_optimizer.domain.enums import ExtinguisherAgent, OrientationCode, PackageType
 from cargo_optimizer.domain.exceptions import DomainValidationError
-from cargo_optimizer.domain.load_unit import LoadUnit
+from cargo_optimizer.domain.load_unit import DEFAULT_MAX_STACK_COUNT, LoadUnit
 
 _DIMS = Dimensions3D(40.0, 30.0, 20.0)
 
@@ -57,6 +57,23 @@ def test_zero_units_per_package_is_rejected() -> None:
 def test_zero_max_stack_count_is_rejected() -> None:
     with pytest.raises(DomainValidationError):
         LoadUnit(**_base_kwargs(max_stack_count=0))
+
+
+def test_default_max_stack_count_is_thirty_not_one() -> None:
+    """Un producto nuevo sin apilamiento configurado nunca queda "No apilable" por accidente."""
+    unit = LoadUnit(**_base_kwargs())
+    assert unit.max_stack_count == DEFAULT_MAX_STACK_COUNT
+    assert DEFAULT_MAX_STACK_COUNT != 1
+
+
+def test_explicit_max_stack_count_one_means_not_stackable() -> None:
+    unit = LoadUnit(**_base_kwargs(max_stack_count=1))
+    assert unit.max_stack_count == 1
+
+
+def test_explicit_max_stack_count_specific_value_is_preserved() -> None:
+    unit = LoadUnit(**_base_kwargs(max_stack_count=5))
+    assert unit.max_stack_count == 5
 
 
 def test_invalid_color_hex_is_rejected() -> None:

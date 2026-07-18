@@ -2,7 +2,10 @@
 
 Alcance (fase OPT-13, ver `docs/OptimizerPerformance.md`): este módulo
 solo controla el **número máximo de niveles** permitido por SKU
-(`effective_max_stack_count`). No calcula peso soportado acumulado ni
+(`LoadUnit.max_stack_count`, respetado tal cual para cualquier
+producto — ver "Fase OPT-15" en `docs/OptimizerPerformance.md`: no
+existe ninguna excepción automática por tipo de producto, incluidos
+los extintores). No calcula peso soportado acumulado ni
 propaga peso entre cajas — esa capacidad se eliminó por completo (no
 solo se optimizó) en esta fase, junto con la recursión no acotada que
 implicaba (antes, `count_stack_level` recorría la cadena de soporte
@@ -36,7 +39,6 @@ from __future__ import annotations
 
 from cargo_optimizer.rules.codes import MAX_STACK_EXCEEDED
 from cargo_optimizer.rules.context import PlacementRuleContext
-from cargo_optimizer.rules.extinguisher_rules import effective_max_stack_count
 from cargo_optimizer.rules.results import RuleEvaluation, RuleSeverity, RuleViolation
 from cargo_optimizer.rules.stack_levels import (
     compute_stack_levels,
@@ -46,7 +48,6 @@ from cargo_optimizer.rules.stack_levels import (
 
 __all__ = [
     "compute_stack_levels",
-    "effective_max_stack_count",
     "evaluate_stack_count",
     "find_direct_supporting_placements",
     "stack_level_of",
@@ -54,8 +55,13 @@ __all__ = [
 
 
 def evaluate_stack_count(context: PlacementRuleContext) -> RuleEvaluation:
-    """Rechaza la candidata si su nivel de apilamiento supera el máximo efectivo."""
-    max_allowed = effective_max_stack_count(context.load_unit)
+    """Rechaza la candidata si su nivel de apilamiento supera `load_unit.max_stack_count`.
+
+    Sin excepciones por tipo de producto: todo `LoadUnit`, incluidos los
+    extintores, se limita exclusivamente por el valor configurado en su
+    propio SKU (ver "Fase OPT-15", `docs/OptimizerPerformance.md`).
+    """
+    max_allowed = context.load_unit.max_stack_count
     supporters = find_direct_supporting_placements(
         context.candidate_box,
         context.existing_placements,
@@ -73,7 +79,7 @@ def evaluate_stack_count(context: PlacementRuleContext) -> RuleEvaluation:
                 code=MAX_STACK_EXCEEDED,
                 message=(
                     f"'{context.load_unit.sku}' alcanzaría el nivel de apilamiento {level}, "
-                    f"por encima del máximo efectivo {max_allowed}."
+                    f"por encima del máximo permitido {max_allowed}."
                 ),
                 severity=RuleSeverity.ERROR,
                 load_unit_id=context.load_unit.id,

@@ -14,7 +14,6 @@ from cargo_optimizer.rules.codes import (
 )
 from cargo_optimizer.rules.extinguisher_rules import (
     _LENGTH_AXIS_BY_CODE,
-    effective_max_stack_count,
     evaluate_extinguisher_configuration,
     evaluate_extinguisher_orientation,
     is_grouped_small_extinguisher,
@@ -94,11 +93,6 @@ def test_longitudinal_axis_on_z_is_forbidden() -> None:
     assert not result.is_allowed
 
 
-def test_effective_max_stack_count_is_one_for_large_individual() -> None:
-    unit = make_individual_extinguisher(nominal_kg=3.0, max_stack_count=5)
-    assert effective_max_stack_count(unit) == 1
-
-
 def test_rule_uses_nominal_weight_not_gross_weight() -> None:
     # weight_kg (peso bruto) es alto, pero extinguisher_nominal_kg (2 kg) no activa la regla.
     unit = make_individual_extinguisher(nominal_kg=2.0, weight_kg=50.0)
@@ -147,9 +141,20 @@ def test_grouped_box_respects_allowed_orientation_codes() -> None:
     assert unit.allowed_orientation_codes == (OrientationCode.LWH_XYZ,)
 
 
-def test_user_max_stack_count_is_preserved_for_grouped() -> None:
-    unit = make_grouped_extinguisher(nominal_kg=2.0, max_stack_count=5)
-    assert effective_max_stack_count(unit) == 5
+@pytest.mark.parametrize("max_stack_count", [1, 2, 5, 30])
+def test_grouped_extinguisher_max_stack_count_is_preserved(max_stack_count: int) -> None:
+    unit = make_grouped_extinguisher(nominal_kg=2.0, max_stack_count=max_stack_count)
+    assert unit.max_stack_count == max_stack_count
+
+
+@pytest.mark.parametrize("max_stack_count", [1, 2, 5, 30])
+def test_individual_large_extinguisher_max_stack_count_is_preserved_not_overridden(
+    max_stack_count: int,
+) -> None:
+    """Un extintor individual >= 3 kg ya no fuerza max_stack_count=1: se respeta el SKU."""
+    unit = make_individual_extinguisher(nominal_kg=3.0, max_stack_count=max_stack_count)
+    assert is_individual_large_extinguisher(unit)
+    assert unit.max_stack_count == max_stack_count
 
 
 @pytest.mark.parametrize(("nominal_kg", "expected"), [(1.0, 10), (2.0, 8), (3.0, 6)])

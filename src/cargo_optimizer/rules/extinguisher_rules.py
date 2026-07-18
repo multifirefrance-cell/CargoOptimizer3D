@@ -89,13 +89,6 @@ def recommended_grouped_units_per_package(nominal_kg: float) -> int | None:
     return None
 
 
-def effective_max_stack_count(load_unit: LoadUnit) -> int:
-    """`load_unit.max_stack_count`, salvo para extintores individuales grandes (siempre 1)."""
-    if is_individual_large_extinguisher(load_unit):
-        return 1
-    return load_unit.max_stack_count
-
-
 def evaluate_extinguisher_configuration(load_unit: LoadUnit) -> RuleEvaluation:
     """Advertencias de configuración específicas de extintores (no invariantes de dominio).
 

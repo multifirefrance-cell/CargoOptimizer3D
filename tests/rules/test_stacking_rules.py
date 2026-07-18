@@ -9,6 +9,7 @@ niveles permitido por SKU.
 from __future__ import annotations
 
 from cargo_optimizer.domain.dimensions import Dimensions3D
+from cargo_optimizer.domain.load_unit import DEFAULT_MAX_STACK_COUNT
 from cargo_optimizer.domain.position import Position3D
 from cargo_optimizer.geometry.box import box_from_placement
 from cargo_optimizer.rules.codes import MAX_STACK_EXCEEDED
@@ -74,7 +75,73 @@ def test_limit_exceeded_is_rejected() -> None:
     assert result.violations[0].code == MAX_STACK_EXCEEDED
 
 
-def test_individual_extinguisher_cannot_reach_level_2() -> None:
+def test_specific_limit_of_five_is_respected() -> None:
+    """Un límite concreto (ni "no apilable" ni "sin límite") se respeta exactamente."""
+    unit = make_load_unit(dimensions=_DIMS, max_stack_count=5)
+    placements: list = []
+    for level in range(4):
+        placements.append(
+            make_placement(unit, Position3D(0.0, 0.0, level * 20.0), sequence_number=level + 1)
+        )
+    # Nivel 5 (encima de 4 ya colocados): dentro del límite.
+    context_allowed = make_context(
+        unit,
+        position=Position3D(0.0, 0.0, 80.0),
+        existing_placements=tuple(placements),
+        load_units_by_id={unit.id: unit},
+    )
+    assert evaluate_stack_count(context_allowed).is_allowed
+
+    # Nivel 6: fuera del límite de 5.
+    placements.append(make_placement(unit, Position3D(0.0, 0.0, 80.0), sequence_number=5))
+    context_rejected = make_context(
+        unit,
+        position=Position3D(0.0, 0.0, 100.0),
+        existing_placements=tuple(placements),
+        load_units_by_id={unit.id: unit},
+    )
+    result = evaluate_stack_count(context_rejected)
+    assert not result.is_allowed
+    assert result.violations[0].code == MAX_STACK_EXCEEDED
+
+
+def test_high_stack_count_allows_many_levels() -> None:
+    """`DEFAULT_MAX_STACK_COUNT` (30, ver `LoadUnit`) permite más niveles que un límite bajo."""
+    unit = make_load_unit(dimensions=_DIMS, max_stack_count=DEFAULT_MAX_STACK_COUNT)
+    placements = tuple(
+        make_placement(unit, Position3D(0.0, 0.0, level * 20.0), sequence_number=level + 1)
+        for level in range(10)
+    )
+    # Nivel 11: muy por encima de lo que permitiría max_stack_count=1 o un
+    # límite bajo cualquiera, pero muy por debajo del límite configurado de 30.
+    context = make_context(
+        unit,
+        position=Position3D(0.0, 0.0, 200.0),
+        existing_placements=placements,
+        load_units_by_id={unit.id: unit},
+    )
+    assert evaluate_stack_count(context).is_allowed
+
+
+def test_individual_extinguisher_with_limit_one_cannot_reach_level_2() -> None:
+    """Con max_stack_count=1 configurado explícitamente, un extintor individual no apila."""
+    lower_unit = make_load_unit(dimensions=_DIMS)
+    lower = make_placement(lower_unit, Position3D(0.0, 0.0, 0.0))
+    extinguisher = make_individual_extinguisher(nominal_kg=3.0, dimensions=_DIMS, max_stack_count=1)
+    context = make_context(
+        extinguisher,
+        position=Position3D(0.0, 0.0, 20.0),
+        existing_placements=(lower,),
+        load_units_by_id={extinguisher.id: extinguisher, lower_unit.id: lower_unit},
+    )
+    result = evaluate_stack_count(context)
+    assert not result.is_allowed
+    assert result.violations[0].code == MAX_STACK_EXCEEDED
+
+
+def test_individual_extinguisher_with_limit_five_can_reach_level_2() -> None:
+    """Sin la excepción automática eliminada: un extintor individual >= 3 kg con
+    max_stack_count=5 apila exactamente como cualquier otro LoadUnit con ese límite."""
     lower_unit = make_load_unit(dimensions=_DIMS)
     lower = make_placement(lower_unit, Position3D(0.0, 0.0, 0.0))
     extinguisher = make_individual_extinguisher(nominal_kg=3.0, dimensions=_DIMS, max_stack_count=5)
@@ -85,7 +152,7 @@ def test_individual_extinguisher_cannot_reach_level_2() -> None:
         load_units_by_id={extinguisher.id: extinguisher, lower_unit.id: lower_unit},
     )
     result = evaluate_stack_count(context)
-    assert not result.is_allowed
+    assert result.is_allowed
 
 
 def test_stack_with_different_skus() -> None:

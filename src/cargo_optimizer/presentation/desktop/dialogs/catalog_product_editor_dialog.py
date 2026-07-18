@@ -34,7 +34,7 @@ from PySide6.QtWidgets import (
 from cargo_optimizer.domain.dimensions import Dimensions3D
 from cargo_optimizer.domain.enums import ExtinguisherAgent, OrientationCode, PackageType
 from cargo_optimizer.domain.exceptions import DomainValidationError
-from cargo_optimizer.domain.load_unit import LoadUnit
+from cargo_optimizer.domain.load_unit import DEFAULT_MAX_STACK_COUNT, LoadUnit
 
 _PACKAGE_TYPE_LABELS: dict[PackageType, str] = {
     PackageType.INDIVIDUAL: "Individual",
@@ -148,6 +148,10 @@ class CatalogProductEditorDialog(QDialog):
             self._color_edit.setText("#CCCCCC")
             for check in self._orientation_checks.values():
                 check.setChecked(True)
+            # Mismo valor por defecto que `LoadUnit.max_stack_count`
+            # (`DEFAULT_MAX_STACK_COUNT`): un producto nuevo nunca queda
+            # "no apilable" por accidente — ver docstring del campo.
+            self._max_stack_spin.setValue(DEFAULT_MAX_STACK_COUNT)
 
     @staticmethod
     def _make_dimension_spin() -> QDoubleSpinBox:
@@ -167,7 +171,7 @@ class CatalogProductEditorDialog(QDialog):
         form.addRow("Peso", self._weight_spin)
         form.addRow("Tipo de empaque", self._package_type_combo)
         form.addRow("Unidades por paquete", self._units_per_package_spin)
-        form.addRow("Apilamiento máximo", self._max_stack_spin)
+        form.addRow("Límite máximo de apilamiento", self._max_stack_spin)
 
         max_weight_row = QHBoxLayout()
         max_weight_row.addWidget(self._max_supported_weight_spin)

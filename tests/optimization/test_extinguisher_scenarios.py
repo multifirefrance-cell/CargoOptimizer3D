@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 from cargo_optimizer.domain.dimensions import Dimensions3D
-from cargo_optimizer.domain.enums import ExtinguisherAgent, OrientationCode, PackageType
+from cargo_optimizer.domain.enums import (
+    ExtinguisherAgent,
+    LoadingSpaceCategory,
+    OrientationCode,
+    PackageType,
+)
 from cargo_optimizer.domain.load_unit import LoadUnit
+from cargo_optimizer.domain.loading_space import LoadingSpace
 from cargo_optimizer.optimization.engine import PackingEngine
 from cargo_optimizer.optimization.models import PackingRequest
 from cargo_optimizer.rules.extinguisher_rules import (
@@ -89,6 +95,57 @@ def test_co2_5kg_individual_has_same_restriction() -> None:
     assert result.packed_count == 1
     placement = result.placements[0]
     assert placement.orientation.code in (OrientationCode.LWH_XYZ, OrientationCode.LHW_XYZ)
+
+
+# B.1 Un extintor individual >= 3 kg apila hasta su propio max_stack_count -----------
+# (ya no existe ninguna excepción automática que lo fuerce a 1 — ver
+# docs/OptimizerPerformance.md, "Fase OPT-15").
+
+
+def test_individual_large_extinguisher_stacks_up_to_its_own_configured_limit() -> None:
+    unit = _individual_extinguisher(
+        "PQS-STACK",
+        gross_weight_kg=13.5,
+        nominal_kg=10.0,
+        agent=ExtinguisherAgent.PQS,
+        max_stack_count=3,
+        quantity=3,
+    )
+    # Espacio con un único hueco de piso (60x20 cm): solo apilando se
+    # colocan las 3 unidades, nunca esparciéndolas en el suelo.
+    single_footprint_space = LoadingSpace(
+        name="Hueco único de prueba",
+        category=LoadingSpaceCategory.TRUCK,
+        internal_dimensions=Dimensions3D(60.0, 20.0, 100.0),
+    )
+    request = PackingRequest(loading_space=single_footprint_space, load_units=(unit,))
+    result = PackingEngine().optimize(request)
+
+    assert result.packed_count == 3
+    assert result.unpacked_units == ()
+    z_levels = sorted({p.position.z_cm for p in result.placements})
+    assert z_levels == [0.0, 20.0, 40.0]
+
+
+def test_individual_large_extinguisher_with_limit_one_does_not_stack() -> None:
+    unit = _individual_extinguisher(
+        "PQS-NOSTACK",
+        gross_weight_kg=13.5,
+        nominal_kg=10.0,
+        agent=ExtinguisherAgent.PQS,
+        max_stack_count=1,
+        quantity=3,
+    )
+    single_footprint_space = LoadingSpace(
+        name="Hueco único de prueba",
+        category=LoadingSpaceCategory.TRUCK,
+        internal_dimensions=Dimensions3D(60.0, 20.0, 100.0),
+    )
+    request = PackingRequest(loading_space=single_footprint_space, load_units=(unit,))
+    result = PackingEngine().optimize(request)
+
+    assert result.packed_count == 1
+    assert len(result.unpacked_units) == 2
 
 
 # C/D/E. Cajas grupales 1/2/3 kg --------------------------------------------------------

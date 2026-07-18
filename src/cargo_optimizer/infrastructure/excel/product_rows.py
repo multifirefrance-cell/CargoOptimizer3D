@@ -20,7 +20,7 @@ from uuid import uuid4
 from cargo_optimizer.domain.dimensions import Dimensions3D
 from cargo_optimizer.domain.enums import ExtinguisherAgent, OrientationCode, PackageType
 from cargo_optimizer.domain.exceptions import DomainValidationError
-from cargo_optimizer.domain.load_unit import LoadUnit
+from cargo_optimizer.domain.load_unit import DEFAULT_MAX_STACK_COUNT, LoadUnit
 from cargo_optimizer.infrastructure.excel.row_parsing import (
     RowConversionError,
     format_bool,
@@ -203,7 +203,7 @@ def row_to_load_unit(row_number: int, values: tuple[object, ...]) -> LoadUnit:
         nominal_raw, field_name="Peso nominal (kg)", row_number=row_number
     )
     max_stack_count = parse_int(
-        stack_raw, field_name="Apilamiento", row_number=row_number, default=1
+        stack_raw, field_name="Apilamiento", row_number=row_number, default=DEFAULT_MAX_STACK_COUNT
     )
     allowed_orientations = _parse_orientations(orientations_raw, row_number=row_number)
     notes = "" if notes_raw is None else str(notes_raw).strip()

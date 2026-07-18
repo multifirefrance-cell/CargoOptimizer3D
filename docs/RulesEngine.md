@@ -100,10 +100,16 @@ orientaciones en las que la dimensión original `length_cm` termina
 sobre el eje X (`OrientationCode.LWH_XYZ` y `LHW_XYZ`); cualquier otra
 se rechaza, distinguiendo si `length` terminó en Z (vertical,
 `EXTINGUISHER_INDIVIDUAL_MUST_BE_HORIZONTAL`) o en Y (horizontal pero
-no paralelo a X, `EXTINGUISHER_AXIS_NOT_PARALLEL_TO_X`). El máximo
-efectivo de apilamiento es siempre 1
-(`effective_max_stack_count`), sin importar lo que declare
-`max_stack_count`.
+no paralelo a X, `EXTINGUISHER_AXIS_NOT_PARALLEL_TO_X`).
+
+**Ya no existe ninguna excepción automática de apilamiento para
+extintores (fase OPT-15, ver `docs/OptimizerPerformance.md`).** Hasta
+esa fase, un extintor individual >= 3 kg tenía forzado
+`effective_max_stack_count = 1` sin importar `max_stack_count`; esa
+función y esa excepción se eliminaron por completo. Un extintor
+individual >= 3 kg respeta exactamente el `max_stack_count` de su
+propio SKU, igual que cualquier otro `LoadUnit`: `1` = no apilable,
+`N` = máximo N niveles.
 
 **Los extintores de 1, 2 y 3 kg en cajas grupales sí pueden colocarse
 verticalmente.**
@@ -145,8 +151,9 @@ precalculado (pruebas unitarias que construyen un
 niveles de todos los placements existentes en una única pasada lineal
 (ordenados por altura ascendente), tampoco recursiva.
 `evaluate_stack_count` rechaza si el nivel resultante supera
-`effective_max_stack_count`. No asume que una pila comparte SKU: el
-nivel se calcula únicamente por geometría de soporte.
+`load_unit.max_stack_count`, sin ninguna excepción por tipo de
+producto (ver "Fase OPT-15" más arriba). No asume que una pila
+comparte SKU: el nivel se calcula únicamente por geometría de soporte.
 
 ## Fragilidad
 

@@ -188,9 +188,10 @@ def test_fragility_prevents_stacking_on_top() -> None:
 # --- 12: extintor individual --------------------------------------------------------
 
 
-def test_individual_extinguisher_stays_horizontal_axis_x_and_unstacked() -> None:
+def test_individual_extinguisher_stays_horizontal_axis_x_with_limit_one() -> None:
+    """Con max_stack_count=1 explícito, un extintor individual >= 3 kg sigue sin apilar."""
     tight_space = _space(60.0, 20.0, 100.0)
-    extinguisher = make_individual_extinguisher(nominal_kg=5.0, quantity=2, max_stack_count=5)
+    extinguisher = make_individual_extinguisher(nominal_kg=5.0, quantity=2, max_stack_count=1)
     request = PackingRequest(loading_space=tight_space, load_units=(extinguisher,))
     result = PackingEngine().optimize(request)
     assert result.packed_count == 1
@@ -198,6 +199,22 @@ def test_individual_extinguisher_stays_horizontal_axis_x_and_unstacked() -> None
     placement = result.placements[0]
     assert placement.orientation.code in (OrientationCode.LWH_XYZ, OrientationCode.LHW_XYZ)
     assert placement.z_cm == 0.0
+
+
+def test_individual_extinguisher_stacks_when_its_limit_allows_it() -> None:
+    """Sin la excepción automática eliminada (fase OPT-15): con max_stack_count=5,
+    un extintor individual >= 3 kg apila igual que cualquier otro LoadUnit, siempre
+    manteniendo su eje longitudinal horizontal sobre X."""
+    tight_space = _space(60.0, 20.0, 100.0)
+    extinguisher = make_individual_extinguisher(nominal_kg=5.0, quantity=2, max_stack_count=5)
+    request = PackingRequest(loading_space=tight_space, load_units=(extinguisher,))
+    result = PackingEngine().optimize(request)
+    assert result.packed_count == 2
+    assert result.unpacked_units == ()
+    for placement in result.placements:
+        assert placement.orientation.code in (OrientationCode.LWH_XYZ, OrientationCode.LHW_XYZ)
+    z_levels = sorted({p.z_cm for p in result.placements})
+    assert z_levels == [0.0, 20.0]
 
 
 # --- 16-18: quantity, determinismo, SKU mezclados ----------------------------------

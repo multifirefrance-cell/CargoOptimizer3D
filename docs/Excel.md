@@ -100,7 +100,7 @@ un `.xlsx` válido, o no tiene las cabeceras esperadas.
 | Extintor | `is_extinguisher` | "Si"/"No" |
 | Agente | `extinguisher_agent` | Obligatorio si Extintor = Si |
 | Peso nominal (kg) | `extinguisher_nominal_kg` | Obligatorio si Extintor = Si |
-| Apilamiento | `max_stack_count` | Por defecto 1 |
+| Apilamiento | `max_stack_count` | Celda vacía en una importación nueva -> 30 (`DEFAULT_MAX_STACK_COUNT`); valor numérico presente siempre se respeta tal cual |
 | Orientaciones | `allowed_orientation_codes` | Lista separada por comas, o "Todas" (por defecto) |
 | Notas | `notes` | Opcional |
 

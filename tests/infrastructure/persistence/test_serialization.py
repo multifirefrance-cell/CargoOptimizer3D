@@ -105,3 +105,35 @@ def test_load_unit_round_trip_non_extinguisher() -> None:
         notes="Frágil",
     )
     assert ser.load_unit_from_dict(ser.load_unit_to_dict(value)) == value
+
+
+def test_existing_project_with_max_stack_count_one_keeps_it_at_one() -> None:
+    """Un proyecto guardado antes de esta fase con `max_stack_count=1` NUNCA se migra a 30.
+
+    La corrección (fase OPT-14) solo cambia el valor por defecto para
+    construcciones nuevas sin este campo — nunca reinterpreta un valor
+    ya guardado explícitamente en un archivo `.cargo3d` existente.
+    """
+    value = LoadUnit(
+        sku="OLD-1",
+        name="Producto de proyecto antiguo",
+        dimensions=Dimensions3D(40.0, 30.0, 20.0),
+        weight_kg=10.0,
+        max_stack_count=1,
+    )
+    data = ser.load_unit_to_dict(value)
+    assert data["max_stack_count"] == 1
+    restored = ser.load_unit_from_dict(data)
+    assert restored.max_stack_count == 1
+
+
+def test_existing_project_with_specific_stack_limit_keeps_its_exact_value() -> None:
+    value = LoadUnit(
+        sku="OLD-2",
+        name="Producto con límite 7",
+        dimensions=Dimensions3D(40.0, 30.0, 20.0),
+        weight_kg=10.0,
+        max_stack_count=7,
+    )
+    restored = ser.load_unit_from_dict(ser.load_unit_to_dict(value))
+    assert restored.max_stack_count == 7

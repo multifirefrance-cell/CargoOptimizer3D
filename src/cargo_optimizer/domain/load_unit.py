@@ -16,6 +16,30 @@ no se implementa aquí: pertenece al motor de restricciones (fase 3).
 Este modelo solo deja los campos (`is_extinguisher`,
 `extinguisher_agent`, `extinguisher_nominal_kg`) listos para que esa
 fase pueda apoyarse en ellos.
+
+`max_stack_count` (revisado tras un caso real de cubicaje deficiente —
+ver `docs/OptimizerPerformance.md`, "Fase OPT-14"): un entero normal,
+sin valores especiales ni sentinel. `1` significa **no apilable**,
+cualquier entero `N >= 2` significa **máximo N niveles**. Es un campo
+totalmente editable por el usuario para cada SKU; no existe un
+concepto de "sin límite" en el dominio, la interfaz ni la
+importación/exportación de Excel.
+
+`DEFAULT_MAX_STACK_COUNT` (30) es únicamente el valor por defecto para
+un producto **nuevo** sin apilamiento configurado explícitamente — un
+número práctico alto (30 niveles de una caja real excede cualquier
+altura de contenedor o almacén realista, así que el límite efectivo
+real casi siempre lo deciden antes la altura disponible, el soporte
+geométrico y el resto de reglas del motor), pero sigue siendo un
+entero corriente que el usuario puede cambiar a cualquier otro valor
+`>= 1` en cualquier momento. Antes de esta fase el valor por defecto
+era `1`, lo que convertía silenciosamente en "no apilable" cualquier
+producto cuyo apilamiento no se configurase a mano — el origen real
+del caso de cubicaje deficiente diagnosticado. Un producto ya
+existente con `max_stack_count=1` guardado en un catálogo o proyecto
+anterior a esta fase conserva ese `1` intacto al cargarse: el cambio de
+valor por defecto solo afecta a construcciones nuevas sin el campo
+explícito, nunca reinterpreta un valor ya guardado.
 """
 
 from __future__ import annotations
@@ -31,6 +55,16 @@ from cargo_optimizer.domain.orientation import Orientation
 
 _COLOR_HEX_PATTERN = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _ALL_ORIENTATION_CODES: tuple[OrientationCode, ...] = tuple(OrientationCode)
+
+DEFAULT_MAX_STACK_COUNT = 30
+"""Valor por defecto de `max_stack_count` para un producto nuevo sin este campo configurado.
+
+Un entero normal como cualquier otro, no un sentinel ni un valor
+especial (ver docstring de la clase): el usuario puede cambiarlo
+libremente a cualquier valor `>= 1`. Un único punto de verdad, para no
+repetir el número mágico 30 en la interfaz y en la importación de
+Excel.
+"""
 
 
 def _dedupe_preserving_order(codes: tuple[OrientationCode, ...]) -> tuple[OrientationCode, ...]:
@@ -54,7 +88,7 @@ class LoadUnit:
     quantity: int = 1
     package_type: PackageType = PackageType.INDIVIDUAL
     units_per_package: int = 1
-    max_stack_count: int = 1
+    max_stack_count: int = DEFAULT_MAX_STACK_COUNT
     max_supported_weight_kg: float | None = None
     allowed_orientation_codes: tuple[OrientationCode, ...] = _ALL_ORIENTATION_CODES
     fragile: bool = False

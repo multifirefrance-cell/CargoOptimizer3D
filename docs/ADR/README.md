@@ -13,9 +13,10 @@ cambia: se marcan como `Reemplazada por ADR-XXXX` y se añade una nueva.
 | [ADR-0004](ADR-0004-enforcement-de-capas-con-import-linter.md) | Verificación automática de la regla de dependencia con import-linter | Aceptada |
 | [ADR-0005](ADR-0005-inmutabilidad-y-enums-estables.md) | Dataclasses inmutables y enums con valores string estables en el dominio | Aceptada |
 | [ADR-0006](ADR-0006-motor-geometrico-tolerancia-y-contacto.md) | Motor geométrico separado del dominio, tolerancia y semántica de contacto | Aceptada |
-| [ADR-0007](ADR-0007-motor-de-reglas.md) | Motor de reglas separado del dominio y del optimizador, reglas de extintores, política de acumulación de violaciones | Aceptada |
+| [ADR-0007](ADR-0007-motor-de-reglas.md) | Motor de reglas separado del dominio y del optimizador, reglas de extintores, política de acumulación de violaciones | Aceptada (Decisión 2, mitad de apilamiento, reemplazada por ADR-0014) |
 | [ADR-0008](ADR-0008-arquitectura-del-motor-de-optimizacion.md) | Arquitectura del motor de optimización: paquete separado, `PackingStrategy` como Protocol, determinismo | Aceptada |
 | [ADR-0009](ADR-0009-estrategia-greedy-y-separacion-objetivos.md) | Extreme-point greedy como primera estrategia; separación entre restricciones duras y objetivos | Aceptada |
 | [ADR-0010](ADR-0010-tecnologia-del-visor-3d.md) | Tecnología del visor 3D: PyVista + PyVistaQt, confirmada frente a VTK directo, `QOpenGLWidget` propio y VisPy | Aceptada |
 | [ADR-0011](ADR-0011-desacoplo-visor-y-fallback.md) | Desacoplo del visor 3D respecto al motor (API basada en `PackingResult` ya calculado) y fallback sin 3D | Aceptada |
 | [ADR-0012](ADR-0012-arquitectura-del-sistema-de-informes-pdf.md) | Arquitectura del sistema de informes PDF: `ReportTemplate` como datos (no jerarquía de clases), aislamiento de `reportlab` respecto a `domain`, captura del visor 3D inyectada como `bytes \| None` | Aceptada |
+| [ADR-0014](ADR-0014-eliminacion-limite-apilamiento-forzado-extintores.md) | Eliminación de la excepción automática que forzaba `max_stack_count=1` en extintores individuales >= 3 kg | Aceptada |

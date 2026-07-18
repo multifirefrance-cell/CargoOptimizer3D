@@ -175,6 +175,17 @@ def test_round_trip_grouped_box_extinguisher(db_manager: DatabaseManager) -> Non
     assert fetched.max_stack_count == 3
 
 
+def test_existing_catalog_product_with_max_stack_count_one_keeps_it_at_one(
+    db_manager: DatabaseManager,
+) -> None:
+    """Un producto de catálogo ya guardado con `max_stack_count=1` nunca se migra a 30."""
+    repo = ProductCatalogRepository(db_manager)
+    added = repo.add(_unit(sku="NOT-STACKABLE-1", max_stack_count=1))
+    fetched = repo.get_by_id(added.id)
+    assert fetched is not None
+    assert fetched.max_stack_count == 1
+
+
 def test_round_trip_preserves_all_orientation_codes(db_manager: DatabaseManager) -> None:
     repo = ProductCatalogRepository(db_manager)
     added = repo.add(_unit(allowed_orientation_codes=tuple(OrientationCode)))

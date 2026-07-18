@@ -197,9 +197,11 @@ ponderada. `generation_index` es siempre el desempate final.
 este orden de prioridad: extintor individual grande primero,
 orientación única primero, no apilable primero, mayor volumen, mayor
 dimensión máxima, mayor peso, SKU, `instance_number`, `source_order`.
-`orientation_count` y `effective_max_stack_count` se cachean por
-`load_unit.id` dentro de la llamada (evita recalcular para cada
-instancia repetida del mismo `LoadUnit`).
+`orientation_count` se cachea por `load_unit.id` dentro de la llamada
+(evita recalcular para cada instancia repetida del mismo `LoadUnit`);
+`max_stack_count` se lee directamente del `LoadUnit` (fase OPT-15, ver
+`docs/OptimizerPerformance.md`: ya no existe ninguna excepción
+automática por tipo de producto que requiera pasar por `RulesEngine`).
 
 ## Determinismo
 

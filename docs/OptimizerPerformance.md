@@ -470,3 +470,52 @@ esa estructura — ver `docs/Roadmap.md` y `docs/ProductBacklog.md`,
 ítem `OPT-02` (que permanece parcialmente resuelto: la caché es un
 paso real y verificado en esa dirección, no el cierre completo del
 ítem).
+
+## Fase OPT-15 (2026-07-18): eliminación de la excepción automática de apilamiento para extintores
+
+No es un cambio de rendimiento: es la eliminación completa, a petición
+explícita del arquitecto del proyecto, de una regla de negocio que ya
+no debe existir.
+
+Hasta esta fase, `rules/extinguisher_rules.py::effective_max_stack_count`
+forzaba `max_stack_count` efectivo a `1` para cualquier extintor
+individual >= 3 kg nominales (PQS, CO₂ o cualquier otro agente),
+ignorando el valor que el usuario hubiera configurado en el SKU. Esa
+función, su uso en `rules/stacking_rules.py::evaluate_stack_count`, su
+método facade `RulesEngine.effective_max_stack_count`, y su
+reexportación desde `rules/__init__.py`, se eliminaron por completo
+(no se desactivaron ni se dejaron como no-op): ya no existe en el
+código ninguna ruta que fuerce `max_stack_count=1` por ser extintor,
+por agente PQS/CO₂, por peso nominal ni por `package_type=INDIVIDUAL`.
+
+A partir de esta fase, `evaluate_stack_count` usa siempre
+`load_unit.max_stack_count` directamente, sin excepción por tipo de
+producto: un extintor individual >= 3 kg con `max_stack_count=1` sigue
+sin ser apilable (mismo resultado práctico que antes, si el usuario
+así lo configura), pero uno con `max_stack_count=5` o
+`DEFAULT_MAX_STACK_COUNT` (30, ver "Fase OPT-14" más abajo) ahora sí
+apila hasta ese límite, igual que cualquier otro `LoadUnit`.
+
+**La regla de horizontalidad de extintores individuales >= 3 kg no se
+toca**: `is_individual_large_extinguisher`,
+`evaluate_extinguisher_orientation` y los códigos
+`EXTINGUISHER_INDIVIDUAL_MUST_BE_HORIZONTAL`/
+`EXTINGUISHER_AXIS_NOT_PARALLEL_TO_X` siguen exactamente igual — un
+extintor individual >= 3 kg sigue sin poder colocarse en vertical, solo
+deja de tener un límite de apilamiento distinto al de su propio SKU.
+Tampoco se toca la regla de cajas grupales de 1/2/3 kg (orientación
+libre, `max_stack_count` respetado tal cual desde antes de esta fase) ni
+las advertencias de capacidad recomendada.
+
+## Fase OPT-14 (2026-07-18): valor por defecto de `max_stack_count` para productos nuevos
+
+`LoadUnit.max_stack_count` pasó de tener un valor por defecto de `1` a
+`DEFAULT_MAX_STACK_COUNT` (30) para productos nuevos sin este campo
+configurado explícitamente — origen real de un caso de cubicaje
+deficiente reportado (162/300 unidades cargadas, causado por
+`max_stack_count=1` accidental en ambos SKU del escenario real,
+diagnosticado por instrumentación sin modificar el motor). Sigue siendo
+un entero normal, sin sentinel ni valor especial reservado: el usuario
+puede cambiarlo libremente a cualquier valor `>= 1` para cualquier SKU,
+incluidos los extintores. Ver `docs/DomainModel.md` y el docstring de
+`LoadUnit.max_stack_count` para el detalle completo.

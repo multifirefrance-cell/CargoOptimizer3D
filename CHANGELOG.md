@@ -6,6 +6,32 @@ para pre-releases (`bN` = "beta N"); antes de esta versión el
 versionado 0.x podía incluir cambios estructurales entre versiones
 menores sin aviso adicional.
 
+## [Unreleased]
+
+Correcciones de calidad de cubicaje sobre un caso real reportado
+(162/300 unidades cargadas por `max_stack_count=1` accidental en ambos
+SKU del escenario): sin cambios en el algoritmo de cubicaje
+(`optimization`/`geometry`) en ninguna de las dos fases.
+
+### Changed
+
+- **Fase OPT-14**: `LoadUnit.max_stack_count` pasa de tener un valor
+  por defecto de `1` a `DEFAULT_MAX_STACK_COUNT` (30) para productos
+  nuevos sin este campo configurado explícitamente. Sigue siendo un
+  entero normal, sin sentinel ni valor especial; productos/proyectos
+  existentes conservan su valor guardado tal cual. Excel: celda vacía
+  en una importación nueva -> 30, cualquier valor numérico presente se
+  respeta y exporta tal cual.
+- **Fase OPT-15**: eliminada por completo (no desactivada) la
+  excepción automática que forzaba `max_stack_count` efectivo a `1`
+  para extintores individuales >= 3 kg nominales
+  (`rules/extinguisher_rules.py::effective_max_stack_count` y su uso en
+  `stacking_rules`/`RulesEngine`/`rules.__init__`). Un extintor
+  individual >= 3 kg respeta ahora exactamente el `max_stack_count` de
+  su propio SKU, igual que cualquier otro `LoadUnit`. La regla de
+  horizontalidad de estos extintores (no vertical) no se toca. Ver
+  ADR-0014 y `docs/OptimizerPerformance.md`, "Fase OPT-15".
+
 ## [1.0.0b2] - 2026-07-16
 
 Rediseño del workspace operativo de `presentation/desktop` (estilo

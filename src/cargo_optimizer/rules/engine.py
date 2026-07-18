@@ -12,9 +12,6 @@ from cargo_optimizer.domain.load_unit import LoadUnit
 from cargo_optimizer.domain.loading_space import LoadingSpace
 from cargo_optimizer.domain.orientation import Orientation
 from cargo_optimizer.rules.context import PlacementRuleContext
-from cargo_optimizer.rules.extinguisher_rules import (
-    effective_max_stack_count as _effective_max_stack_count,
-)
 from cargo_optimizer.rules.load_unit_rules import evaluate_load_unit_rules
 from cargo_optimizer.rules.orientation_rules import allowed_orientations_for_load_unit
 from cargo_optimizer.rules.placement_rules import evaluate_candidate_placement
@@ -36,6 +33,3 @@ class RulesEngine:
         self, context: PlacementRuleContext, minimum_support_ratio: float = 1.0
     ) -> RuleEvaluation:
         return evaluate_candidate_placement(context, minimum_support_ratio=minimum_support_ratio)
-
-    def effective_max_stack_count(self, load_unit: LoadUnit) -> int:
-        return _effective_max_stack_count(load_unit)

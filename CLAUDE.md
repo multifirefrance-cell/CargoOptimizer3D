@@ -326,11 +326,18 @@ Ver `docs/RulesEngine.md` para el detalle completo.
   `infrastructure`, `presentation` ni de ninguna biblioteca externa.
   Verificado por `import-linter`.
 - **Extintores individuales >= 3 kg nominales**: horizontales, con la
-  dimensión original `length_cm` paralela al eje X; máximo efectivo de
-  apilamiento siempre 1. **Extintores de 1, 2 y 3 kg en cajas
-  grupales sí pueden colocarse verticalmente** y apilarse hasta
-  `max_stack_count`. Estas dos reglas son obligatorias y no deben
-  relajarse ni fusionarse. Ver ADR-0007, Decisión 2.
+  dimensión original `length_cm` paralela al eje X. Esta regla de
+  orientación es obligatoria y no debe relajarse. **Extintores de 1, 2
+  y 3 kg en cajas grupales sí pueden colocarse verticalmente** y
+  apilarse hasta `max_stack_count`. Ver ADR-0007, Decisión 2 (mitad de
+  orientación, vigente) y ADR-0014 (fase OPT-15): **ya no existe
+  ninguna excepción automática de apilamiento para extintores** — un
+  extintor individual >= 3 kg respeta exactamente el `max_stack_count`
+  de su propio SKU, igual que cualquier otro `LoadUnit` (`1` = no
+  apilable, `N` = máximo N niveles). No reintroducir un
+  `max_stack_count` forzado por ser extintor, por agente PQS/CO₂, por
+  peso nominal ni por `package_type=INDIVIDUAL` sin una decisión
+  explícita y un ADR nuevo.
 - La regla de extintores usa siempre `extinguisher_nominal_kg`, nunca
   `weight_kg` (peso bruto del empaque).
 - Las capacidades recomendadas de extintores grupales (10/8/6 por
