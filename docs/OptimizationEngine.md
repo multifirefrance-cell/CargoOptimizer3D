@@ -57,31 +57,42 @@ Dentro de `GreedyExtremePointStrategy.pack(...)`:
 1. Construye `load_units_by_id`.
 2. `expand_load_units(request.load_units)` → instancias físicas.
 3. `order_instances(...)` → orden determinista (ver más abajo).
-4. Crea un `PackingState` vacío y un caché de orientaciones por
+4. Crea un `PackingState` vacío, un caché de orientaciones por
    `load_unit.id` (evita recalcular `RulesEngine.allowed_orientations`
-   para cada instancia de un mismo `LoadUnit` con `quantity` alta).
+   para cada instancia de un mismo `LoadUnit` con `quantity` alta), y un
+   caché de "orientación preferida" por `load_unit.id` (ver "Selección
+   de orientación preferida y empaquetado en dos rondas", fase de
+   calidad de carga).
 5. Emite el progreso inicial.
-6. Para cada instancia, en orden:
+6. **Ronda 1** — para cada instancia, en orden:
    - comprueba cancelación, límite de tiempo y límite de iteraciones;
      si se activa alguno, detiene el bucle (no es un error);
    - obtiene orientaciones (con caché) y las filtra con
      `orientation_fits_loading_space` (descarta las que no caben ni
      desde el origen, sin evaluar reglas);
-   - genera posiciones candidatas con
-     `geometry.generate_candidate_positions(state.placements)`;
-   - construye y evalúa cada candidato (`build_candidate`, que delega
-     en `RulesEngine.evaluate_placement`);
+   - fija (con caché) la orientación preferida del `LoadUnit`
+     (`select_preferred_orientation`) y genera posiciones candidatas
+     con `geometry.generate_candidate_positions(state.placements)`;
+   - construye y evalúa cada candidato **usando solo esa orientación**
+     (`build_candidate`, que delega en `RulesEngine.evaluate_placement`);
    - entre los candidatos válidos, elige el de menor `score`;
    - si hay elegido: `state.accept_placement(...)` y propaga a
      `state.warnings` cualquier advertencia (`RuleSeverity.WARNING`)
      de la evaluación aceptada (p. ej. capacidad de extintor grupal no
      estándar — ver "Corrección aplicada durante esta fase");
-   - si no hay ninguno válido: clasifica la causa (ver más abajo) y
-     registra un `UnpackedUnit`.
-7. Si el bucle se detuvo por cancelación/tiempo/iteraciones, marca
-   todas las instancias restantes con la razón correspondiente y añade
-   una advertencia explicando cuántas quedaron sin procesar.
-8. Emite el progreso final y construye el `PackingResult`
+   - si no hay ninguno válido: la instancia se pospone a la ronda 2
+     (no se rechaza todavía).
+7. **Ronda 2** — solo si la ronda 1 no se detuvo por
+   cancelación/tiempo/iteraciones: para cada instancia pospuesta, se
+   reintenta con **todas** las orientaciones factibles a la vez (no
+   solo la preferida); si tampoco así hay colocación válida, ahora sí
+   se clasifica la causa (ver más abajo) y se registra un
+   `UnpackedUnit`.
+8. Si alguna de las dos rondas se detuvo por
+   cancelación/tiempo/iteraciones, marca todas las instancias restantes
+   con la razón correspondiente y añade una advertencia explicando
+   cuántas quedaron sin procesar.
+9. Emite el progreso final y construye el `PackingResult`
    (`build_packing_result`).
 
 ## Corrección aplicada durante esta fase
@@ -96,6 +107,78 @@ candidato. Se corrigió propagándolas explícitamente en
 `state.accept_placement(...)`. No es un cambio de diseño (ya estaba
 previsto que las advertencias de reglas fueran visibles), sino una
 omisión de la primera versión del bucle principal.
+
+## Selección de orientación preferida y empaquetado en dos rondas (2026-07-17)
+
+**Problema real reportado**: el usuario, tras cerrar la investigación
+de rendimiento OPT-11, señaló que el motor "no cumple el objetivo del
+software" — no era (solo) una cuestión de velocidad: el patrón de
+carga resultante mostraba muros y columnas aisladas en vez de pisos y
+capas completas, con una ocupación de volumen muy por debajo de lo
+físicamente posible incluso cuando el motor tenía tiempo de sobra para
+terminar.
+
+**Causa raíz**: `LoadUnit.allowed_orientation_codes` permite las 6
+rotaciones por defecto, y `GreedyExtremePointStrategy` decidía la
+orientación **de forma independiente para cada instancia**, con la
+orientación actuando solo como el séptimo (de ocho) componentes del
+score — un desempate de muy baja prioridad, nunca un criterio real de
+selección. El resultado: instancias sucesivas del mismo `LoadUnit`
+alternaban de orientación sin ningún criterio de conjunto, generando
+un terreno irregular (cajas de distinta altura en el mismo nivel) que
+fragmentaba el propio mecanismo de puntos extremos para las capas
+siguientes — confirmado empíricamente comparando ejecuciones con una
+sola orientación forzada frente al comportamiento libre (ver commit
+`74dadc9`).
+
+**Corrección**: `optimization/candidates.py::select_preferred_orientation`
+elige, una única vez por `LoadUnit`, la orientación factible que
+maximiza la capacidad de teselado del piso
+(`⌊largo/x⌋ × ⌊ancho/y⌋`). `GreedyExtremePointStrategy.pack` pasa a
+ejecutar dos rondas (ver "Flujo real" más arriba): la ronda 1 coloca
+cada instancia usando únicamente esa orientación preferida (capas
+completas y consistentes); la ronda 2 reintenta, solo para lo que la
+ronda 1 no pudo colocar, con todas las orientaciones factibles a la
+vez (aprovecha huecos residuales — p. ej. junto a una pared — que la
+orientación preferida no puede llenar). Ningún cambio en
+`rules`/`geometry`: todo candidato sigue pasando por el mismo
+`RulesEngine.evaluate_placement`.
+
+**Métricas antes/después**, mismo escenario documentado en la sección
+OPT-11 de `docs/OptimizerPerformance.md` (caja 20×20×50 cm, 9 kg,
+apilamiento hasta 30, Contenedor 20' — 589×235×239 cm):
+
+| Caso | Métrica | Antes | Después |
+|---|---|---:|---:|
+| 1300 unidades, `time_limit_seconds=15` (reproduce el caso real reportado) | cajas cargadas | 147 | **202 (+37 %)** |
+| | cajas pendientes | 1153 | 1098 |
+| | ocupación de volumen | 8.89 % | **12.21 % (+37 %)** |
+| | tiempo | 15.06 s | 15.20 s (mismo presupuesto) |
+| 400 unidades, sin límite de tiempo (ejecución completa) | cajas cargadas / pendientes | 400 / 0 | 400 / 0 (idéntico) |
+| | ocupación de volumen | 24.2 % | 24.2 % (mismas cajas, mismo volumen) |
+| | tiempo | 169.4 s | **102.8 s (−39 %)** |
+| | patrón | fragmentado, columnas aisladas | pisos completos, límites rectos |
+
+La suite completa de pytest (922 pruebas) también se ejecuta 3.4 veces
+más rápido tras esta fase (635 s → 186 s), al evaluarse muchas menos
+combinaciones de orientación por candidato en el caso típico.
+
+Cuatro pruebas de `tests/optimization/test_packing_scenarios.py`
+necesitaron ajustarse: usaban un contenedor "estrecho" (40×30×100 cm
+con una caja de 40×30×20 cm) para aislar la regla de apilamiento/
+fragilidad, pero una orientación rotada de esa misma caja (huella
+20×30) cabe dos veces en 40 cm de largo — con la selección de
+orientación libre de antes, el desempate accidental siempre elegía la
+orientación sin rotar (huella 40×30, capacidad 1), y las pruebas
+codificaban ese accidente como si fuera el comportamiento esperado. Se
+corrigieron usando una caja cúbica (30×30×30 cm, huella idéntica en
+cualquier orientación) para las pruebas de apilamiento/fragilidad, y
+actualizando la coordenada esperada en la prueba de alineación en X
+(la nueva orientación preferida tesela cada 20 cm, no 40). Ninguna
+prueba de reglas (`tests/rules/`) ni de geometría (`tests/geometry/`)
+cambió: la regla de apilamiento y la de fragilidad siguen
+comportándose exactamente igual, solo cambió qué orientación llega a
+evaluarlas en esos dos casos concretos.
 
 ## Score
 

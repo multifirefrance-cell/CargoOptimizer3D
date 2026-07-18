@@ -368,6 +368,25 @@ conservado como historial).
   (`z, x, y, -support_ratio, incremento de bounding volume, espacio
   residual aproximado, orden de orientación, generation_index`), nunca
   una suma ponderada.
+- **Empaquetado en dos rondas con orientación preferida por Load Unit
+  (2026-07-17, corrige un defecto real de calidad de carga — ver
+  `docs/OptimizationEngine.md`, sección "Selección de orientación
+  preferida y empaquetado en dos rondas")**:
+  `optimization/candidates.py::select_preferred_orientation` fija, una
+  vez por `LoadUnit`, la orientación factible que maximiza la
+  capacidad de teselado del piso (`⌊largo/x⌋ × ⌊ancho/y⌋`).
+  `GreedyExtremePointStrategy.pack` ejecuta primero una ronda con
+  **solo** esa orientación para todas las instancias (capas completas
+  y consistentes) y, solo para lo que esa ronda no pudo colocar, una
+  segunda ronda con todas las orientaciones factibles a la vez (huecos
+  residuales). Antes de esta fase, cada instancia decidía su
+  orientación de forma independiente y la orientación era casi el
+  último desempate del score — eso permitía alternar orientación
+  instancia a instancia sin ningún criterio de conjunto, la causa raíz
+  confirmada de los "muros"/columnas aisladas reportados por el
+  usuario. No revertir a "una orientación por instancia, sin ronda 2"
+  sin releer esa sección: la ronda 2 es necesaria para no perder
+  colocaciones que solo caben rotadas en el remanente.
 - Restricciones duras (de `rules`) y objetivos de optimización nunca
   se mezclan en un único sistema de puntuación: un candidato inválido
   (`RuleEvaluation.is_allowed = False`) ni siquiera compite por score.
