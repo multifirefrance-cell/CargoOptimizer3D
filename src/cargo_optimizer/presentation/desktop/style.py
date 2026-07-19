@@ -115,6 +115,12 @@ QMainWindow::separator {
     width: 5px;
     height: 5px;
 }
+QSplitter::handle {
+    background: rgba(110, 110, 110, 0.4);
+}
+QSplitter::handle:hover {
+    background: rgba(47, 111, 237, 0.55);
+}
 QToolBar {
     spacing: 8px;
     padding: 6px 8px;

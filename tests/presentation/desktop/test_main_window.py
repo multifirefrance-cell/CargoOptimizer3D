@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtWidgets import QApplication, QMessageBox, QSplitter, QToolBar
+from PySide6.QtWidgets import QApplication, QMessageBox, QSizePolicy, QSplitter, QToolBar
 
 from cargo_optimizer import __version__
 from cargo_optimizer.presentation.desktop.main_window import MainWindow
 from cargo_optimizer.presentation.desktop.settings import _KEY_MAIN_WINDOW_GEOMETRY, AppSettings
+
+_MAX_WIDGET_HEIGHT = 16_777_215  # QWIDGETSIZE_MAX: valor por defecto sin maximumHeight fijado.
 
 
 def _allow_close_without_saving(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -170,10 +172,11 @@ def test_results_tabs_live_under_the_right_column_not_full_window_width(
     qapp: QApplication, app_settings: AppSettings
 ) -> None:
     # Mejoras UX: el panel de resultados ya no ocupa todo el ancho de la
-    # ventana por debajo del panel izquierdo -- vive dentro de la columna
-    # derecha, apilado bajo el visor 3D.
+    # ventana por debajo del panel izquierdo -- vive dentro de un splitter
+    # vertical propio de la columna derecha, apilado bajo el visor 3D.
     window = MainWindow(app_settings)
-    assert window.results_tabs.parentWidget() is window.right_column_container
+    assert window.results_tabs.parentWidget() is window.viewer_results_splitter
+    assert window.viewer_results_splitter.parentWidget() is window.right_column_container
     window.close()
 
 
@@ -198,6 +201,101 @@ def test_product_table_panel_gets_all_extra_vertical_space_in_left_column(
     assert left_layout is not None
     assert left_layout.stretch(0) == 0  # loading_space_summary_panel
     assert left_layout.stretch(1) == 1  # product_table_panel
+    window.close()
+
+
+def test_viewer_has_expanding_vertical_size_policy(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    # Mejoras UX (ajuste del visor): el visor 3D debe poder crecer para
+    # ocupar el espacio sobrante de la columna derecha, no quedarse a su
+    # tamaño mínimo mientras el splitter reparte el resto en otro sitio.
+    window = MainWindow(app_settings)
+    policy = window.viewer_widget.sizePolicy()
+    assert policy.verticalPolicy() == QSizePolicy.Policy.Expanding
+    assert policy.horizontalPolicy() == QSizePolicy.Policy.Expanding
+    window.close()
+
+
+def test_viewer_has_no_inappropriate_fixed_or_maximum_height(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    window = MainWindow(app_settings)
+    assert window.viewer_widget.maximumHeight() == _MAX_WIDGET_HEIGHT
+    assert window.viewer_widget.minimumHeight() > 0
+    window.close()
+
+
+def test_viewer_results_splitter_stretch_factor_favors_the_viewer(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    window = MainWindow(app_settings)
+    assert window.viewer_results_splitter.widget(0) is window.viewer_widget
+    assert window.viewer_results_splitter.widget(1) is window.results_tabs
+    window.resize(1280, 900)
+    window.show()
+    qapp.processEvents()
+    viewer_size, results_size = window.viewer_results_splitter.sizes()
+    assert viewer_size > 0
+    assert viewer_size > results_size
+    window.close()
+
+
+def test_viewer_results_splitter_is_not_collapsible_and_has_minimum_heights(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    window = MainWindow(app_settings)
+    assert window.viewer_results_splitter.childrenCollapsible() is False
+    assert window.viewer_widget.minimumHeight() > 0
+    assert window.results_tabs.minimumHeight() > 0
+    window.close()
+
+
+def test_stale_banner_visibility_does_not_change_viewer_splitter_sizes(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    # Parte 9: el aviso de "resultado invalidado" vive dentro de la pestaña
+    # "Resumen", no altera el reparto de tamaños explícito del splitter.
+    window = MainWindow(app_settings)
+    window.resize(1280, 900)
+    window.show()
+    qapp.processEvents()
+    sizes_before = list(window.viewer_results_splitter.sizes())
+
+    window.results_panel.set_stale(True)
+    qapp.processEvents()
+    sizes_with_banner = list(window.viewer_results_splitter.sizes())
+
+    window.results_panel.set_stale(False)
+    qapp.processEvents()
+
+    assert sizes_with_banner == sizes_before
+    window.close()
+
+
+def test_right_column_layout_contains_only_header_and_splitter(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    # Guarda estructural: ningún widget suelto/duplicado entre el
+    # encabezado del espacio y el visor 3D (investigación de la franja
+    # comprimida reportada -- no se encontró código que la produjera; esta
+    # prueba fija que la columna derecha solo contiene exactamente estos
+    # dos elementos).
+    window = MainWindow(app_settings)
+    layout = window.right_column_container.layout()
+    assert layout is not None
+    assert layout.count() == 2
+    assert layout.itemAt(0).widget() is window.viewer_stats_header
+    assert layout.itemAt(1).widget() is window.viewer_results_splitter
+    window.close()
+
+
+def test_horizontal_work_area_splitter_handle_has_configured_width(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    window = MainWindow(app_settings)
+    assert window.work_area_splitter.handleWidth() >= 6
+    assert window.viewer_results_splitter.handleWidth() >= 6
     window.close()
 
 

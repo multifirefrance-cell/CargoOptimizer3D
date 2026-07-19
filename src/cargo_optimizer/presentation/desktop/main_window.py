@@ -159,6 +159,16 @@ _WORK_AREA_VIEWER_STRETCH = 7
 # estrecho que un control se vuelva inutilizable (Parte 9, responsive).
 _LEFT_PANEL_MIN_WIDTH = 280
 _RIGHT_PANEL_MIN_WIDTH = 480
+# Splitter vertical visor/resultados: el visor domina claramente (4:1) —
+# recupera el tamaño grande que tenía antes de que el panel de
+# resultados compitiera por altura con un `sizeHint` inflado (ver
+# comentario en `_build_central_layout`). Los mínimos evitan que
+# cualquiera de los dos colapse a una altura inútil.
+_VIEWER_STRETCH = 4
+_RESULTS_TABS_STRETCH = 1
+_VIEWER_MIN_HEIGHT = 240
+_RESULTS_TABS_MIN_HEIGHT = 150
+_SPLITTER_HANDLE_WIDTH = 6
 _HEADER_PRODUCT_TABLE = "productTable"
 _ENGINE_LABEL = f"Motor: {GreedyExtremePointStrategy.name}"
 
@@ -331,13 +341,37 @@ class MainWindow(QMainWindow):
         self.results_tabs.addTab(self.log_panel, "Registro")
         self.results_tabs.addTab(self.multi_space_results_panel, "Multi-espacio")
 
+        # El visor 3D y el panel de resultados van dentro de un `QSplitter`
+        # VERTICAL propio, no de un `QVBoxLayout` de celdas fijas: un
+        # `QTabWidget.sizeHint()` refleja el tamaño de **todas** sus
+        # pestañas (aquí, la pestaña "Multi-espacio" es la más alta, no la
+        # "Resumen" que normalmente está visible — mismo motivo ya
+        # documentado en `MultiSpaceResultsPanel`), así que con un
+        # `QVBoxLayout` de stretch fijo, ese `sizeHint` inflado competía
+        # con el visor por espacio en cualquier ventana que no fuera
+        # enorme, dejando el visor mucho más pequeño de lo previsto pese a
+        # tener el stretch factor más alto — un `QSplitter` ignora el
+        # `sizeHint` de sus hijos una vez fijado un tamaño explícito
+        # (`setSizes`), así que esta competencia desaparece por completo
+        # (bug real corregido en la fase de mejoras UX de ajuste del
+        # visor). La proporción por defecto favorece claramente al visor.
+        self.viewer_results_splitter = QSplitter(Qt.Orientation.Vertical, self)
+        self.viewer_results_splitter.setObjectName("viewerResultsSplitter")
+        self.viewer_results_splitter.setChildrenCollapsible(False)
+        self.viewer_results_splitter.addWidget(self.viewer_widget)
+        self.viewer_results_splitter.addWidget(self.results_tabs)
+        self.viewer_widget.setMinimumHeight(_VIEWER_MIN_HEIGHT)
+        self.results_tabs.setMinimumHeight(_RESULTS_TABS_MIN_HEIGHT)
+        self.viewer_results_splitter.setStretchFactor(0, _VIEWER_STRETCH)
+        self.viewer_results_splitter.setStretchFactor(1, _RESULTS_TABS_STRETCH)
+        self.viewer_results_splitter.setSizes([_VIEWER_STRETCH * 100, _RESULTS_TABS_STRETCH * 100])
+
         self.right_column_container = QWidget(self)
         right_column_layout = QVBoxLayout(self.right_column_container)
         right_column_layout.setContentsMargins(0, 0, 0, 0)
         right_column_layout.setSpacing(SPACING_SM)
         right_column_layout.addWidget(self.viewer_stats_header)
-        right_column_layout.addWidget(self.viewer_widget, 1)
-        right_column_layout.addWidget(self.results_tabs, 0)
+        right_column_layout.addWidget(self.viewer_results_splitter, 1)
         self.right_column_container.setMinimumWidth(_RIGHT_PANEL_MIN_WIDTH)
 
         # `QSplitter` ajustable por el usuario entre panel izquierdo y zona
@@ -358,6 +392,15 @@ class MainWindow(QMainWindow):
         self.work_area_splitter.setSizes(
             [_WORK_AREA_LEFT_STRETCH * 100, _WORK_AREA_VIEWER_STRETCH * 100]
         )
+
+        # Handle discreto pero descubrible en ambos splitters: por defecto
+        # Qt lo dibuja casi invisible (un par de píxeles del mismo color
+        # que el fondo), así que el usuario nunca se entera de que puede
+        # arrastrarlo. El ancho se fija aquí explícitamente; el color/hover
+        # sutil vive en la hoja de estilo global (`style.py`, regla
+        # `QSplitter::handle`), igual que el resto de la paleta de la app.
+        for splitter in (self.work_area_splitter, self.viewer_results_splitter):
+            splitter.setHandleWidth(_SPLITTER_HANDLE_WIDTH)
 
         central_container = QWidget(self)
         central_layout = QVBoxLayout(central_container)
@@ -761,7 +804,7 @@ class MainWindow(QMainWindow):
             model.remove_rows_at(list(range(model.rowCount())))
             self.results_panel.clear()
             self.viewer_stats_header.clear_result_stats()
-            self.unpacked_table_panel.model.clear()
+            self.unpacked_table_panel.clear()
             self.warnings_panel.clear()
             self.multi_space_results_panel.clear()
             self._show_empty_space_preview(self.loading_space_form_panel.build_loading_space())
@@ -828,7 +871,7 @@ class MainWindow(QMainWindow):
             else:
                 self.results_panel.clear()
                 self.viewer_stats_header.clear_result_stats()
-                self.unpacked_table_panel.model.clear()
+                self.unpacked_table_panel.clear()
                 self.warnings_panel.clear()
                 self._show_empty_space_preview(loaded.project.loading_space)
             self.results_panel.set_stale(self._result_stale)
@@ -1889,7 +1932,7 @@ class MainWindow(QMainWindow):
         self._set_running_controls_enabled(False)
         self.results_panel.clear()
         self.viewer_stats_header.clear_result_stats()
-        self.unpacked_table_panel.model.clear()
+        self.unpacked_table_panel.clear()
         self.warnings_panel.clear()
         # Un resultado multi-espacio de una ejecución anterior queda
         # obsoleto en cuanto se ejecuta una optimización normal — si no
@@ -2128,8 +2171,8 @@ class MainWindow(QMainWindow):
             weight_kg=result.used_weight_kg,
             utilization_percent=result.volume_utilization_percent,
         )
-        self.unpacked_table_panel.model.set_unpacked_units(
-            result.unpacked_units, self._last_load_units_by_id
+        self.unpacked_table_panel.set_result(
+            result.placements, result.unpacked_units, self._last_load_units_by_id
         )
         self.warnings_panel.set_warnings(result.warnings)
         self.results_panel.set_stale(self._result_stale)

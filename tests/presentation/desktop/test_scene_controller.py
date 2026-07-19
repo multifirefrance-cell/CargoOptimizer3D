@@ -125,6 +125,26 @@ def test_load_scene_creates_separate_actors_for_different_groups(plotter) -> Non
     assert len(controller._box_records) == 3
 
 
+def test_group_actors_render_each_skus_distinct_color(plotter) -> None:  # type: ignore[no-untyped-def]
+    # Sección 7/11-18: la estrategia de actores agrupados (fase OPT-18) no
+    # debe perder la diferenciación visual entre SKU de distinto color --
+    # cada grupo debe pintarse con su propio `color_hex`, no un color
+    # compartido/perdido al fusionar mallas.
+    controller = SceneController(plotter)
+    visuals = (
+        _visual(1, x=0.0, color_hex="#4C78A8"),
+        _visual(2, x=40.0, color_hex="#FF0000"),
+        _visual(3, x=80.0, color_hex="#00FF00"),
+    )
+    controller.load_scene(SceneModel(loading_space=_SPACE, placement_visuals=visuals))
+
+    rendered_colors = {tuple(actor.prop.color)[:3] for actor in controller._group_actors.values()}
+    assert len(rendered_colors) == 3
+    assert pv.Color("#4C78A8").float_rgb in rendered_colors
+    assert pv.Color("#FF0000").float_rgb in rendered_colors
+    assert pv.Color("#00FF00").float_rgb in rendered_colors
+
+
 def test_load_scene_with_empty_placements_still_builds_container(plotter) -> None:  # type: ignore[no-untyped-def]
     controller = SceneController(plotter)
     controller.load_scene(_scene(count=0))

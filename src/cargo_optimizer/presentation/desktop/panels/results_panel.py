@@ -14,12 +14,20 @@ cambia cómo se presentan, nunca el contrato con `MainWindow.set_results`.
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from cargo_optimizer.presentation.desktop.style import (
     ERROR_LIGHT,
-    SPACING_MD,
     SPACING_SM,
+    SPACING_XS,
     SUCCESS_LIGHT,
     WARNING_LIGHT,
 )
@@ -27,21 +35,37 @@ from cargo_optimizer.presentation.desktop.style import (
 _EMPTY = "—"
 _STALE_MESSAGE = "⚠ El resultado anterior fue invalidado porque el proyecto cambió."
 
-_VALUE_STYLE = "font-size: 20pt; font-weight: 700;"
-_TITLE_STYLE = "font-size: 9pt; font-weight: 600; text-transform: uppercase;"
+# Más compactas que en el diseño original (20pt/9pt): liberan altura para
+# el visor 3D sin perder legibilidad (mejoras UX, corrección del bug de
+# truncado — ver `_tile()`).
+_VALUE_STYLE = "font-size: 15pt; font-weight: 700;"
+_TITLE_STYLE = "font-size: 8pt; font-weight: 600; text-transform: uppercase;"
 
 
 def _tile(title: str) -> tuple[QFrame, QLabel]:
-    """Una tarjeta KPI: título pequeño arriba, valor grande abajo. Devuelve `(tarjeta, valor)`."""
+    """Una tarjeta KPI: título pequeño arriba, valor grande abajo. Devuelve `(tarjeta, valor)`.
+
+    El título usa `setWordWrap(True)` en vez de dejar que se recorte: con
+    seis tarjetas en una sola fila, un título largo ("Cantidad pendiente")
+    no siempre cabe en una línea a un ancho de columna razonable — antes
+    de esto, el texto que no cabía simplemente se recortaba (bug real de
+    pérdida de información, no solo estético). `setMinimumWidth(0)` sobre
+    la tarjeta permite que `QGridLayout` la encoja por debajo de su
+    `sizeHint` cuando hace falta, en vez de forzar un ancho mínimo que
+    reintroduciría el mismo problema en ventanas más estrechas.
+    """
     frame = QFrame()
     frame.setFrameShape(QFrame.Shape.StyledPanel)
     frame.setObjectName("kpiTile")
+    frame.setMinimumWidth(0)
+    frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
     title_label = QLabel(title, frame)
     title_label.setStyleSheet(_TITLE_STYLE)
+    title_label.setWordWrap(True)
     value_label = QLabel(_EMPTY, frame)
     value_label.setStyleSheet(_VALUE_STYLE)
     layout = QVBoxLayout(frame)
-    layout.setContentsMargins(SPACING_MD, SPACING_SM, SPACING_MD, SPACING_SM)
+    layout.setContentsMargins(SPACING_SM, SPACING_XS, SPACING_SM, SPACING_XS)
     layout.setSpacing(2)
     layout.addWidget(title_label)
     layout.addWidget(value_label)
@@ -69,27 +93,26 @@ class ResultsPanel(QWidget):
         time_tile, self._time_label = _tile("Tiempo")
 
         # Una sola fila de 6 tarjetas (antes 2x3): la disposición en dos
-        # filas casi duplicaba la altura mínima de este panel, que vive en
-        # `main_splitter` compitiendo por espacio con el área de trabajo
-        # (espacio de carga + productos + visor 3D) — con stretch factor 0
-        # Qt protege su `sizeHint()` al repartir un déficit, así que un
-        # panel de resultados innecesariamente alto termina exprimiendo el
-        # resto de la ventana por debajo de sus propios mínimos, causando
-        # solapamiento visual en los paneles vecinos, no solo un problema
-        # estético aquí.
+        # filas casi duplicaba la altura mínima de este panel. `setColumnStretch`
+        # a 1 en las seis reparte el ancho disponible en partes iguales
+        # (antes ninguna columna tenía stretch, así que cualquier ventana
+        # que no fuera muy ancha dejaba a las tarjetas con menos ancho del
+        # que su contenido necesitaba — la causa real del truncado de
+        # títulos/unidades, no solo un problema estético).
         grid = QGridLayout()
-        grid.setSpacing(SPACING_SM)
+        grid.setSpacing(SPACING_XS)
         for column, tile in enumerate(
             (utilization_tile, weight_tile, volume_tile, packed_tile, pending_tile, time_tile)
         ):
             grid.addWidget(tile, 0, column)
+            grid.setColumnStretch(column, 1)
 
         self._requested_label = QLabel(_EMPTY, self)
         self._status_label = QLabel(_EMPTY, self)
         self._warnings_label = QLabel(_EMPTY, self)
 
         detail_row = QHBoxLayout()
-        detail_row.setSpacing(SPACING_MD)
+        detail_row.setSpacing(SPACING_SM)
         for caption, label in (
             ("Solicitado:", self._requested_label),
             ("Estado:", self._status_label),
@@ -99,12 +122,12 @@ class ResultsPanel(QWidget):
             caption_label.setStyleSheet("font-weight: 600;")
             detail_row.addWidget(caption_label)
             detail_row.addWidget(label)
-            detail_row.addSpacing(SPACING_MD)
+            detail_row.addSpacing(SPACING_SM)
         detail_row.addStretch(1)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(SPACING_MD, SPACING_SM, SPACING_MD, SPACING_SM)
-        layout.setSpacing(SPACING_SM)
+        layout.setContentsMargins(SPACING_SM, SPACING_XS, SPACING_SM, SPACING_XS)
+        layout.setSpacing(SPACING_XS)
         layout.addWidget(self._stale_label)
         layout.addLayout(grid)
         layout.addLayout(detail_row)
