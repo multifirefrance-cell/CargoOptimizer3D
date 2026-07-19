@@ -743,6 +743,15 @@ class ImportMappingProfileRepository:
             return tuple(_orm_to_mapping_profile_entry(row) for row in rows)
 
     def archive(self, id: UUID) -> None:
+        with self._db.session_scope() as session:
+            orm = session.get(ImportMappingProfileORM, str(id))
+            if orm is None:
+                raise RecordNotFoundError(f"No existe un perfil de mapeo con id={id}.")
+            if orm.is_builtin:
+                raise RepositoryError(
+                    "No se puede archivar un perfil de mapeo integrado directamente; "
+                    "duplícalo primero."
+                )
         self._set_active(id, active=False)
 
     def restore(self, id: UUID) -> None:

@@ -19,4 +19,6 @@ cambia: se marcan como `Reemplazada por ADR-XXXX` y se añade una nueva.
 | [ADR-0010](ADR-0010-tecnologia-del-visor-3d.md) | Tecnología del visor 3D: PyVista + PyVistaQt, confirmada frente a VTK directo, `QOpenGLWidget` propio y VisPy | Aceptada |
 | [ADR-0011](ADR-0011-desacoplo-visor-y-fallback.md) | Desacoplo del visor 3D respecto al motor (API basada en `PackingResult` ya calculado) y fallback sin 3D | Aceptada |
 | [ADR-0012](ADR-0012-arquitectura-del-sistema-de-informes-pdf.md) | Arquitectura del sistema de informes PDF: `ReportTemplate` como datos (no jerarquía de clases), aislamiento de `reportlab` respecto a `domain`, captura del visor 3D inyectada como `bytes \| None` | Aceptada |
+| [ADR-0013](ADR-0013-empaquetado-windows.md) | Empaquetado Windows: PyInstaller (onedir) + Inno Setup | Aceptada |
 | [ADR-0014](ADR-0014-eliminacion-limite-apilamiento-forzado-extintores.md) | Eliminación de la excepción automática que forzaba `max_stack_count=1` en extintores individuales >= 3 kg | Aceptada |
+| [ADR-0015](ADR-0015-indice-espacial-colision-soporte.md) | Índice espacial (`SpatialIndex`) para colisión, soporte y apilamiento — documento retroactivo del código ya implementado desde el commit `8396576` | Aceptada (retroactiva) |

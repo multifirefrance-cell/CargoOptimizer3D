@@ -90,9 +90,10 @@ informes PDF (`infrastructure/pdf/`, ReportLab) se diseñó en la fase
 implementación real (cinco tipos de informe, integración con la
 captura del visor 3D, plantillas como datos).
 
-Depende de `domain` (y de `application`
-cuando existan casos de uso reales que orquestar; los tres subpaquetes
-de momento solo necesitan `domain` para reconstruir las entidades).
+Depende de `domain` (y, desde la fase 10.1, también de `application`
+para los casos de uso reales que orquesta, como la asignación
+multi-espacio; los tres subpaquetes de infraestructura anteriores a esa
+fase solo necesitan `domain` para reconstruir las entidades).
 
 ```
 infrastructure/
@@ -304,9 +305,8 @@ sección de rechazo explícito de esa alternativa.
 
 ## El núcleo como SDK
 
-`domain` + `optimization` (+ `application` cuando exista) forman el
-SDK público del proyecto. Ya funciona, sin ninguna dependencia de UI
-instalada:
+`domain` + `optimization` + `application` forman el SDK público del
+proyecto. Ya funciona, sin ninguna dependencia de UI instalada:
 
 ```python
 from cargo_optimizer import PackingEngine, PackingRequest

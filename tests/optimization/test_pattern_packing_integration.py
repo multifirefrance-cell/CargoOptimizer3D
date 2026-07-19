@@ -19,7 +19,6 @@ from cargo_optimizer.optimization.models import PackingRequest
 from tests.optimization._helpers import make_load_unit
 
 _DIMS = Dimensions3D(40.0, 30.0, 20.0)
-_PATTERN_MIN_QUANTITY = 8  # debe coincidir con greedy_extreme_point.py::_PATTERN_MIN_QUANTITY
 
 
 def _space(length: float, width: float, height: float) -> LoadingSpace:

@@ -1,5 +1,20 @@
 # Motor de optimización: implementación real (Fases 4.1-4.2)
 
+**Nota de vigencia (auditoría técnica pre-Beta):** este documento
+describe el motor tal como quedó al cierre de la fase 4.2. Fases muy
+posteriores (OPT-02, OPT-11/ADR-0015, OPT-13, OPT-14 a OPT-18 — ver
+`CLAUDE.md`, invariantes del motor de optimización, y
+`docs/OptimizerPerformance.md`) cambiaron sustancialmente el
+rendimiento real descrito en la sección "Complejidad y rendimiento" de
+más abajo: en concreto, el índice espacial que esa sección da como
+"fuera del alcance" ya está implementado y en uso (`SpatialIndex`,
+ADR-0015), y el caso real de 2000 unidades pasó de no completarse en
+tiempo práctico a resolverse en cientos de segundos con el mismo
+resultado exacto. Para el estado de rendimiento **actual**, usar
+siempre `docs/OptimizerPerformance.md` y `CLAUDE.md` como fuente — el
+resto de este documento (componentes, estrategia, modelo de datos,
+API) sigue vigente sin cambios.
+
 Este documento describe lo que **realmente existe** en
 `src/cargo_optimizer/optimization/`, a diferencia de
 `docs/OptimizationEngineDesign.md` y
@@ -272,6 +287,13 @@ solicitado. Si la validación falla, se lanza
 oculta.
 
 ## Complejidad y rendimiento (medido, no estimado)
+
+**Esta sección describe el estado al cierre de la fase 4.2 — ver la
+nota de vigencia al inicio del documento.** En particular, "fuera del
+alcance autorizado de la fase 4.2" (más abajo) ya no significa "sin
+resolver": el índice espacial que esa frase describe como pendiente se
+implementó en una fase posterior (ADR-0015) y sí redujo ese costo real
+de forma medible — ver `docs/OptimizerPerformance.md`, "Fase OPT-16".
 
 **Corrección sobre `docs/OptimizationEngineDesign.md`:** el diseño de
 fase 4.0 estimaba, antes de medir, "100 cajas: milisegundos a un par

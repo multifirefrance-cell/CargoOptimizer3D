@@ -2001,14 +2001,17 @@ class MainWindow(QMainWindow):
     def _on_worker_thread_finished(self) -> None:
         self._progress_bar.setVisible(False)
         self._set_running_controls_enabled(True)
-        single_worker = self._optimization_worker
-        self._optimization_worker = None
-        if single_worker is not None:
-            single_worker.deleteLater()
-        multi_worker = self._multi_space_worker
-        self._multi_space_worker = None
-        if multi_worker is not None:
-            multi_worker.deleteLater()
+        sender = self.sender()
+        if sender is None or sender is self._optimization_worker:
+            single_worker = self._optimization_worker
+            self._optimization_worker = None
+            if single_worker is not None:
+                single_worker.deleteLater()
+        if sender is None or sender is self._multi_space_worker:
+            multi_worker = self._multi_space_worker
+            self._multi_space_worker = None
+            if multi_worker is not None:
+                multi_worker.deleteLater()
 
     def _populate_results(self, result: PackingResult) -> None:
         volume_m3 = result.used_volume_cm3 / 1_000_000.0

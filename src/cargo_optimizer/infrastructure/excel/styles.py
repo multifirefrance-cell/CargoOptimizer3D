@@ -15,7 +15,6 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 HEADER_FILL = PatternFill(start_color="FFDCE6F1", end_color="FFDCE6F1", fill_type="solid")
 HEADER_FONT = Font(bold=True, color="FF1F3864")
-WARNING_FILL = PatternFill(start_color="FFFCE4D6", end_color="FFFCE4D6", fill_type="solid")
 TITLE_FONT = Font(bold=True, size=13, color="FF1F3864")
 LABEL_FONT = Font(bold=True)
 

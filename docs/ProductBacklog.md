@@ -130,7 +130,7 @@ Cada ítem lleva: descripción funcional, problema, beneficios, ficha de gestió
 
 | Prioridad | Valor usuario | Impacto comercial | Esfuerzo | Riesgo técnico | Dependencias | Versión | Estado |
 |---|---|---|---|---|---|---|---|
-| Crítico | Muy alto | Muy alto | Alto | Alto — nuevo nivel de orquestación sobre el motor greedy actual | Ninguna (es cimiento) | 1.0 | **Motor implementado** (`application.MultiSpaceAssignmentEngine`, ver `docs/MultiSpaceAssignment.md`); integración de interfaz pendiente |
+| Crítico | Muy alto | Muy alto | Alto | Alto — nuevo nivel de orquestación sobre el motor greedy actual | Ninguna (es cimiento) | 1.0 | **Completo** — motor (`application.MultiSpaceAssignmentEngine`) e integración de interfaz (acción "Optimización multi-espacio…", `MultiSpaceOptimizationWorker`, diálogos de candidatos/resultados) ambos implementados y probados; ver `docs/MultiSpaceAssignment.md` |
 
 **Criterios de aceptación:**
 - El usuario puede pedir "optimiza este pedido" sin elegir de antemano cuántos espacios usar.
@@ -281,7 +281,26 @@ Empaquetado real de piezas no rectangulares (maquinaria, muebles). Valor medio-a
 
 ---
 
-#### OPT-11 — Índice espacial para colisión/soporte (postergado, sin ADR)
+#### OPT-11 — Índice espacial para colisión/soporte (implementado — ver ADR-0015)
+
+**Actualización posterior (auditoría técnica pre-Beta):** pese a la
+decisión de cerrar esta investigación "sin ADR, sin código" (más
+abajo), la estructura de datos se implementó poco después, en el mismo
+periodo de trabajo (commit `8396576`, "Speed up packing engine
+1.7x-3x via spatial index..."), y ha sido corregida y ampliada desde
+entonces (`geometry/spatial_index.py::SpatialIndex`; fase OPT-16 en
+`CLAUDE.md`/`docs/OptimizerPerformance.md`). El ADR que este mismo
+ítem exige como criterio de aceptación ("cuando se retome, no antes")
+no se había escrito hasta ahora — **[ADR-0015](ADR/ADR-0015-indice-espacial-colision-soporte.md)**
+lo documenta de forma retroactiva, con la evidencia de equivalencia
+(`tests/rules/test_spatial_index_equivalence.py`) y la medición real
+disponible hoy. El riesgo de falso negativo de soporte transitivo
+(punto 3 de "Por qué queda postergado", más abajo) dejó de aplicar de
+forma independiente cuando una fase posterior eliminó por completo
+`evaluate_supported_weight` y el apilamiento recursivo del motor (ver
+`CLAUDE.md`, invariantes del motor de reglas). El texto original de la
+investigación se conserva sin cambios a continuación, como registro
+histórico de la decisión tal como se tomó en su momento.
 **Descripción:** eliminar de raíz el cuello de botella real del motor —comprobaciones de
 colisión (`geometry/collision.py::boxes_overlap`) y de soporte
 (`geometry/support.py::horizontal_overlap_area_cm2`,
@@ -305,7 +324,7 @@ práctica, inutilizables — mismo argumento ya registrado en OPT-02.
 
 | Prioridad | Valor usuario | Impacto comercial | Esfuerzo | Riesgo técnico | Dependencias | Versión | Estado |
 |---|---|---|---|---|---|---|---|
-| Postergado | Muy alto | Muy alto | Alto | **Alto** — una implementación incorrecta puede introducir un falso negativo de colisión o de soporte, silencioso y grave (una caja "válida" que en realidad se solapa o no está soportada); exige verificación por equivalencia exhaustiva contra el comportamiento actual, no solo pruebas de humo | Profundiza OPT-02 | Sin asignar | **Investigado, sin ADR, sin código** — ver `docs/OptimizerPerformance.md`, sección "OPT-03 → OPT-11 (2026-07-17)", para las métricas completas |
+| Postergado (en su momento) | Muy alto | Muy alto | Alto | Alto en el momento de la decisión — mitigado: ver "Actualización posterior" arriba y ADR-0015 | Profundiza OPT-02 | 1.0 (ya en producción) | **Implementado** (`geometry/spatial_index.py::SpatialIndex`, commit `8396576`, corregido en fase OPT-16) — ver ADR-0015 y `docs/OptimizerPerformance.md`, secciones "OPT-03 → OPT-11" (investigación original) y "Fase OPT-16" (medición tras corrección) |
 
 **Hallazgo que motiva este ítem (2026-07-17):** perfilado real
 (`cProfile`) del escenario reportado por el usuario (caja 20×20×50 cm,

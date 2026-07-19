@@ -13,7 +13,6 @@ un `QComboBox`) y `infrastructure` nunca puede importar de
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import replace
 from typing import Any
 from uuid import uuid4
 
@@ -265,8 +264,3 @@ def row_to_load_unit(
         return LoadUnit(**kwargs)  # type: ignore[arg-type]
     except DomainValidationError as exc:
         raise RowConversionError(row_number, str(exc)) from exc
-
-
-def duplicate_unit_with_new_id(unit: LoadUnit) -> LoadUnit:
-    """Copia independiente con UUID nuevo (mismo criterio que `CatalogService.copy_to_project`)."""
-    return replace(unit, id=uuid4())

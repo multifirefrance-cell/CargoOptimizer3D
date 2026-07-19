@@ -88,8 +88,9 @@ Esta regla se verifica automáticamente con `import-linter` (contrato
 completo y justificación en `docs/Architecture.md` y
 `docs/ADR/ADR-0001-arquitectura-en-capas.md`.
 
-El núcleo (`domain` + `optimization`, y `application` cuando exista)
-es un SDK independiente: ya puede usarse con
+El núcleo (`domain` + `optimization` + `application`, esta última en
+uso real desde la fase 10.1 — `MultiSpaceAssignmentEngine`) es un SDK
+independiente: ya puede usarse con
 `from cargo_optimizer import PackingEngine, PackingRequest` sin
 ninguna dependencia de UI instalada (ADR-0003).
 
@@ -143,6 +144,9 @@ docs/                # Architecture.md, Roadmap.md, GeometryEngine.md, RulesEngi
                      # OptimizationEngineDesign.md, GreedyLayerStrategyDesign.md (diseño), ADR/
 examples/            # Proyectos de ejemplo de uso del SDK
 userdata/            # Datos generados por el usuario en tiempo de ejecución. Nunca se versiona su contenido.
+packaging/           # Empaquetado Windows (fase Beta 1.0, ADR-0013): CargoOptimizer3D.spec (PyInstaller
+                     #   onedir), installer.iss (Inno Setup), generate_app_icon.py, app_icon.ico.
+scripts/             # scripts/benchmark_optimizer.py (fase 4.2) y scripts/build_windows_beta.bat (Beta 1.0).
 ```
 
 ## Comandos de referencia
@@ -300,6 +304,15 @@ cualquier sesión futura debe respetar al tocar `src/cargo_optimizer/domain/`:
 - La regla de horizontalidad obligatoria de extintores (no apilar de
   canto) es del motor de restricciones (fase 3), no del dominio ni de
   `geometry`. El dominio solo deja los campos necesarios preparados.
+- **`domain/color_suggestions.py` (fase OPT-18)**: `suggest_pastel_color`
+  vive en `domain`, no en `presentation/desktop` (donde se creó
+  originalmente en la fase OPT-17) ni en `infrastructure/excel`: tanto
+  la importación de Excel (`infrastructure/excel/product_rows.py`, para
+  celdas de color vacías) como `CatalogProductEditorDialog`
+  (`presentation/desktop`) necesitan la misma función determinista
+  (basada en `zlib.crc32`, nunca en `hash()` de Python ni en `random`),
+  y `domain` es la única capa por debajo de ambas. No moverla de vuelta
+  a `presentation` ni duplicarla en `infrastructure/excel`.
 
 ## Invariantes del motor geométrico (no romper sin ADR)
 
@@ -526,6 +539,26 @@ conservado como historial).
   activos en paralelo, dio 1362,77 s (más lenta que la línea base) —
   no citar ningún número de "×" de esta fase sin volver a medir en una
   máquina descargada, ver `docs/OptimizerPerformance.md`, "Fase OPT-17".
+- **Fase OPT-18 (2026-07-18, saturación temprana por SKU)**:
+  `GreedyExtremePointStrategy.pack` mantiene dos cachés locales por
+  ejecución, `strict_exhausted_at`/`full_exhausted_at`
+  (`dict[UUID, ...]`, nunca atributos de instancia de la estrategia):
+  en cuanto una instancia de un `LoadUnit` falla la búsqueda (ronda 1
+  estricta u orientación completa de ronda 2) con el `PackingState`
+  actual (`len(state.placements)` sin cambios desde el intento
+  anterior de ese mismo SKU), toda instancia pendiente restante del
+  mismo SKU se rechaza directamente sin repetir la búsqueda completa —
+  hasta que se acepte cualquier colocación nueva (de cualquier SKU),
+  momento en que la entrada correspondiente queda automáticamente
+  obsoleta por la clave `len(state.placements)`. Exacto y determinista,
+  nunca una heurística de "número de fallos" ni un umbral: verificado
+  con `candidates_generated` (activado por `diagnostic_mode=True` en
+  los avisos) exactamente igual para 20/200/2000 unidades solicitadas
+  sobre el mismo escenario real que sí caben, y con el mismo
+  `packed_count`/`PackingResult` en los tres casos — nunca reduce el
+  número de cajas cargadas ni afecta a otros SKU. Antes de esta fase,
+  pedir una cantidad muy superior a la que realmente cabe de un mismo
+  SKU repetía cientos de búsquedas completas ya sabidas como inútiles.
 - **Fase OPT-02 (rendimiento, backlog)**: `PlacementRuleContext`
   (`rules/context.py`) acepta un `precomputed_existing_boxes` opcional
   (y expone `box_by_sequence_number`) para que `optimization` le pase

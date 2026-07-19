@@ -6,6 +6,10 @@ generados, bases de datos locales. Nada de lo que se genere aquí se
 versiona en git (ver `.gitignore`): es contenido del usuario, no
 código fuente.
 
-Esta carpeta está vacía porque todavía no existe persistencia (fase 7)
-ni generación de reportes (fase 8). Cuando existan, escribirán aquí
-por defecto.
+Esta carpeta aparece vacía en el repositorio a propósito: la
+persistencia de proyectos (`.cargo3d`, fase 7.0) y la generación de
+informes (Excel desde fase 8.0, PDF desde fase 9.1) ya existen y
+escriben aquí por defecto — lo que está vacío es únicamente el
+directorio versionado en git, no la funcionalidad. El catálogo SQLite
+(fase 7.1) no vive aquí: se guarda en
+`%LOCALAPPDATA%/CargoOptimizer3D/` (ver `docs/Database.md`).

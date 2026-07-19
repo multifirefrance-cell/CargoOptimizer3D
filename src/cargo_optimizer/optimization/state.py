@@ -236,9 +236,14 @@ class PackingState:
         self._bounding_max_z = max(self._bounding_max_z, box.max_z)
         self._spatial_index.insert(placement.sequence_number, box)
         self._box_by_sequence_number[placement.sequence_number] = box
+        # `()` en vez de `self._placements[:-1]`: con `spatial_index` y
+        # `placement_by_sequence_number` siempre presentes aquí,
+        # `_nearby_placements` nunca lee `existing_placements` (ver
+        # `rules/stack_levels.py`) -- construir esa lista era una copia
+        # O(n) descartada en cada colocación aceptada.
         supporters = find_direct_supporting_placements(
             box,
-            self._placements[:-1],
+            (),
             self._box_by_sequence_number,
             self._spatial_index,
             self._placement_by_sequence_number,

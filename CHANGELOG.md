@@ -24,6 +24,25 @@ otros procesos del sistema corriendo en paralelo — ver
 
 ### Changed
 
+- **Fase OPT-18**: tres mejoras independientes sobre el mismo commit.
+  Excel: nueva acción "Descargar plantilla Excel…" genera una plantilla
+  oficial de importación de productos en blanco (hojas "Productos" +
+  "Instrucciones"), con una fila de ejemplo cuyo SKU reservado
+  (`EXAMPLE_ROW_SKU_MARKER`) el importador siempre ignora, y celdas de
+  color vacías reciben ahora un color pastel automático en vez de un
+  gris por defecto. Optimización: nuevo par de cachés de saturación
+  temprana en `GreedyExtremePointStrategy.pack`
+  (`strict_exhausted_at`/`full_exhausted_at`, ver `CLAUDE.md`) que
+  evita repetir la búsqueda completa para cada instancia pendiente de
+  un mismo SKU una vez confirmado que ya no caben más — exacto y
+  determinista (invalidado en cuanto se acepta cualquier colocación),
+  nunca reduce el número de cajas cargadas, verificado con
+  `candidates_generated` exactamente plano para 20/200/2000 unidades
+  solicitadas sobre el mismo escenario real. Visor 3D: `SceneController`
+  agrupa cajas visualmente idénticas (misma dimensión orientada y
+  color) en un único actor VTK por grupo en vez de un actor por caja —
+  ver `docs/ThreeDViewer.md`, sección "12.1", para la medición real
+  (~16.7x más rápido en el caso de 500 cajas).
 - **Fase OPT-17**: `LoadUnit` nuevo sin orientaciones configuradas
   recibe ahora solo 2 de las 6 orientaciones por defecto
   (`DEFAULT_ORIENTATION_CODES` = `LWH_XYZ`/`WLH_XYZ`, las únicas dos
@@ -35,7 +54,9 @@ otros procesos del sistema corriendo en paralelo — ver
   cualquier regla) — no puede producir un resultado peor que antes.
   `PlacementRuleContext.precomputed_support_ratio` elimina un cálculo
   redundante de soporte por candidato. Nuevo módulo
-  `presentation/desktop/color_suggestions.py`: color pastel automático
+  `domain/color_suggestions.py` (movido a `presentation/desktop/` en un
+  primer momento y reubicado en `domain` en la fase OPT-18 para que
+  `infrastructure/excel` también pueda usarlo): color pastel automático
   (determinista, sin `random`) para un SKU nuevo sin color, con
   selector manual (`QColorDialog`) en `CatalogProductEditorDialog`.
   Verificado en el caso real de 2000 unidades: mismo resultado exacto
@@ -81,6 +102,21 @@ otros procesos del sistema corriendo en paralelo — ver
   fuera de espacio, cero cajas flotantes, `max_stack_count`,
   orientaciones permitidas y peso máximo del espacio siguen exactamente
   igual. Ver `docs/OptimizerPerformance.md`, "Fase OPT-16".
+- **Empaquetado Windows (Beta 1.0, ADR-0013)**: cronológicamente
+  anterior a las fases OPT-14 a OPT-18 de más arriba (situada aquí, no
+  al principio de esta sección, para no reescribir el orden ya
+  existente). Nuevo directorio `packaging/`
+  (`CargoOptimizer3D.spec` para PyInstaller en modo onedir,
+  `installer.iss` para Inno Setup, `generate_app_icon.py`,
+  `app_icon.ico`) y `scripts/build_windows_beta.bat`: generan un
+  ejecutable de escritorio autocontenido y un instalador
+  (`CargoOptimizer3D_Beta_Setup.exe`) sin exigir Python instalado en la
+  máquina destino. `tests/test_packaging_metadata.py` verifica que la
+  versión declarada en `pyproject.toml`, `__init__.py` e
+  `installer.iss` se mantiene sincronizada. No cambia ningún
+  comportamiento de `domain`/`geometry`/`rules`/`optimization`/
+  `application`/`infrastructure`/`presentation` — es puramente
+  empaquetado de lo ya construido.
 
 ## [1.0.0b2] - 2026-07-16
 

@@ -1,4 +1,13 @@
-"""Generación de las cuatro plantillas oficiales de CargoOptimizer3D.
+"""Generación de las plantillas oficiales de CargoOptimizer3D.
+
+`generate_all_templates` produce las cuatro plantillas de referencia
+originales (catálogo, packing list, espacio de carga, resultado de
+optimización). Desde la fase OPT-18, este módulo añade una quinta
+plantilla oficial independiente, `generate_product_import_template`
+(la plantilla de importación de productos en blanco, descargable desde
+la interfaz) — no forma parte de `generate_all_templates` a propósito,
+para no alterar el conjunto de cuatro archivos que esa función y sus
+pruebas ya fijan como contrato.
 
 Cada plantilla se construye con el propio código de exportación del
 paquete (nunca escrita a mano celda a celda fuera de aquí), igual que

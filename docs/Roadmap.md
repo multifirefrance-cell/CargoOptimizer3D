@@ -264,3 +264,31 @@ redactar todavía el ADR del índice espacial** — ver
 sin ADR). La prioridad vuelve por completo al desarrollo funcional de
 la Beta 1.0; no abrir nuevas investigaciones de rendimiento hasta que
 esa Beta esté funcionalmente terminada.
+
+**Actualización (auditoría técnica pre-Beta, cierra el hueco de
+narrativa entre lo anterior y el estado real hoy):** en contra de la
+decisión de cierre citada arriba, el índice espacial se implementó
+poco después dentro del mismo periodo de trabajo (commit `8396576`,
+ver ADR-0015 — documento retroactivo escrito durante esta misma
+auditoría) y se corrigió/amplió en varias fases posteriores, todas
+documentadas en `CLAUDE.md` (invariantes del motor de optimización) y
+`docs/OptimizerPerformance.md`: **OPT-13** (eliminación del peso
+soportado acumulado/propagado y del apilamiento recursivo — esto es lo
+que hizo seguro, de forma independiente, generalizar el índice
+espacial), **OPT-14** (valor por defecto de `max_stack_count` = 30),
+**OPT-15** (eliminación de la excepción automática de apilamiento de
+extintores, ADR-0014), **OPT-16** (corrección de varios puntos que no
+aprovechaban el índice espacial ya existente — caso real de 2000
+unidades: ~2973 s → ~552-960 s, mismo resultado exacto), **OPT-17**
+(orientaciones por defecto reducidas, patrón de filas/capas, caché de
+`support_ratio`, color pastel automático) y **OPT-18** (plantilla
+Excel descargable, caché de saturación temprana por SKU, agrupación de
+actores del visor 3D por forma+color). Entre estas fases y la Beta
+1.0, se completó también el **empaquetado Windows** (PyInstaller
+onedir + Inno Setup, ADR-0013, directorio `packaging/`): el instalador
+`CargoOptimizer3D_Beta_Setup.exe` es un entregable real, no solo un
+script de desarrollo. Para el detalle completo de cada fase de
+rendimiento, `docs/OptimizerPerformance.md` y `CLAUDE.md` son siempre
+la fuente actualizada — esta sección se mantiene como narrativa
+histórica y se seguirá extendiendo hacia adelante, no reescribiendo lo
+ya escrito.

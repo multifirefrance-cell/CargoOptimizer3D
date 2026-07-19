@@ -267,7 +267,10 @@ class ProductTableModel(QAbstractTableModel):
 
     def add_default_product(self) -> None:
         """Añade un `LoadUnit` de ejemplo neutro al final de la tabla (acción "Nuevo producto")."""
+        existing_skus = {unit.sku for unit in self._load_units}
         index = len(self._load_units) + 1
+        while f"SKU-{index:03d}" in existing_skus:
+            index += 1
         new_unit = LoadUnit(
             sku=f"SKU-{index:03d}",
             name="Nuevo producto",
