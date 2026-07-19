@@ -13,7 +13,9 @@ productos").
 
 Editar cantidad y eliminar son las únicas dos acciones sobre una línea
 ya agregada; nunca reabren el editor completo de producto solo para
-cambiar un número.
+cambiar un número. Eliminar siempre pide confirmación antes de quitar
+la fila (solo afecta a esta carga; el producto sigue disponible en el
+catálogo).
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QMessageBox,
     QPushButton,
     QStackedWidget,
     QTableView,
@@ -35,6 +38,7 @@ from PySide6.QtWidgets import (
 
 from cargo_optimizer.domain.load_unit import LoadUnit
 from cargo_optimizer.infrastructure.database.repositories import ProductCatalogRepository
+from cargo_optimizer.presentation.desktop.icons import icon
 from cargo_optimizer.presentation.desktop.models.product_table_model import (
     COL_NAME,
     COL_QUANTITY,
@@ -45,6 +49,7 @@ from cargo_optimizer.presentation.desktop.models.product_table_model import (
 from cargo_optimizer.presentation.desktop.panels.product_quick_add_panel import (
     ProductQuickAddPanel,
 )
+from cargo_optimizer.presentation.desktop.style import SPACING_SM, SPACING_XS
 
 _VISIBLE_COLUMNS = frozenset({COL_SKU, COL_NAME, COL_QUANTITY, COL_WEIGHT_TOTAL})
 _EMPTY_LOAD_MESSAGE = (
@@ -102,11 +107,13 @@ class ProductTablePanel(QWidget):
         self._update_stack_page()
 
         self._edit_quantity_button = QPushButton("Editar cantidad…", self)
-        self._remove_button = QPushButton("Eliminar", self)
+        self._remove_button = QPushButton(icon("delete"), "Eliminar", self)
         self._edit_quantity_button.clicked.connect(self._on_edit_quantity_clicked)
         self._remove_button.clicked.connect(self.remove_selected_rows)
 
         toolbar_layout = QHBoxLayout()
+        toolbar_layout.setContentsMargins(SPACING_SM, SPACING_XS, SPACING_SM, SPACING_XS)
+        toolbar_layout.setSpacing(SPACING_XS)
         toolbar_layout.addWidget(QLabel("<b>PRODUCTOS DE ESTA CARGA</b>", self))
         toolbar_layout.addStretch(1)
         toolbar_layout.addWidget(self._edit_quantity_button)
@@ -114,9 +121,10 @@ class ProductTablePanel(QWidget):
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(SPACING_XS)
         layout.addWidget(self.quick_add_panel)
         layout.addLayout(toolbar_layout)
-        layout.addWidget(self._stack)
+        layout.addWidget(self._stack, 1)
 
         self.model.rowsInserted.connect(self._update_stack_page)
         self.model.rowsRemoved.connect(self._update_stack_page)
@@ -169,5 +177,20 @@ class ProductTablePanel(QWidget):
 
     def remove_selected_rows(self) -> None:
         rows = {index.row() for index in self.table_view.selectionModel().selectedRows()}
-        if rows:
-            self.model.remove_rows_at(list(rows))
+        if not rows:
+            return
+        skus = [self.model.load_units()[row].sku for row in sorted(rows)]
+        plural = len(skus) != 1
+        response = QMessageBox.question(
+            self,
+            "Eliminar de la carga",
+            f"¿Eliminar {'los' if plural else 'el'} producto{'s' if plural else ''} "
+            f"seleccionado{'s' if plural else ''} de esta carga?\n\n"
+            + "\n".join(skus)
+            + "\n\nEsto solo lo quita de esta carga; seguirá disponible en el catálogo.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if response != QMessageBox.StandardButton.Yes:
+            return
+        self.model.remove_rows_at(list(rows))

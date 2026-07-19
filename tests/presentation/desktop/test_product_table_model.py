@@ -155,3 +155,62 @@ def test_set_unit_at_ignores_out_of_range_row(qapp: QApplication) -> None:
     model.set_unit_at(5, _unit(sku="Z"))
 
     assert model.load_units()[0].sku == "A"
+
+
+def test_sync_from_catalog_updates_matching_row_preserving_id_and_quantity(
+    qapp: QApplication,
+) -> None:
+    project_unit = _unit(sku="BOX-1", quantity=7, weight_kg=10.0)
+    model = ProductTableModel([project_unit])
+    catalog_unit = _unit(sku="BOX-1", quantity=1, weight_kg=99.0)
+
+    changes = model.sync_from_catalog(catalog_unit)
+
+    updated = model.load_units()[0]
+    assert updated.weight_kg == 99.0
+    assert updated.id == project_unit.id
+    assert updated.quantity == 7
+    assert len(changes) == 1
+    assert changes[0] == (project_unit, updated)
+
+
+def test_sync_from_catalog_matches_sku_case_insensitively(qapp: QApplication) -> None:
+    model = ProductTableModel([_unit(sku="box-1", weight_kg=10.0)])
+    catalog_unit = _unit(sku="BOX-1", weight_kg=42.0)
+
+    model.sync_from_catalog(catalog_unit)
+
+    assert model.load_units()[0].weight_kg == 42.0
+
+
+def test_sync_from_catalog_does_nothing_when_no_sku_matches(qapp: QApplication) -> None:
+    original = _unit(sku="BOX-1", weight_kg=10.0)
+    model = ProductTableModel([original])
+
+    changes = model.sync_from_catalog(_unit(sku="OTHER-SKU", weight_kg=99.0))
+
+    assert model.load_units()[0] == original
+    assert changes == ()
+
+
+def test_sync_from_catalog_does_nothing_when_values_are_identical(qapp: QApplication) -> None:
+    project_unit = _unit(sku="BOX-1", quantity=3, weight_kg=10.0)
+    model = ProductTableModel([project_unit])
+    identical_catalog_unit = _unit(sku="BOX-1", quantity=99, weight_kg=10.0)
+
+    changes = model.sync_from_catalog(identical_catalog_unit)
+
+    assert changes == ()
+    assert model.load_units()[0] == project_unit
+
+
+def test_sync_from_catalog_updates_every_matching_row(qapp: QApplication) -> None:
+    model = ProductTableModel(
+        [_unit(sku="BOX-1", weight_kg=1.0), _unit(sku="BOX-1", weight_kg=1.0)]
+    )
+    catalog_unit = _unit(sku="BOX-1", weight_kg=50.0)
+
+    changes = model.sync_from_catalog(catalog_unit)
+
+    assert len(changes) == 2
+    assert all(unit.weight_kg == 50.0 for unit in model.load_units())

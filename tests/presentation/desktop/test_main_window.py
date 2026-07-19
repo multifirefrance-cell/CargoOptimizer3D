@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from PySide6.QtWidgets import QApplication, QMessageBox, QToolBar
+from PySide6.QtWidgets import QApplication, QMessageBox, QSplitter, QToolBar
 
 from cargo_optimizer import __version__
 from cargo_optimizer.presentation.desktop.main_window import MainWindow
@@ -129,4 +129,88 @@ def test_selection_details_dock_hidden_by_default(
     window = MainWindow(app_settings)
     window.show()
     assert not window.selection_details_dock.isVisible()
+    window.close()
+
+
+def test_work_area_splitter_holds_left_and_right_columns_in_order(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    window = MainWindow(app_settings)
+    assert isinstance(window.work_area_splitter, QSplitter)
+    assert window.work_area_splitter.count() == 2
+    assert window.work_area_splitter.widget(0) is window.left_work_container
+    assert window.work_area_splitter.widget(1) is window.right_column_container
+    window.close()
+
+
+def test_work_area_splitter_is_not_collapsible_and_has_minimum_widths(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    window = MainWindow(app_settings)
+    assert window.work_area_splitter.childrenCollapsible() is False
+    assert window.left_work_container.minimumWidth() > 0
+    assert window.right_column_container.minimumWidth() > 0
+    window.close()
+
+
+def test_work_area_splitter_default_sizes_favor_the_viewer_column(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    window = MainWindow(app_settings)
+    window.resize(1280, 800)
+    window.show()
+    qapp.processEvents()
+    left_size, right_size = window.work_area_splitter.sizes()
+    assert left_size > 0
+    assert right_size > left_size
+    window.close()
+
+
+def test_results_tabs_live_under_the_right_column_not_full_window_width(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    # Mejoras UX: el panel de resultados ya no ocupa todo el ancho de la
+    # ventana por debajo del panel izquierdo -- vive dentro de la columna
+    # derecha, apilado bajo el visor 3D.
+    window = MainWindow(app_settings)
+    assert window.results_tabs.parentWidget() is window.right_column_container
+    window.close()
+
+
+def test_toggling_3d_focus_still_hides_the_left_column(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    window = MainWindow(app_settings)
+    window._on_toggle_3d_focus(True)
+    assert window.left_work_container.isHidden() is True
+    window._on_toggle_3d_focus(False)
+    assert window.left_work_container.isHidden() is False
+    window.close()
+
+
+def test_product_table_panel_gets_all_extra_vertical_space_in_left_column(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    # Parte 4: "PRODUCTOS DE ESTA CARGA" debe crecer con el espacio
+    # disponible, "ESPACIO DE CARGA" mantiene su altura natural.
+    window = MainWindow(app_settings)
+    left_layout = window.left_work_container.layout()
+    assert left_layout is not None
+    assert left_layout.stretch(0) == 0  # loading_space_summary_panel
+    assert left_layout.stretch(1) == 1  # product_table_panel
+    window.close()
+
+
+def test_window_resizes_without_error_at_several_sizes(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    # Parte 9 (responsive): maximizar/restaurar/reducir no debe lanzar
+    # excepciones ni dejar el splitter en un estado inconsistente.
+    window = MainWindow(app_settings)
+    window.show()
+    for width, height in ((1920, 1080), (1024, 768), (900, 600)):
+        window.resize(width, height)
+        qapp.processEvents()
+    assert window.left_work_container.width() > 0
+    assert window.right_column_container.width() > 0
     window.close()

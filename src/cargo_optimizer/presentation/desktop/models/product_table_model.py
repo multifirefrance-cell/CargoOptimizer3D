@@ -309,3 +309,25 @@ class ProductTableModel(QAbstractTableModel):
                 self.beginRemoveRows(QModelIndex(), row, row)
                 del self._load_units[row]
                 self.endRemoveRows()
+
+    def sync_from_catalog(self, catalog_unit: LoadUnit) -> tuple[tuple[LoadUnit, LoadUnit], ...]:
+        """Actualiza toda fila cuyo SKU (sin mayúsculas/espacios) coincida con `catalog_unit`.
+
+        Preserva el `id` y la `quantity` propios de cada fila (son de esta
+        carga, no del catálogo); todo lo demás -- dimensiones, peso,
+        apilamiento, orientaciones, color, fragilidad, tipo de empaque,
+        campos de extintor, notas -- se toma de `catalog_unit`. Devuelve,
+        para cada fila realmente modificada, el par
+        `(unidad_anterior, unidad_nueva)` para que quien llame pueda decidir
+        si el cambio afecta al cubicaje o es solo cosmético (p. ej. color).
+        """
+        sku_lower = catalog_unit.sku.strip().lower()
+        changes: list[tuple[LoadUnit, LoadUnit]] = []
+        for row, existing in enumerate(self._load_units):
+            if existing.sku.strip().lower() != sku_lower:
+                continue
+            updated = replace(catalog_unit, id=existing.id, quantity=existing.quantity)
+            if updated != existing:
+                changes.append((existing, updated))
+                self.set_unit_at(row, updated)
+        return tuple(changes)

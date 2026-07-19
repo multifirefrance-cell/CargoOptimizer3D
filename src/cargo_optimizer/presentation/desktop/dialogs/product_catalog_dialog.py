@@ -8,6 +8,12 @@ solo orquesta la lista y las llamadas al repositorio.
 Desde la fase 8.1 acepta arrastrar y soltar un `.xlsx` directamente
 sobre la ventana (``on_excel_dropped``): el diálogo solo detecta el
 archivo soltado y delega en el callback — nunca importa nada él mismo.
+
+El botón "Eliminar" pide confirmación y, por debajo, sigue llamando a
+`ProductCatalogRepository.archive` (`is_active=False`): el catálogo
+nunca borra un registro físicamente (invariante de `CLAUDE.md`), solo
+se le da al usuario una etiqueta y un icono que se leen como "borrar"
+en vez de "archivar".
 """
 
 from __future__ import annotations
@@ -15,6 +21,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from PySide6.QtCore import QModelIndex, QPersistentModelIndex
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -39,6 +46,7 @@ from cargo_optimizer.presentation.desktop.dialogs.catalog_product_editor_dialog 
     CatalogProductEditorDialog,
 )
 from cargo_optimizer.presentation.desktop.drag_drop import first_excel_path, has_excel_url
+from cargo_optimizer.presentation.desktop.icons import icon
 from cargo_optimizer.presentation.desktop.models.product_catalog_table_model import (
     ProductCatalogTableModel,
 )
@@ -74,11 +82,12 @@ class ProductCatalogDialog(QDialog):
         self.table_view.setAlternatingRowColors(True)
         self.table_view.horizontalHeader().setStretchLastSection(True)
         self.table_view.verticalHeader().setVisible(False)
+        self.table_view.doubleClicked.connect(self._on_row_double_clicked)
 
         self._add_button = QPushButton("Nuevo…", self)
         self._edit_button = QPushButton("Editar…", self)
         self._duplicate_button = QPushButton("Duplicar…", self)
-        self._archive_button = QPushButton("Archivar", self)
+        self._archive_button = QPushButton(icon("delete"), "Eliminar", self)
         self._restore_button = QPushButton("Restaurar", self)
         self._add_to_project_button = QPushButton("Añadir seleccionados al proyecto", self)
         self._close_button = QPushButton("Cerrar", self)
@@ -146,6 +155,11 @@ class ProductCatalogDialog(QDialog):
             entries = self._repository.list_all()
         self.model.set_entries(entries)
 
+    def _on_row_double_clicked(self, index: QModelIndex | QPersistentModelIndex) -> None:
+        """Doble clic abre el mismo editor que "Editar…" — un solo clic solo selecciona."""
+        if index.isValid():
+            self._on_edit()
+
     def _selected_row(self) -> int | None:
         indexes = self.table_view.selectionModel().selectedRows()
         return indexes[0].row() if indexes else None
@@ -208,10 +222,21 @@ class ProductCatalogDialog(QDialog):
         if row is None:
             return
         entry = self.model.entry_at(row)
+        response = QMessageBox.question(
+            self,
+            "Eliminar producto",
+            f"¿Eliminar '{entry.load_unit.sku}' del catálogo?\n\n"
+            "Dejará de estar disponible para agregarlo a nuevos proyectos, pero su "
+            'histórico se conserva y podrás restaurarlo más tarde con "Restaurar".',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if response != QMessageBox.StandardButton.Yes:
+            return
         try:
             self._repository.archive(entry.load_unit.id)
         except RepositoryError as exc:
-            QMessageBox.warning(self, "No se pudo archivar el producto", str(exc))
+            QMessageBox.warning(self, "No se pudo eliminar el producto", str(exc))
         self._refresh()
 
     def _on_restore(self) -> None:

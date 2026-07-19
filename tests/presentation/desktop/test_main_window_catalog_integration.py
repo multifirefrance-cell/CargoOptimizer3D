@@ -21,6 +21,7 @@ from cargo_optimizer.domain.dimensions import Dimensions3D
 from cargo_optimizer.domain.enums import LoadingSpaceCategory
 from cargo_optimizer.domain.load_unit import LoadUnit
 from cargo_optimizer.domain.loading_space import LoadingSpace
+from cargo_optimizer.domain.packing_result import PackingResult
 from cargo_optimizer.infrastructure.database.catalog_service import CatalogService
 from cargo_optimizer.presentation.desktop import main_window as main_window_module
 from cargo_optimizer.presentation.desktop.main_window import MainWindow
@@ -66,6 +67,24 @@ def _unit(**overrides: object) -> LoadUnit:
     }
     kwargs.update(overrides)
     return LoadUnit(**kwargs)  # type: ignore[arg-type]
+
+
+def _sample_result() -> PackingResult:
+    return PackingResult(
+        loading_space=LoadingSpace(
+            name="Espacio",
+            category=LoadingSpaceCategory.WAREHOUSE,
+            internal_dimensions=Dimensions3D(100, 100, 100),
+        ),
+        placements=(),
+        unpacked_units=(),
+        requested_count=0,
+        packed_count=0,
+        used_volume_cm3=0.0,
+        used_weight_kg=0.0,
+        execution_time_seconds=0.01,
+        algorithm_name="greedy_extreme_point_v1",
+    )
 
 
 def _space(**overrides: object) -> LoadingSpace:
@@ -370,3 +389,95 @@ def test_close_event_disposes_catalog_service(
     window.close()
 
     assert calls == ["closed"]
+
+
+def test_sync_catalog_changes_refreshes_quick_add_combo(
+    qapp: QApplication, app_settings: AppSettings, tmp_path: Path
+) -> None:
+    service = CatalogService.create_default(base_dir=tmp_path)
+    window = MainWindow(app_settings, catalog_service=service)
+    service.products.add(_unit(sku="NEW-CATALOG-SKU"))
+
+    window._sync_catalog_changes()
+
+    assert "new-catalog-sku" in window.product_table_panel.quick_add_panel._by_sku
+    window.close()
+
+
+def test_sync_catalog_changes_updates_a_row_already_in_this_load(
+    qapp: QApplication, app_settings: AppSettings, tmp_path: Path
+) -> None:
+    service = CatalogService.create_default(base_dir=tmp_path)
+    window = MainWindow(app_settings, catalog_service=service)
+    added = service.products.add(_unit(sku="EDITED-1", weight_kg=10.0, quantity=1))
+    window.product_table_panel.model.add_units([CatalogService.copy_to_project(added)])
+    service.products.update(_unit(id=added.id, sku="EDITED-1", weight_kg=250.0, quantity=1))
+
+    window._sync_catalog_changes()
+
+    project_unit = window.product_table_panel.model.load_units()[0]
+    assert project_unit.weight_kg == 250.0
+    window.close()
+
+
+def test_sync_catalog_changes_invalidates_stale_result_on_geometric_edit(
+    qapp: QApplication, app_settings: AppSettings, tmp_path: Path
+) -> None:
+    service = CatalogService.create_default(base_dir=tmp_path)
+    window = MainWindow(app_settings, catalog_service=service)
+    added = service.products.add(_unit(sku="EDITED-2", weight_kg=10.0))
+    window.product_table_panel.model.add_units([CatalogService.copy_to_project(added)])
+    window._last_result = _sample_result()
+    window._result_stale = False
+    service.products.update(_unit(id=added.id, sku="EDITED-2", weight_kg=500.0))
+
+    window._sync_catalog_changes()
+
+    assert window._result_stale is True
+    assert window.results_panel._stale_label.isHidden() is False
+    window.close()
+
+
+def test_sync_catalog_changes_color_only_edit_does_not_invalidate_but_recolors_viewer(
+    qapp: QApplication,
+    app_settings: AppSettings,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = CatalogService.create_default(base_dir=tmp_path)
+    window = MainWindow(app_settings, catalog_service=service)
+    added = service.products.add(_unit(sku="EDITED-3", color_hex="#111111"))
+    project_unit = CatalogService.copy_to_project(added)
+    window.product_table_panel.model.add_units([project_unit])
+    window._last_result = _sample_result()
+    window._result_stale = False
+    window._last_load_units_by_id = {project_unit.id: project_unit}
+    display_calls: list[object] = []
+    monkeypatch.setattr(
+        window.viewer_widget, "display_result", lambda *a, **k: display_calls.append(a)
+    )
+    service.products.update(_unit(id=added.id, sku="EDITED-3", color_hex="#ABCDEF"))
+
+    window._sync_catalog_changes()
+
+    assert window._result_stale is False
+    assert window.results_panel._stale_label.isHidden() is True
+    assert len(display_calls) == 1
+    assert window._last_load_units_by_id[project_unit.id].color_hex == "#ABCDEF"
+    window.close()
+
+
+def test_on_open_catalog_syncs_changes_even_when_dialog_is_closed_without_adding(
+    qapp: QApplication, app_settings: AppSettings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service = CatalogService.create_default(base_dir=tmp_path)
+    window = MainWindow(app_settings, catalog_service=service)
+    added = service.products.add(_unit(sku="EDITED-4", weight_kg=10.0))
+    window.product_table_panel.model.add_units([CatalogService.copy_to_project(added)])
+    service.products.update(_unit(id=added.id, sku="EDITED-4", weight_kg=321.0))
+    monkeypatch.setattr(main_window_module, "ProductCatalogDialog", _fake_catalog_dialog(False, ()))
+
+    window._on_open_catalog()
+
+    assert window.product_table_panel.model.load_units()[0].weight_kg == 321.0
+    window.close()

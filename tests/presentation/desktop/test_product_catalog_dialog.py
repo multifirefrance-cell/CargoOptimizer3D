@@ -12,6 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from PySide6.QtCore import QModelIndex
 from PySide6.QtWidgets import QApplication, QDialog, QInputDialog, QMessageBox
 
 from cargo_optimizer.domain.dimensions import Dimensions3D
@@ -129,6 +130,66 @@ def test_on_edit_updates_the_selected_product(
     assert repo.get_by_id(added.id).name == "Actualizado"  # type: ignore[union-attr]
 
 
+def test_double_click_opens_the_same_editor_as_edit_button(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repository(tmp_path)
+    added = repo.add(_unit(sku="BOX-1", name="Original"))
+    dialog = ProductCatalogDialog(None, repository=repo)
+    dialog.table_view.selectRow(0)
+    updated_unit = LoadUnit(
+        id=added.id,
+        sku="BOX-1",
+        name="Editado por doble clic",
+        dimensions=added.dimensions,
+        weight_kg=99.0,
+    )
+    monkeypatch.setattr(
+        dialog_module, "CatalogProductEditorDialog", _fake_editor_dialog_class(True, updated_unit)
+    )
+
+    dialog._on_row_double_clicked(dialog.model.index(0, 0))
+
+    assert repo.get_by_id(added.id).name == "Editado por doble clic"  # type: ignore[union-attr]
+
+
+def test_single_click_selection_does_not_open_the_editor(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repository(tmp_path)
+    repo.add(_unit(sku="BOX-1"))
+    dialog = ProductCatalogDialog(None, repository=repo)
+    opened: list[object] = []
+    monkeypatch.setattr(
+        dialog_module,
+        "CatalogProductEditorDialog",
+        lambda *a, **k: opened.append((a, k)) or _fake_editor_dialog_class(False, None)(*a, **k),
+    )
+
+    dialog.table_view.selectRow(0)
+
+    assert dialog._selected_row() == 0
+    assert opened == []
+
+
+def test_double_click_on_invalid_index_does_nothing(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repository(tmp_path)
+    repo.add(_unit(sku="BOX-1"))
+    dialog = ProductCatalogDialog(None, repository=repo)
+    opened: list[object] = []
+    monkeypatch.setattr(
+        dialog_module,
+        "CatalogProductEditorDialog",
+        lambda *a, **k: opened.append((a, k)) or _fake_editor_dialog_class(False, None)(*a, **k),
+    )
+
+    dialog._on_row_double_clicked(QModelIndex())
+
+    assert opened == []
+
+
 def test_on_duplicate_prompts_for_new_sku(
     qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -144,17 +205,59 @@ def test_on_duplicate_prompts_for_new_sku(
     assert repo.count_active() == 2
 
 
-def test_on_archive_then_restore(qapp: QApplication, tmp_path: Path) -> None:
+def test_on_archive_then_restore(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     repo = _repository(tmp_path)
     repo.add(_unit(sku="BOX-1"))
     dialog = ProductCatalogDialog(None, repository=repo)
     dialog.table_view.selectRow(0)
+    monkeypatch.setattr(
+        QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.Yes)
+    )
 
     dialog._on_archive()
     assert repo.count_active() == 0
 
     dialog.table_view.selectRow(0)
     dialog._on_restore()
+    assert repo.count_active() == 1
+
+
+def test_on_archive_asks_for_confirmation_first(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repository(tmp_path)
+    repo.add(_unit(sku="BOX-1"))
+    dialog = ProductCatalogDialog(None, repository=repo)
+    dialog.table_view.selectRow(0)
+    asked: list[tuple[object, ...]] = []
+
+    def _fake_question(*args: object, **_kwargs: object) -> QMessageBox.StandardButton:
+        asked.append(args)
+        return QMessageBox.StandardButton.Yes
+
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(_fake_question))
+
+    dialog._on_archive()
+
+    assert len(asked) == 1
+    assert repo.count_active() == 0
+
+
+def test_on_archive_declined_leaves_product_active(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = _repository(tmp_path)
+    repo.add(_unit(sku="BOX-1"))
+    dialog = ProductCatalogDialog(None, repository=repo)
+    dialog.table_view.selectRow(0)
+    monkeypatch.setattr(
+        QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.StandardButton.No)
+    )
+
+    dialog._on_archive()
+
     assert repo.count_active() == 1
 
 

@@ -40,6 +40,7 @@ from cargo_optimizer.infrastructure.database.repositories import ProductCatalogR
 from cargo_optimizer.presentation.desktop.dialogs.catalog_product_editor_dialog import (
     CatalogProductEditorDialog,
 )
+from cargo_optimizer.presentation.desktop.style import SPACING_SM, SPACING_XS
 
 _EMPTY_INFO = ""
 _NOT_AVAILABLE_MESSAGE = "Catálogo no disponible en esta sesión."
@@ -96,22 +97,26 @@ class ProductQuickAddPanel(QWidget):
         self._add_button.clicked.connect(self._on_add_clicked)
 
         search_row = QHBoxLayout()
+        search_row.setSpacing(SPACING_XS)
         search_row.addWidget(QLabel("SKU o Nombre", self))
         search_row.addWidget(self._search_combo, 1)
         search_row.addWidget(self._create_sku_button)
 
-        quantity_row = QHBoxLayout()
-        quantity_row.addWidget(QLabel("Cantidad", self))
-        quantity_row.addWidget(self._quantity_spin)
-        quantity_row.addStretch(1)
+        # Cantidad + Agregar en la misma fila que antes ocupaban por
+        # separado (mejoras UX): mismas acciones, una fila menos de alto.
+        action_row = QHBoxLayout()
+        action_row.setSpacing(SPACING_XS)
+        action_row.addWidget(QLabel("Cantidad", self))
+        action_row.addWidget(self._quantity_spin)
+        action_row.addWidget(self._add_button, 1)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(SPACING_SM, SPACING_XS, SPACING_SM, SPACING_XS)
+        layout.setSpacing(SPACING_XS)
         layout.addWidget(QLabel("<b>AGREGAR PRODUCTOS A LA CARGA</b>", self))
         layout.addLayout(search_row)
         layout.addWidget(self._info_label)
-        layout.addLayout(quantity_row)
-        layout.addWidget(self._add_button)
+        layout.addLayout(action_row)
 
         self.set_repository(repository)
 

@@ -34,13 +34,13 @@ from PySide6.QtWidgets import (
     QDialog,
     QDockWidget,
     QFileDialog,
-    QHBoxLayout,
     QInputDialog,
     QLabel,
     QMainWindow,
     QMenu,
     QMessageBox,
     QProgressBar,
+    QSplitter,
     QStatusBar,
     QTabWidget,
     QToolBar,
@@ -148,11 +148,17 @@ from cargo_optimizer.presentation.desktop.workers.optimization_worker import Opt
 
 _NOT_IMPLEMENTED_MESSAGE_MS = 4000
 _STATUS_MESSAGE_MS = 4000
-# El visor 3D ocupa ~70% del área de trabajo (rediseño UX: "la vista 3D
-# pasa a ser el protagonista absoluto") — factores de estiramiento de un
-# `QHBoxLayout` de celdas fijas, nunca tamaños de un `QSplitter`.
+# El visor 3D ocupa ~70% del área de trabajo por defecto (rediseño UX:
+# "la vista 3D pasa a ser el protagonista absoluto"); desde la fase de
+# mejoras UX, esta proporción es el tamaño inicial de un `QSplitter`
+# ajustable por el usuario (`work_area_splitter`), no un factor de
+# estiramiento fijo de un `QHBoxLayout` sin separador arrastrable.
 _WORK_AREA_LEFT_STRETCH = 3
 _WORK_AREA_VIEWER_STRETCH = 7
+# Anchos mínimos del splitter: ninguno de los dos lados puede quedar tan
+# estrecho que un control se vuelva inutilizable (Parte 9, responsive).
+_LEFT_PANEL_MIN_WIDTH = 280
+_RIGHT_PANEL_MIN_WIDTH = 480
 _HEADER_PRODUCT_TABLE = "productTable"
 _ENGINE_LABEL = f"Motor: {GreedyExtremePointStrategy.name}"
 
@@ -168,8 +174,18 @@ STATE_READY = "listo"
 STATE_PREPARING = "preparando"
 STATE_OPTIMIZING = "optimizando"
 STATE_CANCELLING = "cancelando"
-STATE_FINISHED = "finalizado"
 STATE_ERROR = "error"
+
+
+def _catalog_change_is_cosmetic_only(previous_unit: LoadUnit, updated_unit: LoadUnit) -> bool:
+    """True si `updated_unit` solo difiere de `previous_unit` en `color_hex`.
+
+    Un cambio puramente visual no debe invalidar un resultado de
+    optimización ya calculado (nada del cubicaje depende del color); todo
+    lo demás (dimensiones, peso, apilamiento, orientaciones, fragilidad,
+    tipo de empaque, campos de extintor, notas) sí puede afectarlo.
+    """
+    return replace(previous_unit, color_hex=updated_unit.color_hex) == updated_unit
 
 
 class MainWindow(QMainWindow):
@@ -290,40 +306,23 @@ class MainWindow(QMainWindow):
         self.selection_details_dock.setVisible(False)
 
     def _build_central_layout(self) -> None:
-        # Todo el workspace es de celdas fijas, sin ningún separador
-        # arrastrable (ni aquí, ni entre columna izquierda/visor, ni entre
-        # área de trabajo/pestañas de resultados): el usuario nunca puede
-        # reordenar el diseño de la interfaz, solo usarla — "Espacio de
-        # carga" ocupa su altura natural y "Agregar productos"/"Lista de
-        # carga" se reparten el resto.
+        # Panel izquierdo: "Espacio de carga" ocupa su altura natural y
+        # "Agregar productos"/"Lista de carga" se reparten el resto
+        # (mejoras UX: la tabla crece con el espacio vertical disponible).
         self.left_work_container = QWidget(self)
         left_work_layout = QVBoxLayout(self.left_work_container)
         left_work_layout.setContentsMargins(0, 0, 0, 0)
         left_work_layout.setSpacing(0)
         left_work_layout.addWidget(self.loading_space_summary_panel, 0)
         left_work_layout.addWidget(self.product_table_panel, 1)
+        self.left_work_container.setMinimumWidth(_LEFT_PANEL_MIN_WIDTH)
 
-        viewer_container = QWidget(self)
-        viewer_layout = QVBoxLayout(viewer_container)
-        viewer_layout.setContentsMargins(0, 0, 0, 0)
-        viewer_layout.setSpacing(SPACING_SM)
-        viewer_layout.addWidget(self.viewer_stats_header)
-        viewer_layout.addWidget(self.viewer_widget, 1)
-
-        # Celdas fijas también aquí: sin separador arrastrable entre la
-        # columna izquierda y el visor 3D. El visor sigue siendo el
-        # protagonista (~70% del ancho, `_WORK_AREA_VIEWER_STRETCH` vs.
-        # `_WORK_AREA_LEFT_STRETCH`), pero como factor de estiramiento de
-        # un `QHBoxLayout`, no como tamaño de un `QSplitter` — nunca
-        # depende del `sizeHint()` de cada panel ni de una repartición
-        # inicial que el usuario después podría desordenar arrastrando.
-        self.work_area_container = QWidget(self)
-        work_area_layout = QHBoxLayout(self.work_area_container)
-        work_area_layout.setContentsMargins(0, 0, 0, 0)
-        work_area_layout.setSpacing(SPACING_SM)
-        work_area_layout.addWidget(self.left_work_container, _WORK_AREA_LEFT_STRETCH)
-        work_area_layout.addWidget(viewer_container, _WORK_AREA_VIEWER_STRETCH)
-
+        # Zona derecha: visor 3D + el panel de resultados completo (sus
+        # cinco pestañas) apilados debajo, nunca por separado — así el
+        # panel de resultados siempre empieza y termina exactamente donde
+        # el visor, y nunca se extiende bajo el panel izquierdo (mejoras
+        # UX, sustituye al antiguo `results_tabs` a todo el ancho de la
+        # ventana).
         self.results_tabs = QTabWidget(self)
         self.results_tabs.setObjectName("resultsTabs")
         self.results_tabs.addTab(self.results_panel, "Resumen")
@@ -332,12 +331,39 @@ class MainWindow(QMainWindow):
         self.results_tabs.addTab(self.log_panel, "Registro")
         self.results_tabs.addTab(self.multi_space_results_panel, "Multi-espacio")
 
+        self.right_column_container = QWidget(self)
+        right_column_layout = QVBoxLayout(self.right_column_container)
+        right_column_layout.setContentsMargins(0, 0, 0, 0)
+        right_column_layout.setSpacing(SPACING_SM)
+        right_column_layout.addWidget(self.viewer_stats_header)
+        right_column_layout.addWidget(self.viewer_widget, 1)
+        right_column_layout.addWidget(self.results_tabs, 0)
+        self.right_column_container.setMinimumWidth(_RIGHT_PANEL_MIN_WIDTH)
+
+        # `QSplitter` ajustable por el usuario entre panel izquierdo y zona
+        # derecha (mejoras UX; antes era un `QHBoxLayout` de celdas fijas
+        # sin separador arrastrable). `setChildrenCollapsible(False)` evita
+        # que arrastrar hasta el extremo haga desaparecer un lado; los
+        # anchos mínimos de arriba son la segunda mitad de esa misma
+        # garantía. La proporción por defecto (3:7, visor protagonista)
+        # reutiliza exactamente `_WORK_AREA_LEFT_STRETCH`/
+        # `_WORK_AREA_VIEWER_STRETCH` ya existentes.
+        self.work_area_splitter = QSplitter(Qt.Orientation.Horizontal, self)
+        self.work_area_splitter.setObjectName("workAreaSplitter")
+        self.work_area_splitter.setChildrenCollapsible(False)
+        self.work_area_splitter.addWidget(self.left_work_container)
+        self.work_area_splitter.addWidget(self.right_column_container)
+        self.work_area_splitter.setStretchFactor(0, _WORK_AREA_LEFT_STRETCH)
+        self.work_area_splitter.setStretchFactor(1, _WORK_AREA_VIEWER_STRETCH)
+        self.work_area_splitter.setSizes(
+            [_WORK_AREA_LEFT_STRETCH * 100, _WORK_AREA_VIEWER_STRETCH * 100]
+        )
+
         central_container = QWidget(self)
         central_layout = QVBoxLayout(central_container)
         central_layout.setContentsMargins(SPACING_SM, SPACING_SM, SPACING_SM, SPACING_SM)
         central_layout.setSpacing(SPACING_SM)
-        central_layout.addWidget(self.work_area_container, 1)
-        central_layout.addWidget(self.results_tabs, 0)
+        central_layout.addWidget(self.work_area_splitter, 1)
 
         self.setCentralWidget(central_container)
 
@@ -425,7 +451,7 @@ class MainWindow(QMainWindow):
             self.product_table_panel.model.add_default_product,
         )
         self.action_delete_products = self._make_action(
-            "cancel", "&Eliminar seleccionados", None, self.product_table_panel.remove_selected_rows
+            "delete", "&Eliminar seleccionados", None, self.product_table_panel.remove_selected_rows
         )
         self.action_import_products = self._make_action(
             "import", "Importar &productos…", None, self._on_import_excel_auto
@@ -1428,7 +1454,14 @@ class MainWindow(QMainWindow):
             repository=self._catalog_service.products,
             on_excel_dropped=lambda path: self._on_catalog_dialog_excel_dropped(path, dialog),
         )
-        if dialog.exec() != ProductCatalogDialog.DialogCode.Accepted:
+        result = dialog.exec()
+        # Se sincroniza siempre, se haya pulsado "Añadir seleccionados" o
+        # "Cerrar": el diálogo permite editar/archivar/restaurar productos
+        # en cualquier momento antes de cerrarse, y esos cambios deben
+        # reflejarse sin reiniciar la aplicación (buscador de alta rápida +
+        # filas ya agregadas a esta carga), sin importar cómo se cerró.
+        self._sync_catalog_changes()
+        if result != ProductCatalogDialog.DialogCode.Accepted:
             return
         chosen = dialog.selected_units_to_add()
         if not chosen:
@@ -1455,6 +1488,65 @@ class MainWindow(QMainWindow):
                 "No se añadieron los siguientes productos porque su SKU ya existe en "
                 "el proyecto actual: " + ", ".join(skipped),
             )
+
+    def _sync_catalog_changes(self) -> None:
+        """Refleja ediciones hechas en "Catálogo de productos…" sin reiniciar la aplicación.
+
+        Se llama siempre al cerrar el diálogo (fase de mejoras UX): (1)
+        refresca el buscador de alta rápida (`ProductQuickAddPanel`, que
+        antes solo se releía en su propia construcción o tras "Crear nuevo
+        SKU…", nunca tras un cambio hecho desde este diálogo -- causa raíz
+        de tener que reiniciar para ver un SKU editado/nuevo/archivado); (2)
+        sincroniza cualquier fila ya agregada a esta carga cuyo SKU siga
+        existiendo en el catálogo, preservando su `id`/`quantity` propios
+        (`ProductTableModel.sync_from_catalog`). Si el único cambio es el
+        color, el resultado ya mostrado no se invalida -- solo se recolorea
+        el visor (`_refresh_viewer_colors`); cualquier otro cambio geométrico
+        o de reglas pasa por el mecanismo de invalidación ya existente
+        (`_on_project_data_changed`), nunca uno nuevo.
+        """
+        if self._catalog_service is None:
+            return
+        self.product_table_panel.quick_add_panel.refresh_catalog()
+
+        model = self.product_table_panel.model
+        project_skus = {unit.sku.strip().lower() for unit in model.load_units()}
+        if not project_skus:
+            return
+
+        cosmetic_only_updates: list[LoadUnit] = []
+        has_invalidating_change = False
+        self._suspend_change_tracking = True
+        try:
+            for entry in self._catalog_service.products.list_all():
+                if entry.load_unit.sku.strip().lower() not in project_skus:
+                    continue
+                for previous_unit, updated_unit in model.sync_from_catalog(entry.load_unit):
+                    if _catalog_change_is_cosmetic_only(previous_unit, updated_unit):
+                        cosmetic_only_updates.append(updated_unit)
+                    else:
+                        has_invalidating_change = True
+        finally:
+            self._suspend_change_tracking = False
+
+        if has_invalidating_change:
+            self._on_project_data_changed()
+        elif cosmetic_only_updates:
+            self._mark_dirty()
+            self._refresh_viewer_colors(cosmetic_only_updates)
+
+    def _refresh_viewer_colors(self, updated_units: list[LoadUnit]) -> None:
+        """Recolorea el visor 3D tras un cambio de catálogo puramente cosmético (color).
+
+        Nunca recalcula ni invalida el resultado ya mostrado: solo
+        actualiza el mapping `LoadUnit` que el visor ya usa y vuelve a
+        pedirle que dibuje exactamente el mismo `PackingResult`.
+        """
+        for unit in updated_units:
+            if unit.id in self._last_load_units_by_id:
+                self._last_load_units_by_id[unit.id] = unit
+        if self._last_result is not None:
+            self.viewer_widget.display_result(self._last_result, self._last_load_units_by_id)
 
     def _on_save_product_to_catalog(self) -> None:
         if self._catalog_service is None:
@@ -1857,7 +1949,12 @@ class MainWindow(QMainWindow):
         self.selection_details_panel.clear()
         self.viewer_widget.display_result(result, self._last_load_units_by_id)
         self._mark_dirty()
-        self._set_state(STATE_FINISHED)
+        # `STATE_READY`, no un estado "finalizado" propio: el resultado ya
+        # queda contado en el propio `results_panel` ("Solicitado/Estado/
+        # Avisos"), que es ahora la única fuente de ese hecho -- dejar la
+        # barra de estado en "Estado: finalizado" duplicaba exactamente esa
+        # misma información en dos sitios a la vez (fase de mejoras UX).
+        self._set_state(STATE_READY)
         if not self._cancel_requested:
             self._record_run_history(result)
         message = (
@@ -1974,7 +2071,7 @@ class MainWindow(QMainWindow):
         else:
             self.viewer_widget.clear_scene()
         self.selection_details_panel.clear()
-        self._set_state(STATE_FINISHED)
+        self._set_state(STATE_READY)
         message = (
             "Optimización multi-espacio cancelada."
             if self._cancel_requested

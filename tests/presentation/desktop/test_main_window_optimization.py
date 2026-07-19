@@ -110,7 +110,11 @@ def test_run_optimization_executes_and_populates_results(
     assert window.loading_space_form_panel.isEnabled()
     assert not window.action_cancel_optimization.isEnabled()
     assert not window._progress_bar.isVisible()
-    assert window._state_status_label.text() == "Estado: finalizado"
+    # El estado de "finalizado" lo cuenta únicamente `results_panel` (fase
+    # de mejoras UX, Parte 6): la barra de estado vuelve a "listo" en vez
+    # de duplicar la misma información.
+    assert window.results_panel._status_label.text() == "Finalizado"
+    assert window._state_status_label.text() == "Estado: listo"
     assert "finalizada" in window.log_panel.text().lower()
     _allow_close_without_saving(monkeypatch)
     window.close()
