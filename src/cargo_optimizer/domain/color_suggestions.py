@@ -1,12 +1,24 @@
 """Sugerencia automática de color pastel para un SKU nuevo (fase OPT-17).
 
+Vive en `domain` (no en `presentation/desktop`, donde se introdujo
+originalmente) porque, desde la fase OPT-18, dos capas independientes lo
+necesitan sin poder depender la una de la otra:
+`presentation/desktop/dialogs/catalog_product_editor_dialog.py` (nuevo
+producto en el editor visual) e
+`infrastructure/excel/product_rows.py` (celda de color vacía al
+importar un catálogo desde Excel) — y `infrastructure` nunca puede
+importar de `presentation`. Es una utilidad de color pura (sin Qt, sin
+openpyxl, sin ningún concepto de dominio de negocio más allá de
+"colores ya usados"), así que encaja en la capa más baja que ambas
+comparten, sin crear una dependencia nueva entre ellas.
+
 Deliberadamente distinto de `viewer/color_registry.py::FALLBACK_PALETTE`:
 esa paleta es de alto contraste, pensada para distinguir cajas en el
 visor 3D cuando no hay ningún `LoadUnit` que consultar (repuesto de
 emergencia). Este módulo, en cambio, genera un color suave/pastel para
-proponerlo como valor inicial de un producto de catálogo **nuevo**
-(nunca configurado todavía) — un uso completamente distinto, con su
-propio rango de saturación/brillo.
+proponerlo como valor inicial de un producto **nuevo** (nunca
+configurado todavía) — un uso completamente distinto, con su propio
+rango de saturación/brillo.
 
 Determinista y sin `random`: los tonos candidatos se generan recorriendo
 el círculo de matiz (HSV) con el ángulo áureo (137.507764°), que
@@ -36,10 +48,10 @@ def suggest_pastel_color(existing_colors: Sequence[str] = ()) -> str:
     """Propone un color pastel hex, de matiz lo más distinto posible de `existing_colors`.
 
     `existing_colors` son los `color_hex` de los productos ya existentes
-    (catálogo o proyecto, según quien llame) — cualquier valor que no
-    sea un hexadecimal válido se ignora silenciosamente (no rompe la
-    sugerencia). Sin colores existentes, siempre devuelve el mismo
-    primer color determinista.
+    (catálogo, proyecto o archivo Excel en curso, según quien llame) —
+    cualquier valor que no sea un hexadecimal válido se ignora
+    silenciosamente (no rompe la sugerencia). Sin colores existentes,
+    siempre devuelve el mismo primer color determinista.
     """
     existing_hues = [_hue_of(color) for color in existing_colors if _HEX_COLOR_PATTERN.match(color)]
 

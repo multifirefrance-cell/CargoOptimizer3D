@@ -12,11 +12,12 @@ un `QComboBox`) y `infrastructure` nunca puede importar de
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any
 from uuid import uuid4
 
+from cargo_optimizer.domain.color_suggestions import suggest_pastel_color
 from cargo_optimizer.domain.dimensions import Dimensions3D
 from cargo_optimizer.domain.enums import ExtinguisherAgent, OrientationCode, PackageType
 from cargo_optimizer.domain.exceptions import DomainValidationError
@@ -37,6 +38,16 @@ from cargo_optimizer.infrastructure.excel.row_parsing import (
 )
 
 CATALOG_SHEET_NAME = "Catálogo"
+
+EXAMPLE_ROW_SKU_MARKER = "EJEMPLO-PLANTILLA-BORRAR-ESTA-FILA"
+"""SKU reservado de la fila de ejemplo en la plantilla oficial descargable (fase OPT-18).
+
+Ningún SKU real de un usuario coincidirá con este texto por accidente.
+`import_catalog_from_worksheet` reconoce esta fila y la omite en
+silencio (ni se importa ni se cuenta como error), así que la fila de
+ejemplo de `generate_product_import_template` nunca puede colarse como
+un producto real, aunque el usuario olvide borrarla antes de importar.
+"""
 
 PRODUCT_COLUMNS: tuple[str, ...] = (
     "SKU",
@@ -147,7 +158,12 @@ def load_unit_to_row(unit: LoadUnit) -> tuple[Any, ...]:
     )
 
 
-def row_to_load_unit(row_number: int, values: tuple[object, ...]) -> LoadUnit:
+def row_to_load_unit(
+    row_number: int,
+    values: tuple[object, ...],
+    *,
+    existing_colors: Sequence[str] = (),
+) -> LoadUnit:
     """Reconstruye un `LoadUnit` a partir de una fila; valida completamente con el dominio.
 
     Lanza `RowConversionError` (capturada por el importador, nunca
@@ -157,6 +173,15 @@ def row_to_load_unit(row_number: int, values: tuple[object, ...]) -> LoadUnit:
     sin agente): ambas terminan siendo, desde el punto de vista del
     usuario, "esta fila no se pudo importar, y esto es exactamente lo
     que falla".
+
+    `existing_colors` (fase OPT-18): igual que en
+    `CatalogProductEditorDialog` (fase OPT-17), una celda "Color" vacía
+    ya no se traduce silenciosamente en el gris `#CCCCCC` por defecto de
+    `LoadUnit` — se asigna un color pastel automático
+    (`domain.color_suggestions.suggest_pastel_color`), distinto de
+    `existing_colors` mientras haya matices libres. Un color hexadecimal
+    explícito en la celda (`#RRGGBB`, validado por `LoadUnit` en su
+    `__post_init__`) siempre se respeta tal cual, nunca se sobrescribe.
     """
     (
         sku_raw,
@@ -234,8 +259,7 @@ def row_to_load_unit(row_number: int, values: tuple[object, ...]) -> LoadUnit:
         notes=notes,
         id=uuid4(),
     )
-    if color_hex:
-        kwargs["color_hex"] = color_hex
+    kwargs["color_hex"] = color_hex if color_hex else suggest_pastel_color(existing_colors)
 
     try:
         return LoadUnit(**kwargs)  # type: ignore[arg-type]

@@ -131,32 +131,53 @@ lo que hace `SceneBuilder`.
   según `DoorPosition` (sin resaltado si es `UNRESTRICTED`), tres ejes
   XYZ desde el origen. Sin permutar ejes: X = largo, Y = ancho, Z =
   altura, igual que en `domain`.
-- **Cajas**: un actor por `Placement` (no agrupado por SKU en esta
-  fase), color por SKU, borde fino, nombre de actor
-  `viewer-box-{sequence_number}` para poder localizarlo. La conversión
-  de la esquina mínima de `Placement` a centro+longitudes de
+- **Cajas (fase OPT-18: agrupadas por forma+color, no un actor por
+  `Placement`)**: `SceneController._build_boxes` agrupa las cajas por
+  `(oriented_dimensions, color_hex)` — mismo SKU en la misma
+  orientación son visualmente indistinguibles salvo por posición — y
+  construye una única malla combinada por grupo
+  (`pyvista.merge(cubes, merge_points=False)`, sin fusionar vértices
+  coincidentes entre cajas que se tocan) con un solo `add_mesh` por
+  grupo, nombre de actor `viewer-box-group-{índice}`. Cada caja
+  conserva su propio registro (`SceneController._box_records`: centro +
+  longitudes por `sequence_number`) para picking, resaltado y encuadre
+  — ver sección 12.1 para la medición real y la justificación. La
+  conversión de la esquina mínima de `Placement` a centro+longitudes de
   `pv.Cube` (`cube_center_and_lengths`) respeta exactamente
   `min_x = placement.x_cm`, `max_x = placement.x_cm + placement.length_cm`
-  (e Y/Z análogos) — cubierta por pruebas dedicadas.
-- **Picking**: clic sobre una caja identifica el actor, lo resalta
-  (borde + `SELECTION_LINE_WIDTH` + `selection_color`), restaura el
-  estilo del actor previamente seleccionado, y notifica
-  `sequence_number` a través de un callback interno. Clic en espacio
-  vacío deselecciona y notifica `None`. `SceneController.load_scene`
-  llama a `disable_picking()` antes de `enable_mesh_picking(...)` para
-  que recargar la escena (p. ej. al cambiar de tema) no lance
+  (e Y/Z análogos) — cubierta por pruebas dedicadas, sin cambios.
+- **Picking (fase OPT-18)**: como varias cajas comparten un actor,
+  `enable_mesh_picking(use_actor=True)` solo identifica el *grupo*
+  clicado. `SceneController._handle_pick` resuelve la caja concreta
+  comparando el punto de click en coordenadas del mundo
+  (`Plotter.picked_point`) contra el centro de cada caja del grupo
+  (`_nearest_box_in_group`, distancia mínima) — nunca por índice de
+  celda/punto de VTK. Sin punto disponible, selecciona la primera caja
+  del grupo en vez de no seleccionar nada. El resto del flujo (resalta,
+  restaura el estilo previo, notifica `sequence_number`, clic vacío
+  deselecciona y notifica `None`) no cambió. `SceneController.load_scene`
+  sigue llamando a `disable_picking()` antes de `enable_mesh_picking(...)`
+  para que recargar la escena (p. ej. al cambiar de tema) no lance
   `PyVistaPickingError: Picking is already enabled`.
-- **Selección programática** (`set_selected_placement`) resalta el
-  actor pero **no** invoca el callback — evita un ciclo de señal entre
+- **Resaltado de selección (fase OPT-18)**: ya no puede lograrse
+  cambiando `actor.prop.line_width`/`edge_color` (recolorearía todas
+  las cajas del grupo compartido a la vez). Es un actor de contorno
+  independiente (`SceneController._selection_actor`, un único `pv.Cube`
+  en modo `wireframe`, `pickable=False`), construido sobre la caja
+  seleccionada y eliminado al deseleccionar — el color de relleno del
+  grupo nunca se toca.
+- **Selección programática** (`set_selected_placement`) resalta pero
+  **no** invoca el callback — evita un ciclo de señal entre
   `MainWindow` y el propio widget cuando la selección se origina fuera
   del picking (p. ej. una futura tabla de cajas).
 - **Cámara**: `reset_camera()` usa `view_isometric()` +
   `camera.up = (0, 0, 1)` + `reset_camera()` de PyVista, para encuadrar
   todo el espacio con Z hacia arriba. `focus_placement(sequence_number)`
-  encuadra la cámara sobre los límites del actor de esa caja
-  (`reset_camera(bounds=actor.GetBounds())`) — implementado ya en 6.1,
-  no aplazado a 6.2 como decía el diseño original (ver nota en
-  `docs/ThreeDViewerDesign.md`).
+  encuadra la cámara sobre los límites de esa caja calculados desde su
+  propio `_BoxRecord` (centro + longitudes) — desde la fase OPT-18, ya
+  no usa `actor.GetBounds()` porque el actor es una malla combinada
+  compartida por todo el grupo, cuyos límites abarcarían todas las
+  cajas del grupo, no solo esta.
 - **Tema**: `apply_theme(theme)` cambia el color de fondo y, si hay una
   escena cargada, la reconstruye por completo (no hay forma barata de
   recolorear todos los actores sin reconstruir en PyVista/VTK para
@@ -319,23 +340,69 @@ y mide `SceneBuilder().build(...)` y
 | 500 | 2.41 ms | 3988 ms |
 
 `SceneBuilder.build` es, como se esperaba, prácticamente gratis (es
-Python puro sobre datos ya calculados). `SceneController.load_scene`
-crece de forma aproximadamente lineal con el número de cajas —
-consistente con la estrategia "un actor por caja" documentada en
-`docs/ThreeDViewerDesign.md` (sección 9.1) como válida para esta fase,
-con agrupación/instancing explícitamente aplazada a la fase 6.3 si el
-uso real lo justifica. Con 500 cajas, cargar una escena tarda del
-orden de 4 segundos — perceptible pero no bloqueante para una
-optimización típica de decenas a un par de cientos de instancias
-(ver `docs/OptimizerPerformance.md` para los volúmenes de referencia
-del propio motor). No se fija ningún umbral de fallo en pytest sobre
-estos números, tal como pedía el encargo de la fase.
+Python puro sobre datos ya calculados). Estos tres números (medidos
+con la estrategia "un actor por caja" de la fase 6.1, antes de
+OPT-18) crecían de forma aproximadamente lineal con el número de
+cajas. Con 500 cajas, cargar una escena tardaba del orden de 4
+segundos — la extrapolación lineal apuntaba a cifras cada vez más
+incómodas para el caso real de miles de cajas que motivó la fase
+OPT-18 (ver sección 12.1).
+
+### 12.1. Fase OPT-18: agrupación por forma+color (medición real antes/después)
+
+Caso real reportado: cientos/miles de cajas del mismo SKU
+(2000-unidad, ver `docs/OptimizerPerformance.md`) volvían el
+`load_scene` de fase 6.1 perceptiblemente lento. Medido con el mismo
+tipo de script puntual que la sección 12 (sin umbrales de pytest),
+comparando la estrategia de fase 6.1 (un actor por caja) contra la de
+OPT-18 (un actor por grupo `(oriented_dimensions, color_hex)`), mismo
+escenario (N cajas idénticas del mismo SKU, misma máquina de
+desarrollo):
+
+| N placements | Antes (un actor/caja) | Después (un actor/grupo, OPT-18) | Factor |
+|---:|---:|---:|---:|
+| 100 | 0.506 s | — | — |
+| 300 | 21.229 s | — | — |
+| 500 | 19.064 s | 1.142 s | **~16.7×** |
+| 1000 | (no medido, crecimiento ya no lineal) | 2.466 s | — |
+| 2000 | (no medido, crecimiento ya no lineal) | 5.978 s | — |
+
+El comportamiento "antes" **no es lineal**: de 100 a 300 cajas el
+tiempo se dispara de 0.5 s a 21 s (~14× más lento para solo 3× más
+cajas), consistente con un costo de VTK que crece con el número
+*total* de actores ya presentes en la escena, no solo con el actor
+que se añade. La estrategia OPT-18 (un actor por grupo, es decir, un
+actor por SKU/orientación distintos — 1 para un escenario de un solo
+SKU) evita ese crecimiento superlineal: 2000 cajas del mismo SKU
+siguen cargando en ~6 s, con solo 1 actor de caja en toda la escena
+(más los actores fijos del contenedor y los ejes, que no dependen del
+número de cajas). Con varios SKU distintos en la misma escena, el
+número de actores de caja es "número de combinaciones
+SKU×orientación distintas", no el número de placements — medido
+también en 5 grupos para 500/1000/2000 cajas reforzando 5 SKU
+distintos, con tiempos muy similares a la variante de 1 solo grupo
+(la parte cara sigue siendo la construcción de las mallas
+individuales antes del `merge`, no el número de llamadas a
+`add_mesh`).
+
+No se fija ningún umbral de fallo en pytest sobre estos números, tal
+como pedía el encargo de la fase original — la comparación aquí es
+puramente informativa, para documentar la mejora real medida.
 
 ## 13. Limitaciones conocidas / próximas fases
 
-- Un actor VTK por caja, sin agrupar por SKU ni usar *instancing* —
-  aceptable en esta fase, candidato a revisar en 6.3 si el uso real
-  con miles de cajas lo requiere (ver sección 12).
+- Agrupación por `(oriented_dimensions, color_hex)` (fase OPT-18): el
+  número de actores de caja pasa de "uno por placement" a "uno por
+  combinación distinta de forma orientada y color" — sigue sin ser
+  *instancing* real de GPU (cada grupo sigue siendo geometría
+  explícita combinada, no una única malla base con transformaciones
+  por instancia), pero elimina el crecimiento superlineal medido en
+  fase 6.1 para el caso real de miles de cajas del mismo SKU (ver
+  sección 12.1). Un *instancing* real de GPU (glyphs con matriz de
+  transformación por punto) seguiría siendo una mejora candidata si en
+  el futuro el cuello de botella pasara a estar en la construcción de
+  las mallas individuales antes del `merge`, no en el número de
+  actores.
 - Sin filtros (por SKU, por capa, ocultar seleccionados, solo no
   cargados), sin etiquetas 3D, sin modos de color alternativos (peso,
   orden de carga, fragilidad), sin vistas de cámara predefinidas más

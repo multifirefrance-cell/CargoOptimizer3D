@@ -67,11 +67,13 @@ from cargo_optimizer.infrastructure.excel.templates import (
     LOADING_SPACE_TEMPLATE_FILENAME,
     OPTIMIZATION_RESULT_TEMPLATE_FILENAME,
     PACKING_LIST_TEMPLATE_FILENAME,
+    PRODUCT_IMPORT_TEMPLATE_FILENAME,
     generate_all_templates,
     generate_catalog_template,
     generate_loading_space_template,
     generate_optimization_result_template,
     generate_packing_list_template,
+    generate_product_import_template,
 )
 
 __all__ = [
@@ -92,6 +94,7 @@ __all__ = [
     "OPTIMIZATION_RESULT_TEMPLATE_FILENAME",
     "PACKING_LIST_TEMPLATE_FILENAME",
     "PRODUCT_COLUMNS",
+    "PRODUCT_IMPORT_TEMPLATE_FILENAME",
     "PackingListImportResult",
     "RowConversionError",
     "RowError",
@@ -113,6 +116,7 @@ __all__ = [
     "generate_loading_space_template",
     "generate_optimization_result_template",
     "generate_packing_list_template",
+    "generate_product_import_template",
     "import_catalog",
     "import_catalog_with_mapping",
     "import_loading_spaces",

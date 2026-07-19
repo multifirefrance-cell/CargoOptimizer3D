@@ -14,6 +14,36 @@ picking por actor); no se extraen `camera_controller.py`/
 `picking_controller.py` todavía porque, con actor-por-caja, ninguno de
 los dos justifica un archivo propio — ver la nota de la sección 3.1 del
 diseño sobre cuándo sí haría falta.
+
+**Fase OPT-18 (agrupación de cajas por forma+color)**: la estrategia
+"un actor por caja" de la fase 6.1 (ver CLAUDE.md, invariante del
+visor 3D) se sustituye por "un actor por grupo de cajas visualmente
+idénticas" — mismas dimensiones orientadas y mismo color (`color_hex`),
+es decir, mismo SKU en la misma orientación. Cada grupo se construye
+como una única malla combinada (`pyvista.merge`, `merge_points=False`
+para no fusionar vértices coincidentes entre cajas que se tocan y
+alterar sutilmente el resultado visual) en vez de una caja por
+`add_mesh`. Con miles de cajas del mismo SKU (el caso real que motiva
+esta fase), esto reduce el número de actores VTK de "uno por caja" a
+"uno por SKU/orientación distintos", el factor dominante en el tiempo
+de `SceneController.load_scene` medido en `docs/ThreeDViewer.md`,
+sección 12.
+
+La selección ya no puede resolverse por identidad de actor (varias
+cajas comparten uno): `_box_records` guarda el centro y las longitudes
+de cada caja por `sequence_number`, y el picking (todavía por actor,
+`enable_mesh_picking(use_actor=True)`, sin tocar VTK de más bajo nivel)
+resuelve la caja concreta dentro del grupo clicado por la posición
+mundial del click (`Plotter.picked_point`) más cercana al centro de
+cada caja del grupo — nunca por índice de celda/punto de VTK, para no
+depender de la topología interna de la malla combinada. El resaltado
+de selección ya no cambia las propiedades del actor compartido (eso
+recolorearía/marcaría todas las cajas del grupo a la vez): se
+construye un actor de contorno independiente
+(`self._selection_actor`), una única caja en modo wireframe sobre la
+caja seleccionada, añadido/eliminado solo cuando cambia la selección —
+el color de relleno del grupo nunca se toca, igual que exigía la
+estrategia anterior.
 """
 
 from __future__ import annotations
@@ -21,6 +51,7 @@ from __future__ import annotations
 import os
 import tempfile
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -40,6 +71,20 @@ from cargo_optimizer.presentation.desktop.viewer.constants import (
     theme_colors,
 )
 from cargo_optimizer.presentation.desktop.viewer.models import PlacementVisualModel, SceneModel
+
+_GroupKey = tuple[tuple[float, float, float], str]
+"""Clave de agrupación visual: (dimensiones orientadas, color_hex). Dos cajas con la
+misma clave son geométricamente indistinguibles salvo por su posición, así que
+comparten un único actor/malla combinada."""
+
+
+@dataclass(slots=True)
+class _BoxRecord:
+    """Metadatos de una caja individual dentro de una malla combinada por grupo."""
+
+    group_key: _GroupKey
+    center: tuple[float, float, float]
+    lengths: tuple[float, float, float]
 
 
 class PyVistaPlotterLike(Protocol):
@@ -106,8 +151,11 @@ class SceneController:
         self._plotter = plotter
         self._theme = theme
         self._scene: SceneModel | None = None
-        self._box_actors: dict[int, Any] = {}  # sequence_number -> actor
-        self._sequence_number_by_actor_id: dict[int, int] = {}  # id(actor) -> sequence_number
+        self._group_actors: dict[_GroupKey, Any] = {}  # (dims, color) -> actor de malla combinada
+        self._actor_group_by_id: dict[int, _GroupKey] = {}  # id(actor) -> clave de grupo
+        self._box_records: dict[int, _BoxRecord] = {}  # sequence_number -> centro/longitudes
+        self._group_members: dict[_GroupKey, list[int]] = {}  # clave de grupo -> sequence_number
+        self._selection_actor: Any | None = None  # contorno de resalte, independiente del grupo
         self._container_actors: list[Any] = []
         self._axes_actors: list[Any] = []
         self._selected_sequence_number: int | None = None
@@ -142,14 +190,19 @@ class SceneController:
         self.reset_camera()
 
     def clear_scene(self) -> None:
-        for actor in list(self._box_actors.values()):
+        for actor in list(self._group_actors.values()):
             self._plotter.remove_actor(actor, render=False)
+        if self._selection_actor is not None:
+            self._plotter.remove_actor(self._selection_actor, render=False)
+            self._selection_actor = None
         for actor in self._container_actors:
             self._plotter.remove_actor(actor, render=False)
         for actor in self._axes_actors:
             self._plotter.remove_actor(actor, render=False)
-        self._box_actors.clear()
-        self._sequence_number_by_actor_id.clear()
+        self._group_actors.clear()
+        self._actor_group_by_id.clear()
+        self._box_records.clear()
+        self._group_members.clear()
         self._container_actors.clear()
         self._axes_actors.clear()
         self._selected_sequence_number = None
@@ -268,22 +321,49 @@ class SceneController:
         )
 
     def _build_boxes(self, scene: SceneModel) -> None:
+        """Agrupa cajas visualmente idénticas (mismas dimensiones orientadas y mismo
+        color) en una única malla combinada por grupo -- ver docstring del módulo
+        (fase OPT-18). El orden de construcción no importa para la corrección: cada
+        caja mantiene su propio `_BoxRecord` (centro, longitudes) indexado por
+        `sequence_number`, independientemente de a qué grupo/actor pertenezca.
+        """
+        groups: dict[_GroupKey, list[PlacementVisualModel]] = {}
         for visual in scene.placement_visuals:
+            key: _GroupKey = (visual.oriented_dimensions, visual.color_hex)
+            groups.setdefault(key, []).append(visual)
             center, lengths = cube_center_and_lengths(visual.position, visual.oriented_dimensions)
-            mesh = pv.Cube(
-                center=center, x_length=lengths[0], y_length=lengths[1], z_length=lengths[2]
+            self._box_records[visual.sequence_number] = _BoxRecord(
+                group_key=key, center=center, lengths=lengths
             )
+            self._group_members.setdefault(key, []).append(visual.sequence_number)
+
+        for group_index, (key, visuals) in enumerate(groups.items()):
+            _dimensions, color_hex = key
+            cubes = [
+                pv.Cube(
+                    center=self._box_records[visual.sequence_number].center,
+                    x_length=self._box_records[visual.sequence_number].lengths[0],
+                    y_length=self._box_records[visual.sequence_number].lengths[1],
+                    z_length=self._box_records[visual.sequence_number].lengths[2],
+                )
+                for visual in visuals
+            ]
+            # `merge_points=False`: cada caja conserva su propia geometría
+            # independiente dentro de la malla combinada -- dos cajas que se
+            # tocan cara con cara nunca deben fusionar vértices, para que el
+            # resultado visual sea idéntico al de un actor por caja.
+            merged = cubes[0] if len(cubes) == 1 else pv.merge(cubes, merge_points=False)
             actor = self._plotter.add_mesh(
-                mesh,
-                color=visual.color_hex,
+                merged,
+                color=color_hex,
                 opacity=BOX_OPACITY,
                 show_edges=True,
                 edge_color=ColorRegistry.edge_color(self._theme),
                 line_width=BOX_EDGE_LINE_WIDTH,
-                name=f"viewer-box-{visual.sequence_number}",
+                name=f"viewer-box-group-{group_index}",
             )
-            self._box_actors[visual.sequence_number] = actor
-            self._sequence_number_by_actor_id[id(actor)] = visual.sequence_number
+            self._group_actors[key] = actor
+            self._actor_group_by_id[id(actor)] = key
 
     def _build_axes(self, scene: SceneModel) -> None:
         colors = theme_colors(self._theme)
@@ -312,8 +392,10 @@ class SceneController:
         self._plotter.render()
 
     def set_boxes_visible(self, visible: bool) -> None:
-        for actor in self._box_actors.values():
+        for actor in self._group_actors.values():
             actor.visibility = visible
+        if self._selection_actor is not None:
+            self._selection_actor.visibility = visible
         self._plotter.render()
 
     def set_axes_visible(self, visible: bool) -> None:
@@ -330,19 +412,34 @@ class SceneController:
         self._apply_selection(sequence_number)
 
     def _apply_selection(self, sequence_number: int | None) -> None:
-        if self._selected_sequence_number is not None:
-            previous = self._box_actors.get(self._selected_sequence_number)
-            if previous is not None:
-                previous.prop.line_width = BOX_EDGE_LINE_WIDTH
-                previous.prop.edge_color = ColorRegistry.edge_color(self._theme)
+        """Nunca cambia el color de relleno del grupo compartido -- ver docstring del
+        módulo (fase OPT-18). El resalte es un actor de contorno independiente,
+        reconstruido aquí (barato: una única caja) y nunca reutilizado entre
+        selecciones distintas para no arrastrar tamaño/posición de la caja anterior.
+        """
+        if self._selection_actor is not None:
+            self._plotter.remove_actor(self._selection_actor, render=False)
+            self._selection_actor = None
 
         self._selected_sequence_number = sequence_number
 
         if sequence_number is not None:
-            actor = self._box_actors.get(sequence_number)
-            if actor is not None:
-                actor.prop.line_width = SELECTION_LINE_WIDTH
-                actor.prop.edge_color = ColorRegistry.selection_color(self._theme)
+            record = self._box_records.get(sequence_number)
+            if record is not None:
+                highlight = pv.Cube(
+                    center=record.center,
+                    x_length=record.lengths[0],
+                    y_length=record.lengths[1],
+                    z_length=record.lengths[2],
+                )
+                self._selection_actor = self._plotter.add_mesh(
+                    highlight,
+                    style="wireframe",
+                    color=ColorRegistry.selection_color(self._theme),
+                    line_width=SELECTION_LINE_WIDTH,
+                    name="viewer-selection-highlight",
+                    pickable=False,
+                )
 
         self._plotter.render()
 
@@ -360,15 +457,48 @@ class SceneController:
         )
 
     def _handle_pick(self, actor: Any) -> None:
-        sequence_number = (
-            None if actor is None else self._sequence_number_by_actor_id.get(id(actor))
-        )
+        sequence_number = None
+        if actor is not None:
+            group_key = self._actor_group_by_id.get(id(actor))
+            if group_key is not None:
+                point = getattr(self._plotter, "picked_point", None)
+                sequence_number = self._nearest_box_in_group(group_key, point)
         self._apply_selection(sequence_number)
         if self._on_selection_changed is not None:
             self._on_selection_changed(sequence_number)
 
+    def _nearest_box_in_group(
+        self, group_key: _GroupKey, point: tuple[float, float, float] | None
+    ) -> int | None:
+        """Resuelve qué caja concreta de un grupo (varias comparten un mismo actor de
+        malla combinada) corresponde a un punto de click en coordenadas del mundo.
+
+        Nunca depende de índices de celda/punto de VTK (la malla combinada no
+        garantiza un orden estable útil para eso): compara `point` contra el
+        centro ya conocido de cada caja del grupo (`_box_records`) y devuelve la
+        más cercana. Sin `point` (p. ej. un picker que no lo proporcione), se
+        devuelve la primera caja del grupo en vez de no seleccionar nada.
+        """
+        members = self._group_members.get(group_key, [])
+        if not members:
+            return None
+        if point is None:
+            return members[0]
+        px, py, pz = point
+
+        def _squared_distance(sequence_number: int) -> float:
+            cx, cy, cz = self._box_records[sequence_number].center
+            return (cx - px) ** 2 + (cy - py) ** 2 + (cz - pz) ** 2
+
+        return min(members, key=_squared_distance)
+
     def find_placement_actor(self, sequence_number: int) -> Any | None:
-        return self._box_actors.get(sequence_number)
+        """El actor de malla combinada que renderiza esta caja (compartido con
+        cualquier otra caja del mismo grupo visual -- fase OPT-18)."""
+        record = self._box_records.get(sequence_number)
+        if record is None:
+            return None
+        return self._group_actors.get(record.group_key)
 
     def find_placement_visual(self, sequence_number: int) -> PlacementVisualModel | None:
         """El `PlacementVisualModel` de la escena actual con ese `sequence_number`, si existe."""
@@ -408,11 +538,20 @@ class SceneController:
         self._plotter.render()
 
     def focus_placement(self, sequence_number: int) -> None:
-        """Encuadra la cámara sobre una única caja. No hace nada si no existe."""
-        actor = self._box_actors.get(sequence_number)
-        if actor is None:
+        """Encuadra la cámara sobre una única caja. No hace nada si no existe.
+
+        Calcula los límites directamente desde `_BoxRecord` (centro +
+        longitudes), no desde `actor.GetBounds()`: desde la fase OPT-18 el actor
+        es una malla combinada compartida por todo el grupo visual, y sus
+        límites abarcarían todas las cajas del grupo, no solo esta.
+        """
+        record = self._box_records.get(sequence_number)
+        if record is None:
             return
-        self._plotter.reset_camera(bounds=actor.GetBounds())
+        cx, cy, cz = record.center
+        half_x, half_y, half_z = (length / 2.0 for length in record.lengths)
+        bounds = (cx - half_x, cx + half_x, cy - half_y, cy + half_y, cz - half_z, cz + half_z)
+        self._plotter.reset_camera(bounds=bounds)
         self._plotter.render()
 
     # ------------------------------------------------------------------

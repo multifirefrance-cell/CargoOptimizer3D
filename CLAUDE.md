@@ -723,13 +723,54 @@ ADR-0010 (tecnología) y ADR-0011 (desacoplo y fallback).
   volver a emitir la señal `placement_selected` — esa señal representa
   únicamente "el usuario seleccionó algo haciendo clic en el visor",
   para evitar un ciclo de señales con quien la escucha.
-- Estrategia de renderizado (6.1): un actor por caja, no malla
-  combinada ni glyphs — decisión revisable en 6.3 si el rendimiento del
-  optimizador a gran escala lo justifica (ver
-  `docs/OptimizerPerformance.md`, y el rendimiento medido en
-  `docs/ThreeDViewer.md`, sección 12), pero no antes: el modelo de
-  escena (`SceneModel`/`PlacementVisualModel`) ya está diseñado para no
-  depender de esta estrategia concreta.
+- **Estrategia de renderizado (6.1, sustituida en fase OPT-18): un
+  actor por grupo visual, no un actor por caja.** La estrategia
+  original (6.1) era un actor VTK por `Placement`; medida a partir de
+  cientos/miles de cajas (caso real reportado, ver
+  `docs/ThreeDViewer.md`, sección 12) resultó severamente
+  superlineal — no solo lenta —, así que se sustituyó, exactamente
+  bajo la condición que la propia fase 6.1 dejaba prevista ("revisable
+  si el rendimiento a gran escala lo justifica"). Ahora
+  `SceneController._build_boxes` agrupa cajas por
+  `(oriented_dimensions, color_hex)` (mismo SKU en la misma
+  orientación) y construye **una única malla combinada por grupo**
+  (`pyvista.merge(cubes, merge_points=False)` — sin fusionar vértices
+  coincidentes entre cajas que se tocan, para no alterar el resultado
+  visual), con un solo `add_mesh` por grupo en vez de uno por caja. El
+  modelo de escena (`SceneModel`/`PlacementVisualModel`) no cambió: la
+  agrupación es una decisión interna de `scene_controller.py`, tal
+  como el diseño original preveía. Cada caja individual sigue teniendo
+  su propio registro (`SceneController._box_records`, centro +
+  longitudes por `sequence_number`) para picking, resaltado de
+  selección y encuadre de cámara — ver los tres bullets siguientes.
+- **Picking con actores compartidos (fase OPT-18)**: como varias cajas
+  comparten un actor, `enable_mesh_picking(use_actor=True)` ya no basta
+  por sí solo para identificar qué caja se clicó — solo identifica el
+  *grupo*. `SceneController._handle_pick` resuelve la caja concreta
+  comparando el punto de click en coordenadas del mundo
+  (`Plotter.picked_point`) contra el centro de cada caja del grupo
+  (`_nearest_box_in_group`, distancia mínima), nunca por índice de
+  celda/punto de VTK (la malla combinada no garantiza un orden estable
+  útil para eso). Sin punto disponible, se selecciona la primera caja
+  del grupo en vez de no seleccionar nada.
+- **Resaltado de selección con actores compartidos (fase OPT-18)**:
+  seguir cambiando `actor.prop.line_width`/`edge_color` recolorearía
+  **todas** las cajas del grupo a la vez (rompería el invariante de
+  arriba, "nunca su color de relleno/contorno de las demás"). El
+  resaltado ahora es un actor de contorno independiente
+  (`SceneController._selection_actor`, un único `pv.Cube` en modo
+  `wireframe`, `pickable=False` para no interferir con el picking),
+  reconstruido en la caja seleccionada y eliminado al deseleccionar —
+  nunca reutiliza ni muta las propiedades del actor de grupo
+  compartido.
+- `focus_placement`/`find_placement_actor` (fase OPT-18): los límites
+  de cámara para encuadrar una caja se calculan desde su propio
+  `_BoxRecord` (centro + longitudes), nunca desde
+  `actor.GetBounds()` — desde esta fase esos límites abarcarían todo
+  el grupo, no la caja individual. `find_placement_actor` sigue
+  existiendo (devuelve el actor de grupo que renderiza esa caja, para
+  quien necesite "el actor responsable"), pero ya no es 1:1 con
+  `sequence_number`.
 - `Packing3DViewer._try_create_interactor` comprueba
   `QApplication.platformName() == "offscreen"` **antes** de importar o
   construir `pyvistaqt.QtInteractor`, nunca dentro de un

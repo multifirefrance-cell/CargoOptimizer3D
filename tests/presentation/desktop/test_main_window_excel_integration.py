@@ -25,6 +25,7 @@ from cargo_optimizer.domain.loading_space import LoadingSpace
 from cargo_optimizer.domain.packing_result import PackingResult
 from cargo_optimizer.infrastructure.database.catalog_service import CatalogService
 from cargo_optimizer.infrastructure.excel.catalog_exporter import export_catalog
+from cargo_optimizer.infrastructure.excel.catalog_importer import import_catalog
 from cargo_optimizer.infrastructure.excel.loading_space_rows import (
     LOADING_SPACE_COLUMNS,
     loading_space_to_row,
@@ -226,6 +227,31 @@ def test_on_export_catalog_excel_warns_when_catalog_empty(
     window._on_export_catalog_excel()
 
     assert len(warnings) == 1
+    window.close()
+
+
+def test_on_download_product_template_writes_a_real_template(
+    qapp: QApplication, app_settings: AppSettings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = MainWindow(app_settings, catalog_service=None)
+    out_path = tmp_path / "plantilla_productos.xlsx"
+    monkeypatch.setattr(QFileDialog, "getSaveFileName", _fake_save_dialog(out_path))
+
+    window._on_download_product_template()
+
+    assert out_path.exists()
+    result = import_catalog(out_path)
+    assert result.errors == ()
+    assert result.units == ()
+    window.close()
+
+
+def test_action_download_product_template_stays_enabled_in_limited_mode(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    """No depende del catálogo SQLite: sigue disponible incluso en modo limitado."""
+    window = MainWindow(app_settings, catalog_service=None)
+    assert window.action_download_product_template.isEnabled() is True
     window.close()
 
 

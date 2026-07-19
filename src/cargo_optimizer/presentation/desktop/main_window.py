@@ -62,6 +62,7 @@ from cargo_optimizer.domain.packing_result import PackingResult
 from cargo_optimizer.domain.project import CargoProject
 from cargo_optimizer.infrastructure.database import CatalogService, DatabaseError, RepositoryError
 from cargo_optimizer.infrastructure.excel import (
+    PRODUCT_IMPORT_TEMPLATE_FILENAME,
     DuplicateResolution,
     ExcelError,
     ImportReport,
@@ -76,6 +77,7 @@ from cargo_optimizer.infrastructure.excel import (
     export_catalog,
     export_import_report,
     export_packing_result,
+    generate_product_import_template,
     import_catalog,
     import_catalog_with_mapping,
     import_loading_spaces,
@@ -455,6 +457,12 @@ class MainWindow(QMainWindow):
         self.action_export_catalog_excel = self._make_action(
             "import", "Exportar catálogo (E&xcel)…", None, self._on_export_catalog_excel
         )
+        self.action_download_product_template = self._make_action(
+            "import",
+            "&Descargar plantilla Excel…",
+            None,
+            self._on_download_product_template,
+        )
         self.action_import_packing_list_excel = self._make_action(
             "import", "Importar &Packing List…", None, self._on_import_packing_list_excel
         )
@@ -617,6 +625,7 @@ class MainWindow(QMainWindow):
         products_menu.addAction(self.action_import_catalog_excel_mapping)
         products_menu.addAction(self.action_bulk_import_catalog_excel)
         products_menu.addAction(self.action_export_catalog_excel)
+        products_menu.addAction(self.action_download_product_template)
         products_menu.addSeparator()
         products_menu.addAction(self.action_delete_products)
 
@@ -1182,6 +1191,26 @@ class MainWindow(QMainWindow):
             return
         self.statusBar().showMessage(
             f"Catálogo exportado a '{path.name}' ({len(units)} producto(s)).", _STATUS_MESSAGE_MS
+        )
+
+    def _on_download_product_template(self) -> None:
+        """Acción "Descargar plantilla Excel…" (fase OPT-18): plantilla oficial vacía
+        para que un usuario nuevo complete sus propios SKU sin conocer la estructura
+        interna del programa. No depende del catálogo SQLite ni del proyecto abierto —
+        siempre disponible, incluso en modo limitado o mientras corre una optimización.
+        """
+        path = self._prompt_save_excel_path(
+            "Descargar plantilla Excel", PRODUCT_IMPORT_TEMPLATE_FILENAME
+        )
+        if path is None:
+            return
+        try:
+            generate_product_import_template(path)
+        except ExcelError as exc:
+            self._show_error("No se pudo generar la plantilla", str(exc))
+            return
+        self.statusBar().showMessage(
+            f"Plantilla de productos guardada en '{path.name}'.", _STATUS_MESSAGE_MS
         )
 
     def _import_packing_list_from_path(self, path: Path) -> None:

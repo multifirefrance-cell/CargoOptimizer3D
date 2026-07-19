@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from cargo_optimizer.domain.color_suggestions import suggest_pastel_color
 from cargo_optimizer.domain.dimensions import Dimensions3D
 from cargo_optimizer.domain.enums import ExtinguisherAgent, OrientationCode, PackageType
 from cargo_optimizer.domain.exceptions import DomainValidationError
@@ -43,7 +44,6 @@ from cargo_optimizer.domain.load_unit import (
     DEFAULT_ORIENTATION_CODES,
     LoadUnit,
 )
-from cargo_optimizer.presentation.desktop.color_suggestions import suggest_pastel_color
 
 _PACKAGE_TYPE_LABELS: dict[PackageType, str] = {
     PackageType.INDIVIDUAL: "Individual",

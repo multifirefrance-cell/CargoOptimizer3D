@@ -8,13 +8,13 @@ import pytest
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QApplication, QColorDialog, QMessageBox
 
+from cargo_optimizer.domain.color_suggestions import _HEX_COLOR_PATTERN
 from cargo_optimizer.domain.dimensions import Dimensions3D
 from cargo_optimizer.domain.enums import ExtinguisherAgent, OrientationCode, PackageType
 from cargo_optimizer.domain.load_unit import DEFAULT_ORIENTATION_CODES, LoadUnit
 from cargo_optimizer.infrastructure.database.engine import DatabaseManager
 from cargo_optimizer.infrastructure.database.paths import get_user_database_path
 from cargo_optimizer.infrastructure.database.repositories import ProductCatalogRepository
-from cargo_optimizer.presentation.desktop.color_suggestions import _HEX_COLOR_PATTERN
 from cargo_optimizer.presentation.desktop.dialogs.catalog_product_editor_dialog import (
     CatalogProductEditorDialog,
 )

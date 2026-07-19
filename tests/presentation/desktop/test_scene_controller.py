@@ -38,7 +38,13 @@ _SPACE = LoadingSpace(
 )
 
 
-def _visual(sequence_number: int, x: float = 0.0) -> PlacementVisualModel:
+def _visual(
+    sequence_number: int,
+    x: float = 0.0,
+    *,
+    color_hex: str = "#4C78A8",
+    oriented_dimensions: tuple[float, float, float] = (40.0, 30.0, 20.0),
+) -> PlacementVisualModel:
     return PlacementVisualModel(
         sequence_number=sequence_number,
         instance_number=sequence_number,
@@ -46,7 +52,7 @@ def _visual(sequence_number: int, x: float = 0.0) -> PlacementVisualModel:
         sku=f"BOX-{sequence_number}",
         name="Caja",
         position=(x, 0.0, 0.0),
-        oriented_dimensions=(40.0, 30.0, 20.0),
+        oriented_dimensions=oriented_dimensions,
         orientation_code="lwh_xyz",
         weight_kg=10.0,
         package_type="individual",
@@ -56,7 +62,7 @@ def _visual(sequence_number: int, x: float = 0.0) -> PlacementVisualModel:
         fragile=False,
         max_stack_count=1,
         notes="",
-        color_hex="#4C78A8",
+        color_hex=color_hex,
     )
 
 
@@ -95,18 +101,34 @@ def test_cube_center_and_lengths_zero_origin() -> None:
     assert lengths == (40.0, 30.0, 20.0)
 
 
-def test_load_scene_creates_one_actor_per_box(plotter) -> None:  # type: ignore[no-untyped-def]
+def test_load_scene_groups_identical_boxes_into_one_actor(plotter) -> None:  # type: ignore[no-untyped-def]
+    """Fase OPT-18: cajas con la misma forma orientada y el mismo color comparten un
+    único actor de malla combinada, en vez de un actor VTK por caja."""
     controller = SceneController(plotter)
     controller.load_scene(_scene(count=3))
-    assert len(controller._box_actors) == 3
+    assert len(controller._group_actors) == 1
+    assert len(controller._box_records) == 3
     assert len(controller._container_actors) > 0
     assert len(controller._axes_actors) == 3
+
+
+def test_load_scene_creates_separate_actors_for_different_groups(plotter) -> None:  # type: ignore[no-untyped-def]
+    """Cajas de distinta forma u distinto color caen en grupos (y actores) distintos."""
+    controller = SceneController(plotter)
+    visuals = (
+        _visual(1, x=0.0),
+        _visual(2, x=40.0, color_hex="#FF0000"),
+        _visual(3, x=80.0, oriented_dimensions=(10.0, 10.0, 10.0)),
+    )
+    controller.load_scene(SceneModel(loading_space=_SPACE, placement_visuals=visuals))
+    assert len(controller._group_actors) == 3
+    assert len(controller._box_records) == 3
 
 
 def test_load_scene_with_empty_placements_still_builds_container(plotter) -> None:  # type: ignore[no-untyped-def]
     controller = SceneController(plotter)
     controller.load_scene(_scene(count=0))
-    assert len(controller._box_actors) == 0
+    assert len(controller._group_actors) == 0
     assert len(controller._container_actors) > 0
 
 
@@ -114,7 +136,8 @@ def test_clear_scene_removes_all_actors(plotter) -> None:  # type: ignore[no-unt
     controller = SceneController(plotter)
     controller.load_scene(_scene(count=2))
     controller.clear_scene()
-    assert controller._box_actors == {}
+    assert controller._group_actors == {}
+    assert controller._box_records == {}
     assert controller._container_actors == []
     assert controller._axes_actors == []
 
@@ -123,9 +146,9 @@ def test_set_boxes_visible_toggles_actor_visibility(plotter) -> None:  # type: i
     controller = SceneController(plotter)
     controller.load_scene(_scene(count=2))
     controller.set_boxes_visible(False)
-    assert all(not actor.visibility for actor in controller._box_actors.values())
+    assert all(not actor.visibility for actor in controller._group_actors.values())
     controller.set_boxes_visible(True)
-    assert all(actor.visibility for actor in controller._box_actors.values())
+    assert all(actor.visibility for actor in controller._group_actors.values())
 
 
 def test_set_container_visible_toggles_container_actors(plotter) -> None:  # type: ignore[no-untyped-def]
@@ -154,18 +177,84 @@ def test_set_selected_placement_highlights_actor_without_callback(plotter) -> No
     assert received == []  # llamada externa: nunca notifica
 
 
-def test_picking_callback_selects_and_notifies(plotter) -> None:  # type: ignore[no-untyped-def]
+def test_picking_callback_resolves_the_specific_box_from_the_world_click_point(
+    plotter, monkeypatch: pytest.MonkeyPatch  # type: ignore[no-untyped-def]
+) -> None:
+    """Fase OPT-18: varias cajas comparten un actor de malla combinada -- el picking
+    ya no puede resolver por identidad de actor; usa el punto de click en
+    coordenadas del mundo (`Plotter.picked_point`) para encontrar la caja más
+    cercana dentro del grupo clicado."""
+    controller = SceneController(plotter)
+    received: list[int | None] = []
+    controller.set_selection_changed_callback(received.append)
+    controller.load_scene(_scene(count=2))  # caja 1 en x=0, caja 2 en x=40, mismo grupo
+
+    actor = controller.find_placement_actor(2)
+    assert actor is not None
+    assert controller.find_placement_actor(1) is actor  # mismo actor: mismo grupo visual
+
+    box_2_center = controller._box_records[2].center
+    monkeypatch.setattr(type(plotter), "picked_point", property(lambda self: box_2_center))
+    controller._handle_pick(actor)
+
+    assert controller._selected_sequence_number == 2
+    assert received == [2]
+
+
+def test_picking_callback_without_a_world_point_falls_back_to_the_first_box(
+    plotter,  # type: ignore[no-untyped-def]
+) -> None:
+    """Sin `picked_point` disponible (p. ej. un picker que no lo entregue), sigue
+    seleccionando una caja real del grupo en vez de no seleccionar nada."""
     controller = SceneController(plotter)
     received: list[int | None] = []
     controller.set_selection_changed_callback(received.append)
     controller.load_scene(_scene(count=2))
 
-    actor = controller.find_placement_actor(2)
+    actor = controller.find_placement_actor(1)
     assert actor is not None
     controller._handle_pick(actor)
 
-    assert controller._selected_sequence_number == 2
-    assert received == [2]
+    assert controller._selected_sequence_number in (1, 2)
+    assert received == [controller._selected_sequence_number]
+
+
+def test_nearest_box_in_group_picks_the_closest_center() -> None:
+    controller = SceneController(pv.Plotter(off_screen=True))
+    controller.load_scene(_scene(count=2))
+    group_key = next(iter(controller._group_actors))
+
+    center_1 = controller._box_records[1].center
+    center_2 = controller._box_records[2].center
+    nearest_to_box_1 = controller._nearest_box_in_group(group_key, center_1)
+    nearest_to_box_2 = controller._nearest_box_in_group(group_key, center_2)
+
+    assert nearest_to_box_1 == 1
+    assert nearest_to_box_2 == 2
+    assert controller._nearest_box_in_group(group_key, None) == 1
+    assert controller._nearest_box_in_group(("missing-key", "#000000"), (0.0, 0.0, 0.0)) is None
+    controller.close()
+
+
+def test_selection_highlight_never_changes_the_shared_group_fill_color(
+    plotter,  # type: ignore[no-untyped-def]
+) -> None:
+    """Invariante del visor (CLAUDE.md): seleccionar una caja cambia su contorno,
+    nunca el color de relleno -- con actores compartidos por grupo, esto exige un
+    actor de contorno independiente en vez de tocar las propiedades del grupo."""
+    controller = SceneController(plotter)
+    controller.load_scene(_scene(count=2))
+    group_actor = controller.find_placement_actor(1)
+    original_color = tuple(group_actor.prop.color)
+
+    controller.set_selected_placement(1)
+
+    assert tuple(group_actor.prop.color) == original_color
+    assert controller._selection_actor is not None
+
+    controller.set_selected_placement(None)
+    assert controller._selection_actor is None
+    assert tuple(group_actor.prop.color) == original_color
 
 
 def test_picking_callback_with_none_actor_deselects(plotter) -> None:  # type: ignore[no-untyped-def]
@@ -206,7 +295,8 @@ def test_apply_theme_rebuilds_scene_when_one_is_loaded(plotter) -> None:  # type
     controller = SceneController(plotter)
     controller.load_scene(_scene(count=2))
     controller.apply_theme(THEME_DARK)
-    assert len(controller._box_actors) == 2  # reconstruida, no perdida
+    assert len(controller._group_actors) == 1  # reconstruida, no perdida
+    assert len(controller._box_records) == 2
 
 
 def test_apply_theme_without_scene_does_not_raise(plotter) -> None:  # type: ignore[no-untyped-def]
@@ -227,4 +317,4 @@ def test_close_releases_the_plotter() -> None:
     controller = SceneController(own_plotter)
     controller.load_scene(_scene(count=1))
     controller.close()
-    assert controller._box_actors == {}
+    assert controller._group_actors == {}

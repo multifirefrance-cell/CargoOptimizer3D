@@ -21,6 +21,9 @@ from pathlib import Path
 from uuid import UUID
 
 from openpyxl import Workbook
+from openpyxl.styles import Alignment
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.worksheet import Worksheet
 
 from cargo_optimizer.domain.dimensions import Dimensions3D
 from cargo_optimizer.domain.enums import (
@@ -29,7 +32,11 @@ from cargo_optimizer.domain.enums import (
     LoadingSpaceCategory,
     OrientationCode,
 )
-from cargo_optimizer.domain.load_unit import LoadUnit
+from cargo_optimizer.domain.load_unit import (
+    DEFAULT_MAX_STACK_COUNT,
+    DEFAULT_ORIENTATION_CODES,
+    LoadUnit,
+)
 from cargo_optimizer.domain.loading_space import LoadingSpace
 from cargo_optimizer.domain.orientation import Orientation
 from cargo_optimizer.domain.packing_result import PackingResult
@@ -43,8 +50,15 @@ from cargo_optimizer.infrastructure.excel.loading_space_rows import (
     loading_space_to_row,
 )
 from cargo_optimizer.infrastructure.excel.packing_list_importer import PACKING_LIST_COLUMNS
+from cargo_optimizer.infrastructure.excel.product_rows import (
+    EXAMPLE_ROW_SKU_MARKER,
+    PRODUCT_COLUMNS,
+    load_unit_to_row,
+)
 from cargo_optimizer.infrastructure.excel.result_exporter import export_packing_result
 from cargo_optimizer.infrastructure.excel.styles import (
+    LABEL_FONT,
+    TITLE_FONT,
     apply_borders_to_data_rows,
     apply_table,
     autofit_columns,
@@ -60,8 +74,11 @@ CATALOG_TEMPLATE_FILENAME = "CatalogTemplate.xlsx"
 PACKING_LIST_TEMPLATE_FILENAME = "PackingListTemplate.xlsx"
 LOADING_SPACE_TEMPLATE_FILENAME = "LoadingSpaceTemplate.xlsx"
 OPTIMIZATION_RESULT_TEMPLATE_FILENAME = "OptimizationResultTemplate.xlsx"
+PRODUCT_IMPORT_TEMPLATE_FILENAME = "PlantillaProductosCargoOptimizer3D.xlsx"
 
 _PACKING_LIST_SHEET_NAME = "Packing List"
+PRODUCT_IMPORT_SHEET_NAME = "Productos"
+INSTRUCTIONS_SHEET_NAME = "Instrucciones"
 
 
 def _example_catalog_units() -> tuple[LoadUnit, ...]:
@@ -104,6 +121,149 @@ def _example_catalog_units() -> tuple[LoadUnit, ...]:
 def generate_catalog_template(path: Path) -> None:
     """Genera `CatalogTemplate.xlsx`: cabeceras reales + filas de ejemplo."""
     export_catalog(_example_catalog_units(), path)
+
+
+_INSTRUCTIONS_COLUMNS = ("Columna", "Obligatorio", "Descripcion", "Si se deja vacio")
+_INSTRUCTIONS_COLUMN_WIDTHS = (20.0, 14.0, 70.0, 45.0)
+
+_COLUMN_INSTRUCTIONS: tuple[tuple[str, str, str, str], ...] = (
+    ("SKU", "Si", "Codigo unico del producto. No puede repetirse en el archivo.", "-"),
+    ("Nombre", "Si", "Nombre descriptivo del producto.", "-"),
+    ("Largo (cm)", "Si", "Dimension mayor o igual a 0.1 cm, paralela al largo del vehiculo.", "-"),
+    ("Ancho (cm)", "Si", "Dimension mayor o igual a 0.1 cm.", "-"),
+    ("Alto (cm)", "Si", "Dimension mayor o igual a 0.1 cm.", "-"),
+    ("Peso (kg)", "Si", "Peso bruto del paquete, mayor o igual a 0.", "-"),
+    ("Cantidad", "No", "Numero de paquetes solicitados de este SKU.", "1"),
+    (
+        "Color",
+        "No",
+        "Codigo hexadecimal #RRGGBB para distinguir el SKU en el visor 3D.",
+        "Se asigna automaticamente un color pastel distinto de los demas SKU.",
+    ),
+    ("Fragil", "No", "'Si' o 'No'. Un producto fragil no admite nada apilado encima.", "No"),
+    (
+        "Tipo de empaque",
+        "No",
+        "Individual, Caja grupal, Pallet, Tambor, Cilindro, Carga irregular u Otro.",
+        "Individual",
+    ),
+    ("Extintor", "No", "'Si' o 'No'. Marca el producto como extintor.", "No"),
+    (
+        "Agente",
+        "Solo si Extintor = Si",
+        "PQS, CO2, Agua, Espuma, Quimico humedo, Agente limpio u Otro.",
+        "-",
+    ),
+    (
+        "Peso nominal (kg)",
+        "Solo si Extintor = Si",
+        "Carga nominal del agente extintor (no es el peso bruto del paquete).",
+        "-",
+    ),
+    (
+        "Apilamiento",
+        "No",
+        "Numero maximo de niveles apilables. 1 = no apilable.",
+        str(DEFAULT_MAX_STACK_COUNT),
+    ),
+    (
+        "Orientaciones",
+        "No",
+        (
+            "Lista separada por comas: Original, Girada 90 Z, Girada 90 X, Girada 90 Y, "
+            "Ancho-alto-largo, Alto-largo-ancho. O 'Todas' para las 6."
+        ),
+        "Original, Girada 90 Z (las 2 orientaciones horizontales)",
+    ),
+    ("Notas", "No", "Texto libre.", "-"),
+)
+
+
+def _write_instructions_sheet(worksheet: Worksheet) -> None:
+    worksheet.cell(row=1, column=1, value="Instrucciones de la plantilla de productos").font = (
+        TITLE_FONT
+    )
+    worksheet.cell(
+        row=2,
+        column=1,
+        value=(
+            "Completa la hoja 'Productos' con tus propios articulos (uno por fila) y luego "
+            "importa este archivo desde CargoOptimizer3D. La fila de ejemplo de la hoja "
+            "'Productos' tiene un SKU reservado y nunca se importa como producto real, "
+            "aunque olvides borrarla."
+        ),
+    ).alignment = Alignment(wrap_text=True, vertical="top")
+    worksheet.merge_cells(start_row=2, start_column=1, end_row=2, end_column=4)
+    worksheet.row_dimensions[2].height = 45
+
+    header_row = 4
+    write_header_row(worksheet, _INSTRUCTIONS_COLUMNS, row=header_row)
+    last_row = header_row
+    for column_label, required, description, blank_default in _COLUMN_INSTRUCTIONS:
+        last_row += 1
+        worksheet.cell(row=last_row, column=1, value=column_label).font = LABEL_FONT
+        worksheet.cell(row=last_row, column=2, value=required)
+        description_cell = worksheet.cell(row=last_row, column=3, value=description)
+        description_cell.alignment = Alignment(wrap_text=True, vertical="top")
+        blank_cell = worksheet.cell(row=last_row, column=4, value=blank_default)
+        blank_cell.alignment = Alignment(wrap_text=True, vertical="top")
+
+    apply_borders_to_data_rows(
+        worksheet, first_row=header_row, last_row=last_row, column_count=len(_INSTRUCTIONS_COLUMNS)
+    )
+    for index, width in enumerate(_INSTRUCTIONS_COLUMN_WIDTHS, start=1):
+        worksheet.column_dimensions[get_column_letter(index)].width = width
+
+
+def generate_product_import_template(path: Path) -> None:
+    """Genera la plantilla oficial descargable para que un usuario nuevo importe sus SKU.
+
+    Distinta de `generate_catalog_template` (que produce
+    `CatalogTemplate.xlsx`, usada internamente como material de
+    referencia/pruebas con 3 productos de ejemplo ya completos): esta
+    plantilla es la que se ofrece desde la interfaz ("Descargar
+    plantilla Excel…") a un usuario que **todavia no conoce** la
+    estructura del programa. Hoja "Productos" (cabeceras reales,
+    `PRODUCT_COLUMNS`, una única fila de ejemplo con el SKU reservado
+    `EXAMPLE_ROW_SKU_MARKER` — `import_catalog_from_worksheet` la omite
+    siempre, así que nunca puede colarse como un producto real) + hoja
+    "Instrucciones" con una tabla columna por columna (obligatoriedad,
+    descripción, valor si se deja vacío).
+    """
+    workbook = Workbook()
+    products_sheet = get_active_worksheet(workbook)
+    products_sheet.title = PRODUCT_IMPORT_SHEET_NAME
+
+    write_header_row(products_sheet, PRODUCT_COLUMNS, row=HEADER_ROW)
+    example_unit = LoadUnit(
+        sku=EXAMPLE_ROW_SKU_MARKER,
+        name="Fila de ejemplo: borrala o sobrescribela con tu propio producto",
+        dimensions=Dimensions3D(length_cm=50, width_cm=40, height_cm=30),
+        weight_kg=10.0,
+        quantity=1,
+        allowed_orientation_codes=DEFAULT_ORIENTATION_CODES,
+        notes="Esta fila nunca se importa (SKU reservado), aunque no la borres.",
+    )
+    products_sheet.append(load_unit_to_row(example_unit))
+    last_row = HEADER_ROW + 1
+
+    column_count = len(PRODUCT_COLUMNS)
+    apply_borders_to_data_rows(
+        products_sheet, first_row=HEADER_ROW, last_row=last_row, column_count=column_count
+    )
+    apply_table(
+        products_sheet,
+        table_name="TablaProductos",
+        first_row=HEADER_ROW + 1,
+        last_row=last_row,
+        column_count=column_count,
+    )
+    autofit_columns(products_sheet, column_count=column_count)
+
+    instructions_sheet = workbook.create_sheet(INSTRUCTIONS_SHEET_NAME)
+    _write_instructions_sheet(instructions_sheet)
+
+    save_workbook_atomic(workbook, path)
 
 
 def generate_packing_list_template(path: Path) -> None:

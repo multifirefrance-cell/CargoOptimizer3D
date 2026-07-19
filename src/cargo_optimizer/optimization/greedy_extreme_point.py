@@ -87,6 +87,8 @@ class GreedyExtremePointStrategy:
         orientation_cache: dict[object, tuple[Orientation, ...]] = {}
         preferred_orientation_cache: dict[UUID, tuple[int, Orientation]] = {}
         pattern_cursors: dict[UUID, PatternCursor] = {}
+        strict_exhausted_at: dict[UUID, int] = {}
+        full_exhausted_at: dict[UUID, tuple[int, UnpackedReason]] = {}
         total = len(ordered_instances)
 
         self._emit_progress(progress_callback, state, total, None, start_time)
@@ -123,6 +125,8 @@ class GreedyExtremePointStrategy:
                 preferred_orientation_cache,
                 strict=True,
                 pattern_cursors=pattern_cursors,
+                strict_exhausted_at=strict_exhausted_at,
+                full_exhausted_at=full_exhausted_at,
             )
             if not placed:
                 pending_after_round_one.append(instance)
@@ -162,6 +166,7 @@ class GreedyExtremePointStrategy:
                     orientation_cache,
                     preferred_orientation_cache,
                     strict=False,
+                    full_exhausted_at=full_exhausted_at,
                 )
                 state.iteration_count += 1
                 self._emit_progress(
@@ -205,6 +210,8 @@ class GreedyExtremePointStrategy:
         preferred_orientation_cache: dict[UUID, tuple[int, Orientation]],
         strict: bool,
         pattern_cursors: dict[UUID, PatternCursor] | None = None,
+        strict_exhausted_at: dict[UUID, int] | None = None,
+        full_exhausted_at: dict[UUID, tuple[int, UnpackedReason]] | None = None,
     ) -> bool:
         """Intenta colocar `instance`; devuelve `True` si se aceptó un placement.
 
@@ -236,6 +243,33 @@ class GreedyExtremePointStrategy:
         falla, el patrón se marca agotado y esta instancia (solo esta)
         cae a la búsqueda general de más abajo, sin perder ninguna
         colocación posible.
+
+        `strict_exhausted_at`/`full_exhausted_at` (fase OPT-18, saturación
+        temprana — ver `docs/OptimizerPerformance.md`): cuando una
+        instancia de un `LoadUnit` agota la búsqueda (preferida en modo
+        `strict`, o todas las orientaciones factibles en modo no
+        `strict`) sin encontrar ningún candidato válido, ese resultado es
+        exactamente el mismo para **cualquier otra instancia del mismo
+        `LoadUnit`** mientras `PackingState` no haya aceptado ningún
+        placement nuevo desde entonces (`len(state.placements)` sin
+        cambios) — mismas orientaciones permitidas, mismas dimensiones,
+        mismas reglas, mismos placements existentes con los que
+        comparar, así que repetir la búsqueda completa produciría,
+        letra por letra, el mismo resultado. Estos dos diccionarios
+        recuerdan `(len(state.placements) en el momento del último
+        agotamiento confirmado, [razón])` por `load_unit.id`; si una
+        instancia posterior del mismo `LoadUnit` llega con el estado
+        exactamente igual, se rechaza (o se devuelve `False`, según el
+        modo) sin volver a recorrer ningún candidato. En cuanto se acepta
+        cualquier placement nuevo (de este `LoadUnit` o de cualquier
+        otro), `len(state.placements)` cambia y la entrada cacheada deja
+        de coincidir automáticamente — la próxima instancia de ese
+        `LoadUnit` vuelve a buscar de cero, nunca se asume "contenedor
+        lleno" de forma global ni se descarta un SKU distinto por el
+        agotamiento de otro. `strict_exhausted_at` y `full_exhausted_at`
+        son cachés independientes porque agotar la orientación preferida
+        (`strict`) no implica agotar todas las orientaciones factibles
+        (no `strict`): un valor cacheado en uno nunca se usa para el otro.
         """
         load_unit = instance.load_unit
 
@@ -249,6 +283,27 @@ class GreedyExtremePointStrategy:
                 # No se pierde esta instancia: cae a la búsqueda general
                 # de más abajo, exactamente como si nunca hubiera existido
                 # un patrón para este LoadUnit.
+
+        if (
+            strict
+            and strict_exhausted_at is not None
+            and strict_exhausted_at.get(load_unit.id) == len(state.placements)
+        ):
+            return False
+
+        if not strict and full_exhausted_at is not None:
+            cached_full = full_exhausted_at.get(load_unit.id)
+            if cached_full is not None and cached_full[0] == len(state.placements):
+                state.reject_instance(
+                    instance,
+                    cached_full[1].value,
+                    f"'{load_unit.sku}' no encontró ninguna posición/orientación válida: "
+                    "mismo resultado que la instancia anterior del mismo SKU, el estado "
+                    "del contenedor no cambió desde entonces (saturación detectada, fase "
+                    "OPT-18).",
+                )
+                return False
+
         if load_unit.id not in orientation_cache:
             orientation_cache[load_unit.id] = rules_engine.allowed_orientations(
                 load_unit, request.loading_space
@@ -329,9 +384,13 @@ class GreedyExtremePointStrategy:
             return True
 
         if strict:
+            if strict_exhausted_at is not None:
+                strict_exhausted_at[load_unit.id] = len(state.placements)
             return False
 
         reason = self._classify_unpacked_reason(violation_codes_seen)
+        if full_exhausted_at is not None:
+            full_exhausted_at[load_unit.id] = (len(state.placements), reason)
         state.reject_instance(
             instance,
             reason.value,

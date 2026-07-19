@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import colorsys
 
-from cargo_optimizer.presentation.desktop.color_suggestions import (
+from cargo_optimizer.domain.color_suggestions import (
     _HEX_COLOR_PATTERN,
     _PASTEL_SATURATION,
     _PASTEL_VALUE,
