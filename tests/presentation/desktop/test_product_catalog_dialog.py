@@ -57,7 +57,10 @@ def _fake_editor_dialog_class(accepted: bool, result_unit: LoadUnit | None) -> t
     return _FakeEditorDialog
 
 
-def test_dialog_lists_all_products_including_archived(qapp: QApplication, tmp_path: Path) -> None:
+def test_dialog_shows_only_active_products_by_default(qapp: QApplication, tmp_path: Path) -> None:
+    # Corrección UX archivar/eliminar: por defecto solo se ven los SKU
+    # activos -- antes de esta corrección, un SKU archivado se mostraba
+    # mezclado con los activos sin ningún filtro ni distinción clara.
     repo = _repository(tmp_path)
     added = repo.add(_unit(sku="BOX-1"))
     repo.add(_unit(sku="BOX-2"))
@@ -65,7 +68,85 @@ def test_dialog_lists_all_products_including_archived(qapp: QApplication, tmp_pa
 
     dialog = ProductCatalogDialog(None, repository=repo)
 
+    assert dialog.model.rowCount() == 1
+    assert dialog.model.entry_at(0).load_unit.sku == "BOX-2"
+
+
+def test_show_archived_checkbox_reveals_archived_products(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    repo = _repository(tmp_path)
+    added = repo.add(_unit(sku="BOX-1"))
+    repo.add(_unit(sku="BOX-2"))
+    repo.archive(added.id)
+
+    dialog = ProductCatalogDialog(None, repository=repo)
+    assert dialog.model.rowCount() == 1
+
+    dialog._show_archived_check.setChecked(True)
+
     assert dialog.model.rowCount() == 2
+    skus = {dialog.model.entry_at(row).load_unit.sku for row in range(dialog.model.rowCount())}
+    assert skus == {"BOX-1", "BOX-2"}
+
+    dialog._show_archived_check.setChecked(False)
+
+    assert dialog.model.rowCount() == 1
+
+
+def test_show_archived_checkbox_distinguishes_active_from_archived(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    repo = _repository(tmp_path)
+    added = repo.add(_unit(sku="BOX-1"))
+    repo.add(_unit(sku="BOX-2"))
+    repo.archive(added.id)
+
+    dialog = ProductCatalogDialog(None, repository=repo)
+    dialog._show_archived_check.setChecked(True)
+
+    entries_by_sku = {
+        dialog.model.entry_at(row).load_unit.sku: dialog.model.entry_at(row).is_active
+        for row in range(dialog.model.rowCount())
+    }
+    assert entries_by_sku == {"BOX-1": False, "BOX-2": True}
+
+
+def test_search_with_archived_shown_filters_by_text_too(qapp: QApplication, tmp_path: Path) -> None:
+    repo = _repository(tmp_path)
+    added = repo.add(_unit(sku="BOX-1", name="Caja de herramientas"))
+    repo.add(_unit(sku="PALLET-1", name="Pallet"))
+    repo.archive(added.id)
+
+    dialog = ProductCatalogDialog(None, repository=repo)
+    dialog._show_archived_check.setChecked(True)
+    dialog._search_edit.setText("herramientas")
+
+    assert dialog.model.rowCount() == 1
+    assert dialog.model.entry_at(0).load_unit.sku == "BOX-1"
+
+
+def test_archive_button_is_labeled_archivar_not_eliminar(
+    qapp: QApplication, tmp_path: Path
+) -> None:
+    # No debe existir ninguna acción rotulada "Eliminar" que en realidad
+    # solo archive -- corrección UX explícita pedida por el usuario.
+    repo = _repository(tmp_path)
+    dialog = ProductCatalogDialog(None, repository=repo)
+
+    assert dialog._archive_button.text() == "Archivar"
+    assert "eliminar" not in dialog._archive_button.text().lower()
+    all_button_texts = " ".join(
+        button.text().lower()
+        for button in (
+            dialog._add_button,
+            dialog._edit_button,
+            dialog._duplicate_button,
+            dialog._archive_button,
+            dialog._restore_button,
+        )
+    )
+    assert "eliminar" not in all_button_texts
 
 
 def test_search_filters_to_active_matches(qapp: QApplication, tmp_path: Path) -> None:
@@ -218,6 +299,13 @@ def test_on_archive_then_restore(
 
     dialog._on_archive()
     assert repo.count_active() == 0
+    # Con el filtro por defecto (solo activos), el SKU recién archivado
+    # ya no aparece en la lista -- hay que pedir explícitamente verlo
+    # para poder seleccionarlo y restaurarlo, igual que haría un usuario
+    # real.
+    assert dialog.model.rowCount() == 0
+    dialog._show_archived_check.setChecked(True)
+    assert dialog.model.rowCount() == 1
 
     dialog.table_view.selectRow(0)
     dialog._on_restore()

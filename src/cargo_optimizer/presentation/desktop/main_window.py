@@ -167,10 +167,23 @@ _RIGHT_PANEL_MIN_WIDTH = 480
 _VIEWER_STRETCH = 4
 _RESULTS_TABS_STRETCH = 1
 _VIEWER_MIN_HEIGHT = 240
-_RESULTS_TABS_MIN_HEIGHT = 150
+# 150 -> 200: con el mínimo anterior, la tabla "PENDIENTE POR SKU" de
+# `UnpackedTablePanel` quedaba con ~30px reales de alto (verificado con
+# un `PackingResult` real) -- prácticamente ilegible incluso con la
+# pestaña "No cargados" ya seleccionada. 200 le deja sitio a un par de
+# filas sin sacrificar el dominio visual del visor (sigue siendo
+# claramente mayoritario a cualquier tamaño de ventana razonable; ver
+# `test_viewer_stays_dominant_after_pending_min_height_increase`).
+_RESULTS_TABS_MIN_HEIGHT = 200
 _SPLITTER_HANDLE_WIDTH = 6
 _HEADER_PRODUCT_TABLE = "productTable"
 _ENGINE_LABEL = f"Motor: {GreedyExtremePointStrategy.name}"
+# Etiqueta base de la pestaña "No cargados": `_update_pending_tab_label`
+# le añade "(N)" cuando hay unidades pendientes, para que la pestaña sea
+# visiblemente distinta de las demás sin tener que abrirla primero
+# (mejoras UX: el desglose por SKU ya existía pero no tenía ninguna
+# señal visual que indicara que había algo que ver ahí).
+_UNPACKED_TAB_BASE_LABEL = "No cargados"
 
 _PROJECT_FILE_FILTER = "Proyectos CargoOptimizer3D (*.cargo3d)"
 _PROJECT_FILE_EXTENSION = ".cargo3d"
@@ -284,6 +297,7 @@ class MainWindow(QMainWindow):
         self.viewer_widget.placement_selected.connect(self._on_placement_selected)
         self.multi_space_results_panel.space_selected.connect(self._on_multi_space_space_selected)
         self.product_table_panel.add_requested.connect(self._on_quick_add_requested)
+        self.results_panel.pending_tile_clicked.connect(self._on_pending_tile_clicked)
 
         self.loading_space_summary_panel.profile_selected.connect(
             self.loading_space_form_panel.set_current_profile_name
@@ -336,7 +350,7 @@ class MainWindow(QMainWindow):
         self.results_tabs = QTabWidget(self)
         self.results_tabs.setObjectName("resultsTabs")
         self.results_tabs.addTab(self.results_panel, "Resumen")
-        self.results_tabs.addTab(self.unpacked_table_panel, "No cargados")
+        self.results_tabs.addTab(self.unpacked_table_panel, _UNPACKED_TAB_BASE_LABEL)
         self.results_tabs.addTab(self.warnings_panel, "Avisos")
         self.results_tabs.addTab(self.log_panel, "Registro")
         self.results_tabs.addTab(self.multi_space_results_panel, "Multi-espacio")
@@ -805,6 +819,7 @@ class MainWindow(QMainWindow):
             self.results_panel.clear()
             self.viewer_stats_header.clear_result_stats()
             self.unpacked_table_panel.clear()
+            self._update_pending_tab_label(0)
             self.warnings_panel.clear()
             self.multi_space_results_panel.clear()
             self._show_empty_space_preview(self.loading_space_form_panel.build_loading_space())
@@ -872,6 +887,7 @@ class MainWindow(QMainWindow):
                 self.results_panel.clear()
                 self.viewer_stats_header.clear_result_stats()
                 self.unpacked_table_panel.clear()
+                self._update_pending_tab_label(0)
                 self.warnings_panel.clear()
                 self._show_empty_space_preview(loaded.project.loading_space)
             self.results_panel.set_stale(self._result_stale)
@@ -1819,6 +1835,32 @@ class MainWindow(QMainWindow):
         self.results_tabs.setCurrentWidget(self.results_panel)
         self.results_panel.setFocus()
 
+    def _on_pending_tile_clicked(self) -> None:
+        """Clic en la tarjeta "Cantidad pendiente": salta directo al desglose por SKU."""
+        self._show_pending_tab()
+
+    def _show_pending_tab(self) -> None:
+        self.results_tabs.setCurrentWidget(self.unpacked_table_panel)
+        self.unpacked_table_panel.setFocus()
+
+    def _update_pending_tab_label(self, pending_count: int) -> None:
+        """Añade "(N)" a la pestaña "No cargados" cuando hay pendientes, la limpia si no.
+
+        Es la única señal permanente (no depende de que el usuario haya
+        visto el cambio de pestaña en el momento exacto en que ocurrió)
+        de que hay algo que revisar en esa pestaña -- se actualiza tanto
+        al poblar un resultado real como al limpiar el panel.
+        """
+        index = self.results_tabs.indexOf(self.unpacked_table_panel)
+        if index < 0:
+            return
+        label = (
+            _UNPACKED_TAB_BASE_LABEL
+            if pending_count <= 0
+            else f"{_UNPACKED_TAB_BASE_LABEL} ({pending_count})"
+        )
+        self.results_tabs.setTabText(index, label)
+
     def _on_toggle_3d_focus(self, checked: bool) -> None:
         # Oculta la columna izquierda por completo en vez de mover un
         # separador: sin `QSplitter` en el workspace (celdas fijas, sin
@@ -1933,6 +1975,7 @@ class MainWindow(QMainWindow):
         self.results_panel.clear()
         self.viewer_stats_header.clear_result_stats()
         self.unpacked_table_panel.clear()
+        self._update_pending_tab_label(0)
         self.warnings_panel.clear()
         # Un resultado multi-espacio de una ejecución anterior queda
         # obsoleto en cuanto se ejecuta una optimización normal — si no
@@ -2008,7 +2051,17 @@ class MainWindow(QMainWindow):
             f"{result.execution_time_seconds:.2f} s."
         )
         self.statusBar().showMessage(message, _STATUS_MESSAGE_MS)
-        self._on_show_results()
+        # Cuando quedaron unidades sin cargar (y la ejecución no se
+        # canceló, cuyo listado de pendientes no es representativo), la
+        # pestaña "No cargados" pasa a ser el resultado más relevante que
+        # "Resumen" -- antes esta llamada era siempre `_on_show_results()`
+        # incondicional, así que un desglose por SKU correcto quedaba sin
+        # ninguna vía visible para descubrirlo (bug real reportado sobre
+        # el ejecutable: el dato existía pero nunca se mostraba solo).
+        if result.unpacked_count > 0 and not self._cancel_requested:
+            self._show_pending_tab()
+        else:
+            self._on_show_results()
 
     def _on_optimization_failed(self, message: str) -> None:
         self._set_state(STATE_ERROR)
@@ -2174,6 +2227,7 @@ class MainWindow(QMainWindow):
         self.unpacked_table_panel.set_result(
             result.placements, result.unpacked_units, self._last_load_units_by_id
         )
+        self._update_pending_tab_label(result.unpacked_count)
         self.warnings_panel.set_warnings(result.warnings)
         self.results_panel.set_stale(self._result_stale)
 

@@ -9,11 +9,19 @@ Desde la fase 8.1 acepta arrastrar y soltar un `.xlsx` directamente
 sobre la ventana (``on_excel_dropped``): el diálogo solo detecta el
 archivo soltado y delega en el callback — nunca importa nada él mismo.
 
-El botón "Eliminar" pide confirmación y, por debajo, sigue llamando a
-`ProductCatalogRepository.archive` (`is_active=False`): el catálogo
-nunca borra un registro físicamente (invariante de `CLAUDE.md`), solo
-se le da al usuario una etiqueta y un icono que se leen como "borrar"
-en vez de "archivar".
+El botón "Archivar" (antes rotulado, de forma engañosa, "Eliminar")
+pide confirmación y llama a `ProductCatalogRepository.archive`
+(`is_active=False`): el catálogo nunca borra un registro físicamente
+(invariante ya establecida de `CLAUDE.md`) y la interfaz ya no debe
+sugerir lo contrario. Un SKU archivado no se destruye: solo se oculta
+de la vista por defecto (`_show_archived_check` sin marcar, `_refresh`
+filtra a `is_active=True`) y de las búsquedas; marcar "Mostrar
+archivados" lo vuelve a mostrar, con la columna "Activo" y el botón
+"Restaurar" como única vía para reactivarlo. No existe ninguna acción
+de borrado físico: ver el docstring de `_on_archive` para la
+justificación completa (sin FK hacia `product_catalog`, pero
+irreversible sin ningún beneficio real sobre archivar, que ya libera
+el SKU para reutilizarlo).
 """
 
 from __future__ import annotations
@@ -25,6 +33,7 @@ from PySide6.QtCore import QModelIndex, QPersistentModelIndex
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QDialog,
     QHBoxLayout,
     QInputDialog,
@@ -46,7 +55,6 @@ from cargo_optimizer.presentation.desktop.dialogs.catalog_product_editor_dialog 
     CatalogProductEditorDialog,
 )
 from cargo_optimizer.presentation.desktop.drag_drop import first_excel_path, has_excel_url
-from cargo_optimizer.presentation.desktop.icons import icon
 from cargo_optimizer.presentation.desktop.models.product_catalog_table_model import (
     ProductCatalogTableModel,
 )
@@ -74,6 +82,13 @@ class ProductCatalogDialog(QDialog):
         self._search_edit.setPlaceholderText("Buscar por SKU o nombre…")
         self._search_edit.textChanged.connect(self._refresh)
 
+        # Por defecto solo se ven los SKU activos -- un SKU archivado
+        # (is_active=False) deja de aparecer aquí y no puede confundirse
+        # con uno disponible para nuevas cargas. Marcar esta casilla es la
+        # única forma de volver a verlos (y de poder "Restaurar" alguno).
+        self._show_archived_check = QCheckBox("Mostrar archivados", self)
+        self._show_archived_check.toggled.connect(self._refresh)
+
         self.model = ProductCatalogTableModel(self)
         self.table_view = QTableView(self)
         self.table_view.setObjectName("productCatalogTableView")
@@ -87,7 +102,7 @@ class ProductCatalogDialog(QDialog):
         self._add_button = QPushButton("Nuevo…", self)
         self._edit_button = QPushButton("Editar…", self)
         self._duplicate_button = QPushButton("Duplicar…", self)
-        self._archive_button = QPushButton(icon("delete"), "Eliminar", self)
+        self._archive_button = QPushButton("Archivar", self)
         self._restore_button = QPushButton("Restaurar", self)
         self._add_to_project_button = QPushButton("Añadir seleccionados al proyecto", self)
         self._close_button = QPushButton("Cerrar", self)
@@ -104,6 +119,10 @@ class ProductCatalogDialog(QDialog):
         self._refresh()
 
     def _build_layout(self) -> None:
+        search_row = QHBoxLayout()
+        search_row.addWidget(self._search_edit, 1)
+        search_row.addWidget(self._show_archived_check)
+
         buttons_layout = QHBoxLayout()
         for button in (
             self._add_button,
@@ -121,7 +140,7 @@ class ProductCatalogDialog(QDialog):
         bottom_layout.addWidget(self._close_button)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(self._search_edit)
+        layout.addLayout(search_row)
         layout.addLayout(buttons_layout)
         layout.addWidget(self.table_view)
         layout.addLayout(bottom_layout)
@@ -145,14 +164,38 @@ class ProductCatalogDialog(QDialog):
         self._on_excel_dropped(path)
 
     def _refresh(self) -> None:
+        """Recarga la tabla: activos por defecto, o activos+archivados si se pide.
+
+        `ProductCatalogRepository.search` ya filtra a solo activos, así
+        que con texto de búsqueda y "Mostrar archivados" marcado hace
+        falta filtrar `list_all()` a mano en vez de reutilizar `search` --
+        de lo contrario un SKU archivado nunca aparecería aunque el
+        usuario pidiera explícitamente verlos.
+        """
         text = self._search_edit.text().strip()
-        if text:
-            entries = tuple(
-                CatalogProductEntry(load_unit=unit, is_active=True)
-                for unit in self._repository.search(text)
-            )
+        show_archived = self._show_archived_check.isChecked()
+
+        if not show_archived:
+            if text:
+                entries = tuple(
+                    CatalogProductEntry(load_unit=unit, is_active=True)
+                    for unit in self._repository.search(text)
+                )
+            else:
+                entries = tuple(
+                    CatalogProductEntry(load_unit=unit, is_active=True)
+                    for unit in self._repository.list_active()
+                )
         else:
             entries = self._repository.list_all()
+            if text:
+                pattern = text.lower()
+                entries = tuple(
+                    entry
+                    for entry in entries
+                    if pattern in entry.load_unit.sku.lower()
+                    or pattern in entry.load_unit.name.lower()
+                )
         self.model.set_entries(entries)
 
     def _on_row_double_clicked(self, index: QModelIndex | QPersistentModelIndex) -> None:
@@ -218,16 +261,37 @@ class ProductCatalogDialog(QDialog):
         self._refresh()
 
     def _on_archive(self) -> None:
+        """Archiva el SKU seleccionado -- nunca lo borra físicamente.
+
+        No existe una acción de "eliminar definitivamente" en este
+        diálogo. Se investigó explícitamente si sería seguro añadirla:
+        `product_catalog` no tiene ninguna clave foránea hacia otra tabla
+        (ninguna fila de `project_history`/`packing_run_history` referencia
+        un id de catálogo) y copiar un producto a un proyecto siempre
+        genera un `LoadUnit` con un UUID nuevo (`CatalogService.copy_to_project`),
+        así que un `.cargo3d` guardado nunca depende de que una fila del
+        catálogo siga existiendo -- un borrado físico no rompería
+        ninguna referencia hoy. Aun así no se implementa: sería
+        irreversible (a diferencia de "Restaurar") sin aportar ningún
+        beneficio real sobre archivar, que ya libera el SKU para
+        reutilizarlo (`_check_sku_available` solo mira registros activos)
+        y conserva el histórico. Coincide además con el invariante ya
+        establecido en `CLAUDE.md`: "Borrado siempre lógico, nunca
+        físico". Si en el futuro hiciera falta una purga real (limpieza
+        de base de datos, cumplimiento normativo), es una decisión nueva
+        con su propio ADR, no una casilla más en este diálogo.
+        """
         row = self._selected_row()
         if row is None:
             return
         entry = self.model.entry_at(row)
         response = QMessageBox.question(
             self,
-            "Eliminar producto",
-            f"¿Eliminar '{entry.load_unit.sku}' del catálogo?\n\n"
+            "Archivar producto",
+            f"¿Archivar '{entry.load_unit.sku}' del catálogo?\n\n"
             "Dejará de estar disponible para agregarlo a nuevos proyectos, pero su "
-            'histórico se conserva y podrás restaurarlo más tarde con "Restaurar".',
+            'histórico se conserva y podrás restaurarlo más tarde con "Restaurar" '
+            '(marca "Mostrar archivados" para volver a verlo en esta lista).',
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -236,7 +300,7 @@ class ProductCatalogDialog(QDialog):
         try:
             self._repository.archive(entry.load_unit.id)
         except RepositoryError as exc:
-            QMessageBox.warning(self, "No se pudo eliminar el producto", str(exc))
+            QMessageBox.warning(self, "No se pudo archivar el producto", str(exc))
         self._refresh()
 
     def _on_restore(self) -> None:

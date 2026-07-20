@@ -14,6 +14,8 @@ cambia cómo se presentan, nunca el contrato con `MainWindow.set_results`.
 
 from __future__ import annotations
 
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -42,7 +44,24 @@ _VALUE_STYLE = "font-size: 15pt; font-weight: 700;"
 _TITLE_STYLE = "font-size: 8pt; font-weight: 600; text-transform: uppercase;"
 
 
-def _tile(title: str) -> tuple[QFrame, QLabel]:
+class _ClickableFrame(QFrame):
+    """Un `QFrame` que emite `clicked` al pulsarlo (solo la tarjeta "Cantidad pendiente").
+
+    `QFrame` no trae una señal de clic propia (a diferencia de
+    `QPushButton`); en vez de rehacer la tarjeta como botón (perdería el
+    estilo de tarjeta KPI del resto), se sobrescribe `mousePressEvent`
+    para las pocas tarjetas que de verdad necesitan ser interactivas.
+    """
+
+    clicked = Signal()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
+def _tile(title: str, *, clickable: bool = False) -> tuple[QFrame, QLabel]:
     """Una tarjeta KPI: título pequeño arriba, valor grande abajo. Devuelve `(tarjeta, valor)`.
 
     El título usa `setWordWrap(True)` en vez de dejar que se recorte: con
@@ -53,12 +72,21 @@ def _tile(title: str) -> tuple[QFrame, QLabel]:
     la tarjeta permite que `QGridLayout` la encoja por debajo de su
     `sizeHint` cuando hace falta, en vez de forzar un ancho mínimo que
     reintroduciría el mismo problema en ventanas más estrechas.
+
+    `clickable=True` (usado solo por "Cantidad pendiente") construye la
+    tarjeta como `_ClickableFrame` en vez de `QFrame` liso, y añade un
+    cursor de mano + tooltip -- para que abrir el detalle por SKU sea
+    obvio, no un "easter egg" oculto (mejoras UX: el desglose por SKU ya
+    existía pero no tenía ninguna vía visible de acceso).
     """
-    frame = QFrame()
+    frame = _ClickableFrame() if clickable else QFrame()
     frame.setFrameShape(QFrame.Shape.StyledPanel)
     frame.setObjectName("kpiTile")
     frame.setMinimumWidth(0)
     frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+    if clickable:
+        frame.setCursor(Qt.CursorShape.PointingHandCursor)
+        frame.setToolTip("Ver el detalle de unidades pendientes por SKU")
     title_label = QLabel(title, frame)
     title_label.setStyleSheet(_TITLE_STYLE)
     title_label.setWordWrap(True)
@@ -75,6 +103,11 @@ def _tile(title: str) -> tuple[QFrame, QLabel]:
 class ResultsPanel(QWidget):
     """Resumen de la última ejecución del motor de optimización, como tarjetas KPI."""
 
+    #: Se emite al pulsar la tarjeta "Cantidad pendiente" -- `MainWindow` la
+    #: conecta para navegar a la pestaña "No cargados" (mejoras UX, no
+    #: duplica el desglose por SKU, solo da una vía visible hacia él).
+    pending_tile_clicked = Signal()
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("resultsPanel")
@@ -86,7 +119,9 @@ class ResultsPanel(QWidget):
         self._stale_label.setVisible(False)
 
         packed_tile, self._packed_label = _tile("Cantidad cargada")
-        pending_tile, self._pending_label = _tile("Cantidad pendiente")
+        pending_tile, self._pending_label = _tile("Cantidad pendiente", clickable=True)
+        assert isinstance(pending_tile, _ClickableFrame)
+        pending_tile.clicked.connect(self.pending_tile_clicked)
         utilization_tile, self._utilization_label = _tile("Utilización")
         volume_tile, self._volume_label = _tile("Volumen")
         weight_tile, self._weight_label = _tile("Peso")

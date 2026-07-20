@@ -86,14 +86,21 @@ def test_clear_resets_both_models(qapp: QApplication) -> None:
     assert panel.model.rowCount() == 0
 
 
-def test_summary_table_view_has_bounded_height_and_detail_view_expands(
+def test_summary_table_view_has_bounded_height_and_both_views_stretch(
     qapp: QApplication,
 ) -> None:
-    # El resumen es compacto (altura acotada); el detalle recibe el stretch
-    # sobrante del layout vertical del panel.
+    # El resumen tiene una altura acotada (no crece sin límite si hay
+    # muchos SKU pendientes), pero -- a diferencia del diseño anterior,
+    # donde solo el detalle tenía stretch y el resumen quedaba fijo en su
+    # sizeHint (~30px reales, verificado con un PackingResult real) --
+    # ahora ambos widgets reciben stretch, con el resumen como prioridad
+    # (2:1) por ser la información más relevante de la pestaña.
     panel = UnpackedTablePanel()
     layout = panel.layout()
     assert layout is not None
-    assert panel.summary_table_view.maximumHeight() <= 200
+    assert panel.summary_table_view.maximumHeight() <= 250
+    summary_index = layout.indexOf(panel.summary_table_view)
     detail_index = layout.indexOf(panel.table_view)
-    assert layout.stretch(detail_index) == 1
+    assert layout.stretch(summary_index) > 0
+    assert layout.stretch(detail_index) > 0
+    assert layout.stretch(summary_index) >= layout.stretch(detail_index)

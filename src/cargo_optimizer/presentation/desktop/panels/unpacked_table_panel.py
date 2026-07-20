@@ -39,7 +39,7 @@ class UnpackedTablePanel(QWidget):
         self.summary_table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.summary_table_view.horizontalHeader().setStretchLastSection(True)
         self.summary_table_view.verticalHeader().setVisible(False)
-        self.summary_table_view.setMaximumHeight(160)
+        self.summary_table_view.setMaximumHeight(220)
 
         self.model = UnpackedUnitTableModel(self)
         self.table_view = QTableView(self)
@@ -51,11 +51,20 @@ class UnpackedTablePanel(QWidget):
         self.table_view.horizontalHeader().setStretchLastSection(True)
         self.table_view.verticalHeader().setVisible(False)
 
+        # `summary_table_view` es el resumen que el usuario necesita ver
+        # primero (mejoras UX: existía pero no tenía ninguna vía visible
+        # de acceso); sin stretch propio, un `QVBoxLayout` le da
+        # exactamente su `sizeHint()` y manda todo el sobrante a
+        # `table_view` (el único con stretch antes de este cambio) --
+        # aunque el panel entero creciera, el resumen por SKU se quedaba
+        # fijo en unos 30px reales, prácticamente ilegible. Ambos
+        # widgets reciben ahora stretch, con el resumen como prioridad
+        # (2:1) ya que es la información más relevante de la pestaña.
         layout = QVBoxLayout(self)
         layout.setContentsMargins(SPACING_SM, SPACING_XS, SPACING_SM, SPACING_XS)
         layout.setSpacing(SPACING_XS)
         layout.addWidget(QLabel("<b>PENDIENTE POR SKU</b>", self))
-        layout.addWidget(self.summary_table_view)
+        layout.addWidget(self.summary_table_view, 2)
         layout.addWidget(QLabel("<b>DETALLE POR INSTANCIA</b>", self))
         layout.addWidget(self.table_view, 1)
 

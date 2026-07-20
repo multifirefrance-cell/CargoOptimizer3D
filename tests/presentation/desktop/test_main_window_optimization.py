@@ -15,9 +15,51 @@ from typing import Any
 import pytest
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from cargo_optimizer.domain.dimensions import Dimensions3D
+from cargo_optimizer.domain.enums import LoadingSpaceCategory, OrientationCode
+from cargo_optimizer.domain.load_unit import LoadUnit
+from cargo_optimizer.domain.loading_space import LoadingSpace
+from cargo_optimizer.domain.orientation import Orientation
+from cargo_optimizer.domain.packing_result import PackingResult
+from cargo_optimizer.domain.placement import Placement
+from cargo_optimizer.domain.position import Position3D
+from cargo_optimizer.domain.unpacked_unit import UnpackedUnit
 from cargo_optimizer.presentation.desktop.main_window import MainWindow
 from cargo_optimizer.presentation.desktop.panels.loading_space_form_panel import PROFILE_CUSTOM
 from cargo_optimizer.presentation.desktop.settings import AppSettings
+
+_SPACE = LoadingSpace(
+    name="Espacio de prueba",
+    category=LoadingSpaceCategory.OTHER,
+    internal_dimensions=Dimensions3D(100.0, 100.0, 100.0),
+)
+
+
+def _result_with_pending(*, pending_count: int, packed_count: int = 1) -> PackingResult:
+    """Un `PackingResult` real con `pending_count` unidades pendientes de un único SKU."""
+    unit = LoadUnit(
+        sku="PEND-SKU", name="Pendiente", dimensions=Dimensions3D(10, 10, 10), weight_kg=5.0
+    )
+    orientation = Orientation.from_base_dimensions(unit.dimensions, OrientationCode.LWH_XYZ)
+    placements = tuple(
+        Placement(unit.id, i, Position3D(0, 0, 0), orientation, i)
+        for i in range(1, packed_count + 1)
+    )
+    unpacked = tuple(
+        UnpackedUnit(unit.id, packed_count + i, "no_feasible_position", "sin espacio")
+        for i in range(1, pending_count + 1)
+    )
+    return PackingResult(
+        loading_space=_SPACE,
+        placements=placements,
+        unpacked_units=unpacked,
+        requested_count=packed_count + pending_count,
+        packed_count=packed_count,
+        used_volume_cm3=1000.0,
+        used_weight_kg=10.0,
+        execution_time_seconds=0.01,
+        algorithm_name="greedy_extreme_point_v1",
+    )
 
 
 def _wait_until_worker_finishes(
@@ -265,22 +307,8 @@ def test_populate_results_fills_pending_sku_breakdown_matching_total(
     # recalculada).
     from uuid import uuid4
 
-    from cargo_optimizer.domain.dimensions import Dimensions3D
-    from cargo_optimizer.domain.enums import LoadingSpaceCategory, OrientationCode
-    from cargo_optimizer.domain.load_unit import LoadUnit
-    from cargo_optimizer.domain.loading_space import LoadingSpace
-    from cargo_optimizer.domain.orientation import Orientation
-    from cargo_optimizer.domain.packing_result import PackingResult
-    from cargo_optimizer.domain.placement import Placement
-    from cargo_optimizer.domain.position import Position3D
-    from cargo_optimizer.domain.unpacked_unit import UnpackedUnit
-
     window = MainWindow(app_settings)
-    space = LoadingSpace(
-        name="Espacio de prueba",
-        category=LoadingSpaceCategory.OTHER,
-        internal_dimensions=Dimensions3D(100.0, 100.0, 100.0),
-    )
+    space = _SPACE
     unit_full = LoadUnit(
         sku="FULL-SKU", name="Completo", dimensions=Dimensions3D(10, 10, 10), weight_kg=5.0
     )
@@ -319,4 +347,158 @@ def test_populate_results_fills_pending_sku_breakdown_matching_total(
         summary_model.data(summary_model.index(row, 4)) for row in range(summary_model.rowCount())
     )
     assert total_pending_in_summary == result.unpacked_count
+    window.close()
+
+
+def test_pending_tab_label_shows_count_after_populate_results(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    # Corrección de accesibilidad: la pestaña "No cargados" debe llevar
+    # visiblemente el número de unidades pendientes -- antes de esta
+    # corrección no había ninguna señal en la pestaña que indicara que
+    # había algo que revisar ahí.
+    window = MainWindow(app_settings)
+    result = _result_with_pending(pending_count=4)
+    index = window.results_tabs.indexOf(window.unpacked_table_panel)
+
+    window._populate_results(result)
+
+    assert window.results_tabs.tabText(index) == "No cargados (4)"
+    window.close()
+
+
+def test_pending_tab_label_resets_to_base_text_when_no_pending(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    window = MainWindow(app_settings)
+    index = window.results_tabs.indexOf(window.unpacked_table_panel)
+    window._populate_results(_result_with_pending(pending_count=3))
+    assert window.results_tabs.tabText(index) == "No cargados (3)"
+
+    window._populate_results(_result_with_pending(pending_count=0, packed_count=5))
+
+    assert window.results_tabs.tabText(index) == "No cargados"
+    window.close()
+
+
+def test_reset_to_blank_project_resets_pending_tab_label(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    window = MainWindow(app_settings)
+    index = window.results_tabs.indexOf(window.unpacked_table_panel)
+    window._populate_results(_result_with_pending(pending_count=7))
+    assert window.results_tabs.tabText(index) == "No cargados (7)"
+
+    window._reset_to_blank_project()
+
+    assert window.results_tabs.tabText(index) == "No cargados"
+    window.close()
+
+
+def test_optimization_finished_with_pending_units_switches_to_pending_tab(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    # Causa real reportada: `_on_optimization_finished` siempre saltaba a
+    # "Resumen" (`_on_show_results()` incondicional), así que el
+    # desglose por SKU -- ya calculado correctamente -- nunca tenía
+    # ninguna vía visible para que el usuario lo descubriera sin saber
+    # de antemano que debía hacer clic en "No cargados".
+    window = MainWindow(app_settings)
+    result = _result_with_pending(pending_count=5)
+
+    window._on_optimization_finished(result)
+
+    assert window.results_tabs.currentWidget() is window.unpacked_table_panel
+    window.close()
+
+
+def test_optimization_finished_without_pending_units_shows_summary_tab(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    # Sin pendientes, el comportamiento original (ir a "Resumen") se
+    # mantiene intacto -- el auto-salto a "No cargados" es condicional,
+    # no un cambio general de qué pestaña se muestra al terminar.
+    window = MainWindow(app_settings)
+    result = _result_with_pending(pending_count=0, packed_count=5)
+
+    window._on_optimization_finished(result)
+
+    assert window.results_tabs.currentWidget() is window.results_panel
+    window.close()
+
+
+def test_optimization_cancelled_with_partial_pending_still_shows_summary_tab(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    # Una ejecución cancelada normalmente deja instancias "pendientes"
+    # que no reflejan un resultado real -- no debe disparar el
+    # auto-salto a "No cargados", que está pensado para una
+    # optimización completada de verdad.
+    window = MainWindow(app_settings)
+    window._cancel_requested = True
+    result = _result_with_pending(pending_count=5)
+
+    window._on_optimization_finished(result)
+
+    assert window.results_tabs.currentWidget() is window.results_panel
+    window.close()
+
+
+def test_clicking_pending_kpi_tile_navigates_to_pending_tab(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    window = MainWindow(app_settings)
+    window._populate_results(_result_with_pending(pending_count=2))
+    window._on_show_results()
+    assert window.results_tabs.currentWidget() is window.results_panel
+
+    window.results_panel.pending_tile_clicked.emit()
+
+    assert window.results_tabs.currentWidget() is window.unpacked_table_panel
+    window.close()
+
+
+def test_pending_summary_table_has_usable_height_once_shown(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    # Regresión directa del bug reportado: con la altura mínima y el
+    # stretch anteriores, `summary_table_view` quedaba en ~30px reales
+    # (prácticamente solo la cabecera) sin importar cuánto creciera la
+    # ventana. Verificado antes/después con un `PackingResult` real.
+    window = MainWindow(app_settings)
+    window.resize(1280, 800)
+    window.show()
+    qapp.processEvents()
+    window._populate_results(_result_with_pending(pending_count=4))
+    window.results_tabs.setCurrentWidget(window.unpacked_table_panel)
+    qapp.processEvents()
+    qapp.processEvents()
+
+    assert window.unpacked_table_panel.summary_table_view.height() >= 50
+    window.close()
+
+
+def test_viewer_stays_clearly_dominant_after_pending_visibility_fix(
+    qapp: QApplication, app_settings: AppSettings
+) -> None:
+    # El visor 3D debe seguir siendo la zona visual dominante incluso
+    # tras aumentar la altura mínima de `results_tabs` para que el
+    # resumen de pendientes sea legible -- no se repite la regresión de
+    # una fase anterior donde el visor quedó pequeño.
+    window = MainWindow(app_settings)
+    window.resize(1280, 800)
+    window.show()
+    qapp.processEvents()
+    window._populate_results(_result_with_pending(pending_count=4))
+    window.results_tabs.setCurrentWidget(window.unpacked_table_panel)
+    qapp.processEvents()
+    qapp.processEvents()
+
+    viewer_height, results_height = window.viewer_results_splitter.sizes()
+    assert viewer_height > results_height
+    # Dominancia clara (~2:1, el stretch nominal es 4:1 pero el mínimo de
+    # `results_tabs` recorta algo de esa proporción) -- no una igualdad
+    # exacta de píxeles, que dependería de detalles de layout que no son
+    # el invariante real que importa aquí.
+    assert viewer_height >= 1.9 * results_height
     window.close()
