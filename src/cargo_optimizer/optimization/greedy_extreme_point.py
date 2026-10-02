@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from uuid import UUID
 
 from cargo_optimizer.domain.orientation import Orientation
@@ -38,10 +39,11 @@ from cargo_optimizer.optimization.pattern_packing import PatternCursor, generate
 from cargo_optimizer.optimization.result_builder import ALGORITHM_NAME, build_packing_result
 from cargo_optimizer.optimization.state import PackingState
 from cargo_optimizer.optimization.strategy import StrategyCapabilities
+from cargo_optimizer.domain.enums import ExtinguisherAgent
 from cargo_optimizer.rules.codes import LOADING_SPACE_WEIGHT_EXCEEDED
 from cargo_optimizer.rules.engine import RulesEngine
 
-_PATTERN_MIN_QUANTITY = 8
+_PATTERN_MIN_QUANTITY = 4
 """Cantidad mínima de instancias de un mismo `LoadUnit` para intentar el patrón de
 filas/capas (fase OPT-17) en vez de resolver cada instancia con una búsqueda completa.
 
@@ -51,6 +53,18 @@ complejidad añadida. No afecta a la corrección en ningún caso — solo a
 si se intenta el atajo — porque cada posición generada por el patrón
 sigue evaluándose con `RulesEngine.evaluate_placement` completo antes
 de aceptarse.
+"""
+
+_PATTERN_MAX_SKIPS = 4
+"""Máximo de posiciones consecutivas de la rejilla que se saltan por estar bloqueadas
+(colisión con otro SKU, fuera de límites, etc.) antes de agotar el cursor — fase OPT-19.
+
+Sin este límite (valor=0), un único fallo agotaba el cursor para siempre,
+forzando búsqueda completa en TODAS las instancias restantes del SKU.
+Con round-robin de N SKUs, el cursor fallaba casi inmediatamente porque
+el SKU vecino ocupaba la siguiente posición de la rejilla. Un valor de 4
+permite saltar hasta 4 posiciones bloqueadas por llamada, manteniendo el
+beneficio del patrón incluso cuando otros SKUs fragmentan la rejilla.
 """
 
 
@@ -94,7 +108,26 @@ class GreedyExtremePointStrategy:
         self._emit_progress(progress_callback, state, total, None, start_time)
 
         stop_reason: UnpackedReason | None = None
-        pending_after_round_one: list[PhysicalLoadInstance] = []
+        _PendingItem = tuple[PhysicalLoadInstance, float, float, float, list[tuple[float, float, float]]]
+        pending_after_round_one: list[_PendingItem] = []
+        pending_after_round_two: list[_PendingItem] = []
+
+        # "Layer sealing" XY: cuando el algoritmo termina todas las instancias
+        # de un SKU, el siguiente SKU no puede usar el hueco lateral (eje Y)
+        # que queda entre el footprint del SKU anterior y la pared del
+        # contenedor si ese hueco está por debajo del techo del SKU anterior
+        # Y dentro de su footprint X. La condición correcta permite:
+        #   · y < seal_max_y  → dentro del footprint Y (cualquier z)
+        #   · x >= seal_max_x → gap de fondo (más allá de la última columna X)
+        #   · z >= min_z      → por encima del techo (cualquier X e Y)
+        # Solo bloquea: hueco Y (y >= seal_max_y) AND bajo el techo (z < min_z)
+        # AND dentro de X (x < seal_max_x) — exactamente la "pared lateral".
+        _current_sku_id: UUID | None = None
+        _current_sku_start_count: int = 0
+        _layer_floor_z: float = 0.0
+        _seal_max_x: float = 0.0
+        _seal_max_y: float = 0.0
+        _seal_history: list[tuple[float, float, float]] = []  # (seal_max_y, seal_max_x, floor_z)
 
         # Ronda 1: cada instancia se coloca usando únicamente la
         # orientación preferida de su Load Unit (ver
@@ -116,6 +149,21 @@ class GreedyExtremePointStrategy:
                 stop_reason = UnpackedReason.ITERATION_LIMIT_REACHED
                 break
 
+            # Detectar transición de SKU: actualizar parámetros de sealing.
+            if instance.load_unit.id != _current_sku_id:
+                if _current_sku_id is not None:
+                    prev = state.placements[_current_sku_start_count:]
+                    if prev:
+                        # Guardar el sello actual en el historial antes de sobreescribir
+                        # (sellado N-a-N: protege todos los SKUs previos, no solo el último)
+                        if _layer_floor_z > 0.0:
+                            _seal_history.append((_seal_max_y, _seal_max_x, _layer_floor_z))
+                        _layer_floor_z = max(p.max_z_cm for p in prev)
+                        _seal_max_x = max(p.max_x_cm for p in prev)
+                        _seal_max_y = max(p.max_y_cm for p in prev)
+                _current_sku_start_count = len(state.placements)
+                _current_sku_id = instance.load_unit.id
+
             placed = self._try_place_instance(
                 instance,
                 request,
@@ -127,9 +175,15 @@ class GreedyExtremePointStrategy:
                 pattern_cursors=pattern_cursors,
                 strict_exhausted_at=strict_exhausted_at,
                 full_exhausted_at=full_exhausted_at,
+                min_z=_layer_floor_z,
+                seal_max_x=_seal_max_x,
+                seal_max_y=_seal_max_y,
+                seal_history=_seal_history,
             )
             if not placed:
-                pending_after_round_one.append(instance)
+                pending_after_round_one.append(
+                    (instance, _layer_floor_z, _seal_max_x, _seal_max_y, list(_seal_history))
+                )
             state.iteration_count += 1
             self._emit_progress(progress_callback, state, total, instance.load_unit.sku, start_time)
 
@@ -144,7 +198,7 @@ class GreedyExtremePointStrategy:
         # instancias pendientes se marcan igual que antes en
         # `_mark_remaining`.
         if stop_reason is None:
-            for instance in pending_after_round_one:
+            for instance, min_z, seal_max_x, seal_max_y, seal_history in pending_after_round_one:
                 if cancellation_token.is_cancelled():
                     stop_reason = UnpackedReason.CANCELLED
                     break
@@ -158,7 +212,8 @@ class GreedyExtremePointStrategy:
                     stop_reason = UnpackedReason.ITERATION_LIMIT_REACHED
                     break
 
-                self._try_place_instance(
+                has_gap_fill = bool(instance.load_unit.gap_fill_orientation_codes)
+                placed = self._try_place_instance(
                     instance,
                     request,
                     rules_engine,
@@ -167,6 +222,65 @@ class GreedyExtremePointStrategy:
                     preferred_orientation_cache,
                     strict=False,
                     full_exhausted_at=full_exhausted_at,
+                    min_z=min_z,
+                    seal_max_x=seal_max_x,
+                    seal_max_y=seal_max_y,
+                    seal_history=seal_history,
+                    reject_if_fails=not has_gap_fill,
+                )
+                if not placed and has_gap_fill:
+                    pending_after_round_two.append(
+                        (instance, min_z, seal_max_x, seal_max_y, seal_history)
+                    )
+                state.iteration_count += 1
+                self._emit_progress(
+                    progress_callback, state, total, instance.load_unit.sku, start_time
+                )
+
+        # Ronda 3: orientaciones "de pie" (gap_fill_orientation_codes) para items
+        # que no pudieron colocarse en las rondas 1 y 2 con orientaciones acostadas.
+        # Se usan cachés separados para no contaminar las rondas anteriores.
+        if stop_reason is None and pending_after_round_two:
+            gap_orientation_cache: dict[object, tuple[Orientation, ...]] = {}
+            gap_preferred_cache: dict[UUID, tuple[int, Orientation]] = {}
+            gap_exhausted_at: dict[UUID, tuple[int, UnpackedReason]] = {}
+            for instance, min_z, seal_max_x, seal_max_y, seal_history in pending_after_round_two:
+                if cancellation_token.is_cancelled():
+                    stop_reason = UnpackedReason.CANCELLED
+                    break
+                if deadline is not None and time.monotonic() >= deadline:
+                    stop_reason = UnpackedReason.TIME_LIMIT_REACHED
+                    break
+                if (
+                    request.max_iterations is not None
+                    and state.iteration_count >= request.max_iterations
+                ):
+                    stop_reason = UnpackedReason.ITERATION_LIMIT_REACHED
+                    break
+
+                gap_codes = instance.load_unit.gap_fill_orientation_codes
+                gap_unit = replace(
+                    instance.load_unit,
+                    allowed_orientation_codes=gap_codes,
+                    is_extinguisher=False,
+                    extinguisher_agent=ExtinguisherAgent.NOT_APPLICABLE,
+                    extinguisher_nominal_kg=None,
+                )
+                gap_instance = replace(instance, load_unit=gap_unit)
+                self._try_place_instance(
+                    gap_instance,
+                    request,
+                    rules_engine,
+                    state,
+                    gap_orientation_cache,
+                    gap_preferred_cache,
+                    strict=False,
+                    full_exhausted_at=gap_exhausted_at,
+                    min_z=min_z,
+                    seal_max_x=seal_max_x,
+                    seal_max_y=seal_max_y,
+                    seal_history=seal_history,
+                    reject_if_fails=True,
                 )
                 state.iteration_count += 1
                 self._emit_progress(
@@ -212,6 +326,11 @@ class GreedyExtremePointStrategy:
         pattern_cursors: dict[UUID, PatternCursor] | None = None,
         strict_exhausted_at: dict[UUID, int] | None = None,
         full_exhausted_at: dict[UUID, tuple[int, UnpackedReason]] | None = None,
+        min_z: float = 0.0,
+        seal_max_x: float = 0.0,
+        seal_max_y: float = 0.0,
+        seal_history: list[tuple[float, float, float]] | None = None,
+        reject_if_fails: bool = True,
     ) -> bool:
         """Intenta colocar `instance`; devuelve `True` si se aceptó un placement.
 
@@ -276,13 +395,20 @@ class GreedyExtremePointStrategy:
         if strict and pattern_cursors is not None:
             cursor = pattern_cursors.get(load_unit.id)
             if cursor is not None and not cursor.exhausted:
-                placed = self._try_pattern_position(instance, request, rules_engine, state, cursor)
-                if placed:
-                    return True
-                cursor.exhausted = True
-                # No se pierde esta instancia: cae a la búsqueda general
-                # de más abajo, exactamente como si nunca hubiera existido
-                # un patrón para este LoadUnit.
+                # OPT-19: saltar hasta _PATTERN_MAX_SKIPS posiciones bloqueadas
+                # antes de agotar el cursor, en lugar de agotarlo al primer fallo.
+                for _ in range(_PATTERN_MAX_SKIPS + 1):
+                    result = self._try_pattern_position(
+                        instance, request, rules_engine, state, cursor
+                    )
+                    if result is True:
+                        return True
+                    if result is None:  # rejilla agotada
+                        cursor.exhausted = True
+                        break
+                else:
+                    cursor.exhausted = True
+                # No se pierde esta instancia: cae a la búsqueda general.
 
         if (
             strict
@@ -294,14 +420,15 @@ class GreedyExtremePointStrategy:
         if not strict and full_exhausted_at is not None:
             cached_full = full_exhausted_at.get(load_unit.id)
             if cached_full is not None and cached_full[0] == len(state.placements):
-                state.reject_instance(
-                    instance,
-                    cached_full[1].value,
-                    f"'{load_unit.sku}' no encontró ninguna posición/orientación válida: "
-                    "mismo resultado que la instancia anterior del mismo SKU, el estado "
-                    "del contenedor no cambió desde entonces (saturación detectada, fase "
-                    "OPT-18).",
-                )
+                if reject_if_fails:
+                    state.reject_instance(
+                        instance,
+                        cached_full[1].value,
+                        f"'{load_unit.sku}' no encontró ninguna posición/orientación válida: "
+                        "mismo resultado que la instancia anterior del mismo SKU, el estado "
+                        "del contenedor no cambió desde entonces (saturación detectada, fase "
+                        "OPT-18).",
+                    )
                 return False
 
         if load_unit.id not in orientation_cache:
@@ -337,8 +464,25 @@ class GreedyExtremePointStrategy:
             return False
 
         if load_unit.id not in preferred_orientation_cache:
+            # Para extintores: forzar colocación longitudinal (eje largo del
+            # extintor sobre el eje X del contenedor). El deduplicador geométrico
+            # puede poner una orientación transversal en el índice 0; al empatar
+            # en tile-count, ganaría sin este filtro. Se usa la dimensión máxima
+            # como eje del cilindro (L, W o H según la definición en catálogo):
+            # p. ej. para 19.5×19.5×58.5 el max=58.5 (H) va sobre X → hwl_xyz;
+            # para una unidad con L=60,W=H=20, el max=60 (L) va sobre X → lwh_xyz.
+            # Si ninguna orientación longitudinal es factible, se usa el conjunto
+            # completo como red de seguridad.
+            if load_unit.is_extinguisher:
+                max_dim = max(load_unit.dimensions.as_tuple())
+                long_options = [
+                    (idx, o) for idx, o in feasible_orientations if o.x_size_cm == max_dim
+                ]
+                pref_candidates = long_options if long_options else feasible_orientations
+            else:
+                pref_candidates = feasible_orientations
             preferred_orientation_cache[load_unit.id] = select_preferred_orientation(
-                feasible_orientations, request.loading_space
+                pref_candidates, request.loading_space
             )
         preferred_index, preferred_orientation = preferred_orientation_cache[load_unit.id]
 
@@ -348,7 +492,35 @@ class GreedyExtremePointStrategy:
         positions, pruned_violation_codes = state.cached_pruned_candidate_positions(
             request.loading_space
         )
-
+        # Sealing XY: bloquea solo el hueco lateral Y (y >= seal_max_y) que
+        # también esté por debajo del techo (z < min_z) y dentro del footprint X
+        # (x < seal_max_x). Permite: dentro del footprint Y (any z), por encima
+        # del techo (any XY) y en el gap de fondo X (any Y).
+        # Las posiciones del gap X que no cumplen las otras dos condiciones se
+        # reordenan al final para que el algoritmo prefiera apilar encima de la
+        # carga anterior (z >= min_z ó y < seal_max_y) antes de usar el hueco X.
+        if min_z > 0.0:
+            primary: list[object] = []
+            secondary: list[object] = []
+            active_history = [
+                (sy, sx, sz) for sy, sx, sz in (seal_history or []) if sz > 0.0
+            ]
+            for p in positions:
+                # Sellado N-a-N: bloquear posiciones que caen en el hueco lateral
+                # de cualquier SKU anterior (no solo el más reciente).
+                if any(
+                    p.y_cm >= sy and p.z_cm < sz and p.x_cm < sx
+                    for sy, sx, sz in active_history
+                ):
+                    continue
+                in_footprint_y = p.y_cm < seal_max_y
+                above_ceiling = p.z_cm >= min_z
+                in_x_gap = p.x_cm >= seal_max_x
+                if in_footprint_y or above_ceiling:
+                    primary.append(p)
+                elif in_x_gap:
+                    secondary.append(p)
+            positions = tuple(primary) + tuple(secondary)
         violation_codes_seen: set[str] = set(pruned_violation_codes)
         orientation_options = (
             ((preferred_index, preferred_orientation),) if strict else tuple(feasible_orientations)
@@ -375,9 +547,11 @@ class GreedyExtremePointStrategy:
             if (
                 strict
                 and pattern_cursors is not None
-                and load_unit.id not in pattern_cursors
                 and load_unit.quantity >= _PATTERN_MIN_QUANTITY
             ):
+                # OPT-20: reiniciar siempre el cursor desde la nueva posición
+                # (incluso si ya existía uno agotado), para recuperar el patrón
+                # después de que la búsqueda completa encontró un nuevo ancla.
                 pattern_cursors[load_unit.id] = self._start_pattern_cursor(
                     request, preferred_index, preferred_orientation, best.position
                 )
@@ -391,12 +565,13 @@ class GreedyExtremePointStrategy:
         reason = self._classify_unpacked_reason(violation_codes_seen)
         if full_exhausted_at is not None:
             full_exhausted_at[load_unit.id] = (len(state.placements), reason)
-        state.reject_instance(
-            instance,
-            reason.value,
-            f"'{load_unit.sku}' no encontró ninguna posición/orientación válida tras "
-            f"{generation_index} candidato(s) evaluado(s).",
-        )
+        if reject_if_fails:
+            state.reject_instance(
+                instance,
+                reason.value,
+                f"'{load_unit.sku}' no encontró ninguna posición/orientación válida tras "
+                f"{generation_index} candidato(s) evaluado(s).",
+            )
         return False
 
     @staticmethod
@@ -436,19 +611,19 @@ class GreedyExtremePointStrategy:
         rules_engine: RulesEngine,
         state: PackingState,
         cursor: PatternCursor,
-    ) -> bool:
+    ) -> bool | None:
         """Prueba la siguiente posición del patrón de `cursor` para `instance`.
 
-        Un único candidato, evaluado con `RulesEngine.evaluate_placement`
-        completo (colisión, soporte, apilamiento, peso, fragilidad,
-        orientación, extintor) — nunca se salta ninguna regla. `devuelve
-        True` si se aceptó; `False` si la posición no era válida (o si el
-        patrón ya no tiene más posiciones dentro de límites), sin haber
-        rechazado `instance` — quien llama decide qué hacer a continuación.
+        Devuelve `True` si se aceptó el candidato; `False` si la posición
+        no era válida (colisión, soporte, apilamiento, etc.) — quien llama
+        puede reintentar con la siguiente posición de la rejilla; `None` si
+        el cursor ya no tiene más posiciones dentro de los límites del
+        espacio — quien llama debe marcar el cursor como agotado.
+        Nunca rechaza `instance`: esa decisión queda en manos de quien llama.
         """
         position = cursor.next_position()
         if position is None:
-            return False
+            return None
 
         candidate = build_candidate(
             instance=instance,

@@ -12,29 +12,38 @@ from tests.optimization._helpers import DEFAULT_SPACE, make_individual_extinguis
 _ENGINE = RulesEngine()
 
 
-def test_individual_extinguisher_is_prioritized() -> None:
-    normal = make_load_unit(sku="NORMAL", quantity=1)
-    extinguisher = make_individual_extinguisher(sku="EXT", nominal_kg=5.0, quantity=1)
+def test_individual_extinguisher_with_larger_max_dim_goes_first() -> None:
+    # Regla nueva: ordenamiento por volumen total. Si volumen es igual, desempata
+    # la dimensión máxima. El extintor (max=60) supera a la caja normal (max=40).
+    normal = make_load_unit(sku="NORMAL", quantity=1)      # 40×30×20 = 24 000 cm³
+    extinguisher = make_individual_extinguisher(sku="EXT", nominal_kg=5.0, quantity=1)  # 60×20×20 = 24 000 cm³
     instances = expand_load_units((normal, extinguisher))
     ordered = order_instances(instances, DEFAULT_SPACE, _ENGINE)
     assert ordered[0].load_unit.sku == "EXT"
 
 
-def test_single_orientation_is_prioritized_over_multi() -> None:
+def test_orientation_count_no_longer_affects_order() -> None:
+    # Las restricciones de orientación ya NO alteran la prioridad de carga.
+    # Con igual volumen y dimensiones, el desempate es alfabético (SKU).
     single = make_load_unit(
         sku="SINGLE", allowed_orientation_codes=(OrientationCode.LWH_XYZ,), quantity=1
     )
     multi = make_load_unit(sku="MULTI", quantity=1)
     instances = expand_load_units((multi, single))
     ordered = order_instances(instances, DEFAULT_SPACE, _ENGINE)
-    assert ordered[0].load_unit.sku == "SINGLE"
+    # "MULTI" < "SINGLE" alfabéticamente → MULTI primero (volumen y dims iguales)
+    assert ordered[0].load_unit.sku == "MULTI"
 
 
-def test_non_stackable_is_prioritized() -> None:
+def test_non_stackable_not_prioritized_by_stack_count() -> None:
+    # max_stack_count ya NO altera la prioridad de carga.
+    # Con igual volumen y dims, el desempate es alfabético (SKU).
     non_stackable = make_load_unit(sku="NS", max_stack_count=1, quantity=1)
     stackable = make_load_unit(sku="ST", max_stack_count=5, quantity=1)
     instances = expand_load_units((stackable, non_stackable))
     ordered = order_instances(instances, DEFAULT_SPACE, _ENGINE)
+    # "NS" < "ST" alfabéticamente → NS primero (coincide con el resultado anterior
+    # pero ahora por razón diferente: SKU, no restricción de apilamiento)
     assert ordered[0].load_unit.sku == "NS"
 
 

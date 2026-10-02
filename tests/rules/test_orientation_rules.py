@@ -68,18 +68,21 @@ def test_no_duplicates_even_with_cube() -> None:
     assert len(orientations) == 1
 
 
-def test_individual_large_extinguisher_only_allows_two_orientations() -> None:
-    # Tres ejes distintos para que LWH_XYZ y LHW_XYZ no coincidan geométricamente.
-    # Las 6 declaradas explícitamente para probar el filtrado de la propia regla
-    # de horizontalidad, no el valor por defecto reducido de la fase OPT-17.
+def test_individual_large_extinguisher_only_allows_horizontal_orientations() -> None:
+    # Tres ejes distintos (60×15×20) para que ninguna orientación coincida
+    # geométricamente → las 6 son únicas. Las 2 orientaciones verticales
+    # (eje largo L=60 sobre Z: hwl_xyz y whl_xyz) se rechazan; las 4
+    # horizontales (L sobre X o sobre Y) se mantienen.
     unit = make_individual_extinguisher(
         nominal_kg=5.0,
         dimensions=Dimensions3D(60.0, 15.0, 20.0),
         allowed_orientation_codes=tuple(OrientationCode),
     )
     orientations = allowed_orientations_for_load_unit(unit, DEFAULT_SPACE)
-    assert len(orientations) == 2
-    assert all(o.code in (OrientationCode.LWH_XYZ, OrientationCode.LHW_XYZ) for o in orientations)
+    assert len(orientations) == 4
+    # Ninguna orientación permitida tiene el eje largo (L=60) sobre Z.
+    rejected_vertical = {OrientationCode.HWL_XYZ, OrientationCode.WHL_XYZ}
+    assert all(o.code not in rejected_vertical for o in orientations)
 
 
 def test_grouped_extinguisher_keeps_all_declared_orientations() -> None:
