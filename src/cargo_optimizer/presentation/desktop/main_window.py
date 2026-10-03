@@ -2058,7 +2058,7 @@ class MainWindow(QMainWindow):
             return PackingRequest(
                 loading_space=loading_space,
                 load_units=load_units,
-                minimum_support_ratio=0.5,
+                minimum_support_ratio=0.3,
             )
         except PackingRequestValidationError as exc:
             self._show_warning("Solicitud de optimización inválida", str(exc))
