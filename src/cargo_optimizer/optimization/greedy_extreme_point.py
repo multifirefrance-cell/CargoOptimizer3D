@@ -496,11 +496,17 @@ class GreedyExtremePointStrategy:
         # también esté por debajo del techo (z < min_z) y dentro del footprint X
         # (x < seal_max_x). Permite: dentro del footprint Y (any z), por encima
         # del techo (any XY) y en el gap de fondo X (any Y).
-        # Las posiciones del gap X que no cumplen las otras dos condiciones se
-        # reordenan al final para que el algoritmo prefiera apilar encima de la
-        # carga anterior (z >= min_z ó y < seal_max_y) antes de usar el hueco X.
+        # Orden de prioridad:
+        #   1. above_ceiling (z >= min_z): el SKU siguiente empieza SOBRE el bloque
+        #      anterior → el cursor de patrón ancla en la capa plana superior y genera
+        #      capas horizontales en vez de columnas verticales ("muros").
+        #   2. in_footprint_y (z < min_z): huecos dentro del footprint Y del SKU
+        #      anterior (p.ej. última capa incompleta) — se llenan DESPUÉS de agotar
+        #      las posiciones sobre el techo.
+        #   3. in_x_gap (x >= seal_max_x): hueco lateral X al fondo del contenedor.
         if min_z > 0.0:
-            primary: list[object] = []
+            primary_above: list[object] = []
+            primary_below: list[object] = []
             secondary: list[object] = []
             active_history = [
                 (sy, sx, sz) for sy, sx, sz in (seal_history or []) if sz > 0.0
@@ -516,11 +522,13 @@ class GreedyExtremePointStrategy:
                 in_footprint_y = p.y_cm < seal_max_y
                 above_ceiling = p.z_cm >= min_z
                 in_x_gap = p.x_cm >= seal_max_x
-                if in_footprint_y or above_ceiling:
-                    primary.append(p)
+                if above_ceiling:
+                    primary_above.append(p)
+                elif in_footprint_y:
+                    primary_below.append(p)
                 elif in_x_gap:
                     secondary.append(p)
-            positions = tuple(primary) + tuple(secondary)
+            positions = tuple(primary_above) + tuple(primary_below) + tuple(secondary)
         violation_codes_seen: set[str] = set(pruned_violation_codes)
         orientation_options = (
             ((preferred_index, preferred_orientation),) if strict else tuple(feasible_orientations)
