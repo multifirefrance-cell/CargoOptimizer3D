@@ -31,6 +31,10 @@ from cargo_optimizer.presentation.desktop.viewer.constants import (
 
 _HEX_COLOR_PATTERN = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
+# Valor centinela que `LoadUnit` asigna por defecto cuando no se ha elegido color:
+# se trata como "sin color configurado" y se sustituye por la paleta de respaldo.
+_DEFAULT_NO_COLOR = "#cccccc"
+
 
 class ColorRegistry:
     """Resuelve el color de una caja, y los colores de tema (selección, bordes)."""
@@ -45,16 +49,50 @@ class ColorRegistry:
         return value is not None and bool(_HEX_COLOR_PATTERN.match(value))
 
     def resolve_color(self, color_hex: str | None, fallback_key: str) -> str:
-        """`color_hex` si es válido; si no, un color determinista derivado de `fallback_key`."""
-        if self.is_valid_hex_color(color_hex):
-            assert color_hex is not None  # narrowing para mypy; ya lo comprueba is_valid_hex_color
-            return color_hex
+        """`color_hex` si es válido y no es el gris por defecto; si no, paleta por `fallback_key`."""
+        if self.is_valid_hex_color(color_hex) and color_hex.lower() != _DEFAULT_NO_COLOR:  # type: ignore[union-attr]
+            return color_hex  # type: ignore[return-value]
         return self.fallback_color_for(fallback_key)
 
     def fallback_color_for(self, key: str) -> str:
         """Color determinista para `key` (mismo `key` -> mismo color, entre ejecuciones)."""
         index = zlib.crc32(key.encode("utf-8")) % len(self._palette)
         return self._palette[index]
+
+    def assign_unique_palette_colors(
+        self, sku_color_map: dict[str, str | None]
+    ) -> dict[str, str]:
+        """Asigna un color único a cada SKU, garantizando que no haya colisiones.
+
+        SKUs con `color_hex` explícito y válido (distinto del gris centinela) se
+        respetan tal cual. Los demás reciben el color de la paleta de repuesto
+        empezando desde su índice preferido (crc32 % N) y avanzando si ese slot
+        ya está ocupado. El orden de procesamiento es alfabético para que la
+        asignación sea estable entre ejecuciones aunque varíe el número de SKUs.
+        """
+        result: dict[str, str] = {}
+        used_lowers: set[str] = set()
+
+        # 1ª pasada: colores explícitos
+        for sku, color in sku_color_map.items():
+            if self.is_valid_hex_color(color) and color.lower() != _DEFAULT_NO_COLOR:  # type: ignore[union-attr]
+                result[sku] = color  # type: ignore[assignment]
+                used_lowers.add(color.lower())
+
+        # 2ª pasada: paleta sin colisión para los que no tienen color explícito
+        for sku in sorted(sku for sku in sku_color_map if sku not in result):
+            preferred = zlib.crc32(sku.encode("utf-8")) % len(self._palette)
+            for offset in range(len(self._palette)):
+                candidate = self._palette[(preferred + offset) % len(self._palette)]
+                if candidate.lower() not in used_lowers:
+                    result[sku] = candidate
+                    used_lowers.add(candidate.lower())
+                    break
+            else:
+                # Paleta agotada (más SKUs que colores): reutiliza el preferido
+                result[sku] = self._palette[preferred]
+
+        return result
 
     @staticmethod
     def selection_color(theme: str = THEME_LIGHT) -> str:

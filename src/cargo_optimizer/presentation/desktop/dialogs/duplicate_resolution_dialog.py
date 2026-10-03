@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QPushButton,
     QTableWidget,
@@ -46,8 +47,15 @@ class DuplicateResolutionDialog(QDialog):
 
         self._table = QTableWidget(len(existing_units), 3, self)
         self._table.setHorizontalHeaderLabels(["SKU", "Nombre", "Acción"])
-        self._table.horizontalHeader().setStretchLastSection(True)
+        self._table.setAlternatingRowColors(False)
         self._table.verticalHeader().setVisible(False)
+        _dh = self._table.horizontalHeader()
+        _dh.setStretchLastSection(False)
+        _dh.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        _dh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        _dh.setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)
+        _dh.resizeSection(0, 90)
+        _dh.resizeSection(2, 120)
         self._action_combos: list[QComboBox] = []
         for row, unit in enumerate(existing_units):
             self._table.setItem(row, 0, QTableWidgetItem(unit.sku))
@@ -65,6 +73,9 @@ class DuplicateResolutionDialog(QDialog):
         button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
         )
+        ok_btn = button_box.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_btn is not None:
+            ok_btn.setProperty("class", "primary")
         button_box.accepted.connect(self._on_accept)
         button_box.rejected.connect(self.reject)
 

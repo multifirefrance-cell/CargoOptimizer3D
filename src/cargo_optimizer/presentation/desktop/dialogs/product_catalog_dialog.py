@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QDialog,
+    QHeaderView,
     QHBoxLayout,
     QInputDialog,
     QLineEdit,
@@ -56,6 +57,15 @@ from cargo_optimizer.presentation.desktop.dialogs.catalog_product_editor_dialog 
 )
 from cargo_optimizer.presentation.desktop.drag_drop import first_excel_path, has_excel_url
 from cargo_optimizer.presentation.desktop.models.product_catalog_table_model import (
+    COL_ACTIVE,
+    COL_DIMENSIONS,
+    COL_EXTINGUISHER,
+    COL_EXTINGUISHER_NOMINAL,
+    COL_MAX_STACK,
+    COL_NAME,
+    COL_PACKAGE_TYPE,
+    COL_SKU,
+    COL_WEIGHT,
     ProductCatalogTableModel,
 )
 
@@ -69,6 +79,7 @@ class ProductCatalogDialog(QDialog):
         *,
         repository: ProductCatalogRepository,
         on_excel_dropped: Callable[[Path], None] | None = None,
+        on_sync_induprox: Callable[[], int] | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Catálogo de productos")
@@ -76,6 +87,7 @@ class ProductCatalogDialog(QDialog):
         self._repository = repository
         self._selected_units_to_add: tuple[LoadUnit, ...] = ()
         self._on_excel_dropped = on_excel_dropped
+        self._on_sync_induprox = on_sync_induprox
         self.setAcceptDrops(on_excel_dropped is not None)
 
         self._search_edit = QLineEdit(self)
@@ -94,17 +106,46 @@ class ProductCatalogDialog(QDialog):
         self.table_view.setObjectName("productCatalogTableView")
         self.table_view.setModel(self.model)
         self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table_view.setAlternatingRowColors(True)
-        self.table_view.horizontalHeader().setStretchLastSection(True)
+        self.table_view.setAlternatingRowColors(False)
         self.table_view.verticalHeader().setVisible(False)
+        self.table_view.verticalHeader().setDefaultSectionSize(22)
         self.table_view.doubleClicked.connect(self._on_row_double_clicked)
+        _ch = self.table_view.horizontalHeader()
+        _ch.setStretchLastSection(False)
+        _ch.setSectionResizeMode(COL_SKU, QHeaderView.ResizeMode.Interactive)
+        _ch.setSectionResizeMode(COL_NAME, QHeaderView.ResizeMode.Stretch)
+        _ch.setSectionResizeMode(COL_DIMENSIONS, QHeaderView.ResizeMode.Interactive)
+        _ch.setSectionResizeMode(COL_WEIGHT, QHeaderView.ResizeMode.Interactive)
+        _ch.setSectionResizeMode(COL_PACKAGE_TYPE, QHeaderView.ResizeMode.Interactive)
+        _ch.setSectionResizeMode(COL_EXTINGUISHER, QHeaderView.ResizeMode.Interactive)
+        _ch.setSectionResizeMode(COL_EXTINGUISHER_NOMINAL, QHeaderView.ResizeMode.Interactive)
+        _ch.setSectionResizeMode(COL_MAX_STACK, QHeaderView.ResizeMode.Interactive)
+        _ch.setSectionResizeMode(COL_ACTIVE, QHeaderView.ResizeMode.Interactive)
+        _ch.resizeSection(COL_SKU, 90)
+        _ch.resizeSection(COL_DIMENSIONS, 140)
+        _ch.resizeSection(COL_WEIGHT, 75)
+        _ch.resizeSection(COL_PACKAGE_TYPE, 100)
+        _ch.resizeSection(COL_EXTINGUISHER, 65)
+        _ch.resizeSection(COL_EXTINGUISHER_NOMINAL, 110)
+        _ch.resizeSection(COL_MAX_STACK, 85)
+        _ch.resizeSection(COL_ACTIVE, 80)
 
         self._add_button = QPushButton("Nuevo…", self)
+        self._add_button.setToolTip("Crear un nuevo producto en el catálogo")
         self._edit_button = QPushButton("Editar…", self)
+        self._edit_button.setToolTip("Editar el producto seleccionado")
         self._duplicate_button = QPushButton("Duplicar…", self)
+        self._duplicate_button.setToolTip("Crear una copia del producto seleccionado con un SKU nuevo")
         self._archive_button = QPushButton("Archivar", self)
+        self._archive_button.setToolTip("Ocultar el producto del catálogo (reversible con Restaurar)")
         self._restore_button = QPushButton("Restaurar", self)
+        self._restore_button.setToolTip("Reactivar un producto archivado")
+        self._sync_induprox_button = QPushButton("Sincronizar INDUPROX", self)
+        self._sync_induprox_button.setToolTip("Agrega al catálogo los SKUs INDUPROX que aún no estén presentes")
+        self._sync_induprox_button.setVisible(on_sync_induprox is not None)
         self._add_to_project_button = QPushButton("Añadir seleccionados al proyecto", self)
+        self._add_to_project_button.setToolTip("Agregar los productos seleccionados a la carga actual")
+        self._add_to_project_button.setProperty("class", "primary")
         self._close_button = QPushButton("Cerrar", self)
 
         self._add_button.clicked.connect(self._on_add)
@@ -112,6 +153,7 @@ class ProductCatalogDialog(QDialog):
         self._duplicate_button.clicked.connect(self._on_duplicate)
         self._archive_button.clicked.connect(self._on_archive)
         self._restore_button.clicked.connect(self._on_restore)
+        self._sync_induprox_button.clicked.connect(self._on_sync_induprox)
         self._add_to_project_button.clicked.connect(self._on_add_to_project)
         self._close_button.clicked.connect(self.reject)
 
@@ -130,6 +172,7 @@ class ProductCatalogDialog(QDialog):
             self._duplicate_button,
             self._archive_button,
             self._restore_button,
+            self._sync_induprox_button,
         ):
             buttons_layout.addWidget(button)
         buttons_layout.addStretch(1)
@@ -327,3 +370,17 @@ class ProductCatalogDialog(QDialog):
     def selected_units_to_add(self) -> tuple[LoadUnit, ...]:
         """Los `LoadUnit` elegidos al pulsar "Añadir al proyecto", o `()` si se canceló."""
         return self._selected_units_to_add
+
+    def _on_sync_induprox(self) -> None:
+        if self._on_sync_induprox is None:
+            return
+        changes = self._on_sync_induprox()
+        if changes == 0:
+            QMessageBox.information(self, "Sin cambios", "El catálogo ya está sincronizado con los SKUs INDUPROX.")
+        else:
+            QMessageBox.information(
+                self, "Sincronización completada",
+                f"Catálogo actualizado: {changes} cambio(s) aplicados.\n"
+                "Los productos no INDUPROX fueron archivados y los SKUs faltantes fueron agregados."
+            )
+        self._refresh()

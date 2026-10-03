@@ -78,6 +78,9 @@ class MultiSpaceSetupDialog(QDialog):
         )
         self._button_box.accepted.connect(self._on_accept)
         self._button_box.rejected.connect(self.reject)
+        ok_btn = self._button_box.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_btn is not None:
+            ok_btn.setProperty("class", "primary")
 
         self._build_layout()
 

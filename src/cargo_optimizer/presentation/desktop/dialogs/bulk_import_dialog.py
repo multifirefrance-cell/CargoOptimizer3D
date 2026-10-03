@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QListWidget,
     QMessageBox,
@@ -63,13 +64,20 @@ class BulkImportDialog(QDialog):
         self._choose_button = QPushButton("Seleccionar archivos…", self)
         self._choose_button.clicked.connect(self._on_choose_files)
         self._import_button = QPushButton("Importar todos", self)
+        self._import_button.setProperty("class", "primary")
         self._import_button.clicked.connect(self._on_import_all)
         self._import_button.setEnabled(False)
 
         self._summary_table = QTableWidget(0, len(_SUMMARY_COLUMNS), self)
         self._summary_table.setHorizontalHeaderLabels(list(_SUMMARY_COLUMNS))
-        self._summary_table.horizontalHeader().setStretchLastSection(True)
+        self._summary_table.setAlternatingRowColors(False)
         self._summary_table.verticalHeader().setVisible(False)
+        _sh = self._summary_table.horizontalHeader()
+        _sh.setStretchLastSection(False)
+        _sh.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        for _col in range(1, len(_SUMMARY_COLUMNS)):
+            _sh.setSectionResizeMode(_col, QHeaderView.ResizeMode.Interactive)
+            _sh.resizeSection(_col, 85)
 
         self._save_report_button = QPushButton("Guardar informe como Excel…", self)
         self._save_report_button.clicked.connect(self._on_save_report)

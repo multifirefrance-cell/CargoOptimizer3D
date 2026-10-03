@@ -20,6 +20,9 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, QPersisten
 from PySide6.QtGui import QColor
 
 from cargo_optimizer.domain.dimensions import Dimensions3D
+from cargo_optimizer.presentation.desktop.viewer.color_registry import ColorRegistry
+
+_color_registry = ColorRegistry()
 from cargo_optimizer.domain.enums import ExtinguisherAgent, PackageType
 from cargo_optimizer.domain.exceptions import DomainValidationError
 from cargo_optimizer.domain.load_unit import LoadUnit
@@ -43,7 +46,7 @@ COL_WEIGHT_TOTAL = 14
 _HEADERS = (
     "SKU",
     "Nombre",
-    "Cantidad",
+    "QTY",
     "Largo (cm)",
     "Ancho (cm)",
     "Alto (cm)",
@@ -55,7 +58,7 @@ _HEADERS = (
     "Peso nominal (kg)",
     "Fragilidad",
     "Color",
-    "Peso total (kg)",
+    "Peso (kg)",
 )
 
 _CHECKBOX_COLUMNS = frozenset({COL_EXTINGUISHER, COL_FRAGILE})
@@ -84,6 +87,12 @@ class ProductTableModel(QAbstractTableModel):
     ) -> None:
         super().__init__(parent)
         self._load_units: list[LoadUnit] = list(load_units) if load_units else []
+        self._color_cache: dict[str, str] = {}
+        self._rebuild_color_cache()
+
+    def _rebuild_color_cache(self) -> None:
+        sku_color_map = {u.sku: u.color_hex for u in self._load_units}
+        self._color_cache = _color_registry.assign_unique_palette_colors(sku_color_map)
 
     def load_units(self) -> tuple[LoadUnit, ...]:
         return tuple(self._load_units)
@@ -92,6 +101,7 @@ class ProductTableModel(QAbstractTableModel):
         """Reemplaza toda la tabla (apertura de un proyecto guardado)."""
         self.beginResetModel()
         self._load_units = list(load_units)
+        self._rebuild_color_cache()
         self.endResetModel()
 
     def rowCount(  # noqa: N802
@@ -136,8 +146,15 @@ class ProductTableModel(QAbstractTableModel):
             checked = unit.is_extinguisher if column == COL_EXTINGUISHER else unit.fragile
             return Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
 
-        if role == Qt.ItemDataRole.DecorationRole and column == COL_COLOR:
-            return QColor(unit.color_hex)
+        if role == Qt.ItemDataRole.DecorationRole and column in (COL_SKU, COL_COLOR):
+            resolved = self._color_cache.get(unit.sku, "#CCCCCC")
+            return QColor(resolved)
+
+        if role == Qt.ItemDataRole.BackgroundRole:
+            resolved = self._color_cache.get(unit.sku, "#CCCCCC")
+            color = QColor(resolved)
+            color.setAlpha(50)
+            return color
 
         if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.EditRole):
             return self._display_value(unit, column)
@@ -208,6 +225,7 @@ class ProductTableModel(QAbstractTableModel):
             return False
 
         self._load_units[index.row()] = updated
+        self._rebuild_color_cache()
         self.dataChanged.emit(index, index, [role])
         return True
 
@@ -281,6 +299,7 @@ class ProductTableModel(QAbstractTableModel):
         row = len(self._load_units)
         self.beginInsertRows(QModelIndex(), row, row)
         self._load_units.append(new_unit)
+        self._rebuild_color_cache()
         self.endInsertRows()
 
     def set_unit_at(self, row: int, unit: LoadUnit) -> None:
@@ -288,6 +307,7 @@ class ProductTableModel(QAbstractTableModel):
         if not 0 <= row < len(self._load_units):
             return
         self._load_units[row] = unit
+        self._rebuild_color_cache()
         top_left = self.index(row, 0)
         bottom_right = self.index(row, self.columnCount() - 1)
         self.dataChanged.emit(top_left, bottom_right)
@@ -300,6 +320,7 @@ class ProductTableModel(QAbstractTableModel):
         last_row = first_row + len(units) - 1
         self.beginInsertRows(QModelIndex(), first_row, last_row)
         self._load_units.extend(units)
+        self._rebuild_color_cache()
         self.endInsertRows()
 
     def remove_rows_at(self, rows: list[int]) -> None:
@@ -309,6 +330,7 @@ class ProductTableModel(QAbstractTableModel):
                 self.beginRemoveRows(QModelIndex(), row, row)
                 del self._load_units[row]
                 self.endRemoveRows()
+        self._rebuild_color_cache()
 
     def sync_from_catalog(self, catalog_unit: LoadUnit) -> tuple[tuple[LoadUnit, LoadUnit], ...]:
         """Actualiza toda fila cuyo SKU (sin mayúsculas/espacios) coincida con `catalog_unit`.

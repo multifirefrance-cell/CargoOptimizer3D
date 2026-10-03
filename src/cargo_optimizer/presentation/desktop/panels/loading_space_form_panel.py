@@ -93,6 +93,13 @@ def loading_space_profiles() -> dict[str, LoadingSpaceProfilePreset]:
             container_40hq.door_position,
             container_40hq.max_weight_kg,
         ),
+        "Contenedor 20' Reefer": LoadingSpaceProfilePreset(
+            "Contenedor 20' frigorífico (perfil orientativo)",
+            LoadingSpaceCategory.CONTAINER,
+            Dimensions3D(560.0, 228.0, 220.0),
+            DoorPosition.REAR,
+            27400.0,
+        ),
         "Camión": LoadingSpaceProfilePreset(
             "Camión rígido (perfil orientativo)",
             LoadingSpaceCategory.TRUCK,
@@ -114,11 +121,32 @@ def loading_space_profiles() -> dict[str, LoadingSpaceProfilePreset]:
             DoorPosition.REAR,
             1500.0,
         ),
+        "Camión urbano": LoadingSpaceProfilePreset(
+            "Camión de reparto urbano (perfil orientativo)",
+            LoadingSpaceCategory.TRUCK,
+            Dimensions3D(350.0, 200.0, 210.0),
+            DoorPosition.REAR,
+            3500.0,
+        ),
         "Van": LoadingSpaceProfilePreset(
             "Van de carga (perfil orientativo)",
             LoadingSpaceCategory.VAN,
             Dimensions3D(300.0, 170.0, 170.0),
             DoorPosition.REAR,
+            1000.0,
+        ),
+        "Pallet EUR": LoadingSpaceProfilePreset(
+            "Pallet europeo EUR (perfil orientativo)",
+            LoadingSpaceCategory.OTHER,
+            Dimensions3D(120.0, 80.0, 170.0),
+            DoorPosition.UNRESTRICTED,
+            1000.0,
+        ),
+        "Pallet GMA": LoadingSpaceProfilePreset(
+            "Pallet americano GMA (perfil orientativo)",
+            LoadingSpaceCategory.OTHER,
+            Dimensions3D(122.0, 102.0, 150.0),
+            DoorPosition.UNRESTRICTED,
             1000.0,
         ),
         "Bodega": LoadingSpaceProfilePreset(

@@ -151,6 +151,7 @@ def load_unit_to_dict(value: LoadUnit) -> JSONDict:
         "max_stack_count": value.max_stack_count,
         "max_supported_weight_kg": value.max_supported_weight_kg,
         "allowed_orientation_codes": [code.value for code in value.allowed_orientation_codes],
+        "gap_fill_orientation_codes": [code.value for code in value.gap_fill_orientation_codes],
         "fragile": value.fragile,
         "is_extinguisher": value.is_extinguisher,
         "extinguisher_agent": value.extinguisher_agent.value,
@@ -176,6 +177,9 @@ def load_unit_from_dict(data: JSONDict) -> LoadUnit:
         max_supported_weight_kg=None if max_supported is None else float(max_supported),
         allowed_orientation_codes=tuple(
             OrientationCode(code) for code in data["allowed_orientation_codes"]
+        ),
+        gap_fill_orientation_codes=tuple(
+            OrientationCode(code) for code in data.get("gap_fill_orientation_codes", [])
         ),
         fragile=bool(data["fragile"]),
         is_extinguisher=bool(data["is_extinguisher"]),

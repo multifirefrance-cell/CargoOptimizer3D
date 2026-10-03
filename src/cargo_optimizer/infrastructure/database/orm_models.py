@@ -48,6 +48,7 @@ class ProductCatalogORM(Base):
     extinguisher_nominal_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     color_hex: Mapped[str] = mapped_column(String)
     notes: Mapped[str] = mapped_column(String)
+    loading_priority: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(_UTC_DATETIME)
     updated_at: Mapped[datetime] = mapped_column(_UTC_DATETIME)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

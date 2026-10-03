@@ -15,11 +15,13 @@ from collections.abc import Mapping
 from uuid import UUID
 
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
     QFormLayout,
     QGroupBox,
+    QHeaderView,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -32,10 +34,41 @@ from PySide6.QtWidgets import (
 from cargo_optimizer.application.codes import MultiSpaceStopReason
 from cargo_optimizer.application.models import MultiSpaceAssignmentResult
 from cargo_optimizer.domain.load_unit import LoadUnit
-from cargo_optimizer.presentation.desktop.models.unpacked_table_model import UnpackedUnitTableModel
+from cargo_optimizer.presentation.desktop.models.unpacked_table_model import (
+    COL_CODE as UNPACKED_COL_CODE,
+    COL_INSTANCE as UNPACKED_COL_INSTANCE,
+    COL_REASON as UNPACKED_COL_REASON,
+    COL_SKU as UNPACKED_COL_SKU,
+    UnpackedUnitTableModel,
+)
 
 _EMPTY = "—"
 _NO_WARNINGS_MESSAGE = "Sin avisos."
+
+_WARNING_BG = QColor("#FFF8E1")
+_WARNING_FG = QColor("#7A4F00")
+_WARNING_BG_DARK = QColor("#2A2010")
+_WARNING_FG_DARK = QColor("#F2A93B")
+
+
+def _utilization_color(pct: float) -> str:
+    if pct >= 85:
+        return "#43A047"
+    if pct >= 60:
+        return "#FB8C00"
+    if pct > 0:
+        return "#1E88E5"
+    return "#888888"
+
+
+def _apply_utilization_color(label: QLabel, text: str) -> None:
+    """Sets label text and colors it by the percentage value contained in the text."""
+    label.setText(text)
+    try:
+        pct = float(text.split("%")[0].strip())
+        label.setStyleSheet(f"color: {_utilization_color(pct)}; font-weight: 600;")
+    except (ValueError, IndexError):
+        label.setStyleSheet("")
 
 _STOP_REASON_LABELS: dict[MultiSpaceStopReason, str] = {
     MultiSpaceStopReason.ALL_PACKED: "Toda la carga se ubicó",
@@ -55,6 +88,7 @@ class MultiSpaceResultsPanel(QWidget):
         self.setObjectName("multiSpaceResultsPanel")
         self._result: MultiSpaceAssignmentResult | None = None
         self._load_units_by_id: Mapping[UUID, LoadUnit] = {}
+        self._dark: bool = False
 
         self._global_group = QGroupBox("Resumen global", self)
         self._spaces_used_label = QLabel(_EMPTY, self)
@@ -111,8 +145,16 @@ class MultiSpaceResultsPanel(QWidget):
         self._unpacked_table.setModel(self._unpacked_model)
         self._unpacked_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._unpacked_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self._unpacked_table.horizontalHeader().setStretchLastSection(True)
         self._unpacked_table.verticalHeader().setVisible(False)
+        _uh = self._unpacked_table.horizontalHeader()
+        _uh.setStretchLastSection(False)
+        _uh.setSectionResizeMode(UNPACKED_COL_SKU, QHeaderView.ResizeMode.Interactive)
+        _uh.setSectionResizeMode(UNPACKED_COL_INSTANCE, QHeaderView.ResizeMode.Interactive)
+        _uh.setSectionResizeMode(UNPACKED_COL_REASON, QHeaderView.ResizeMode.Stretch)
+        _uh.setSectionResizeMode(UNPACKED_COL_CODE, QHeaderView.ResizeMode.Interactive)
+        _uh.resizeSection(UNPACKED_COL_SKU, 90)
+        _uh.resizeSection(UNPACKED_COL_INSTANCE, 75)
+        _uh.resizeSection(UNPACKED_COL_CODE, 100)
 
         # Este panel apila un formulario de 14 filas + selector + otro
         # formulario + una lista + una tabla: sin envolverlo en un
@@ -147,9 +189,22 @@ class MultiSpaceResultsPanel(QWidget):
 
         self.clear()
 
+    def set_dark_mode(self, dark: bool) -> None:
+        self._dark = dark
+
     def clear(self) -> None:
         self._result = None
         self._load_units_by_id = {}
+        styled_labels = (
+            self._packed_label,
+            self._pending_label,
+            self._volume_utilization_label,
+            self._min_utilization_label,
+            self._avg_utilization_label,
+            self._max_utilization_label,
+            self._individual_volume_label,
+            self._individual_packed_label,
+        )
         for label in (
             self._spaces_used_label,
             self._spaces_by_name_label,
@@ -170,6 +225,8 @@ class MultiSpaceResultsPanel(QWidget):
             self._individual_weight_label,
         ):
             label.setText(_EMPTY)
+        for label in styled_labels:
+            label.setStyleSheet("")
         self._space_combo.blockSignals(True)
         self._space_combo.clear()
         self._space_combo.blockSignals(False)
@@ -188,17 +245,39 @@ class MultiSpaceResultsPanel(QWidget):
         )
         self._spaces_by_name_label.setText(by_name or _EMPTY)
         self._requested_label.setText(str(result.total_requested_count))
-        self._packed_label.setText(str(result.total_packed_count))
-        self._pending_label.setText(str(result.pending_count))
+        packed = result.total_packed_count
+        pending = result.pending_count
+        if pending == 0:
+            packed_color = "#43A047"
+            pending_color = "#43A047"
+        else:
+            packed_color = "#FB8C00"
+            pending_color = "#C62828"
+        self._packed_label.setText(str(packed))
+        self._packed_label.setStyleSheet(f"color: {packed_color}; font-weight: 600;")
+        self._pending_label.setText(str(pending))
+        self._pending_label.setStyleSheet(f"color: {pending_color}; font-weight: 600;")
         self._capacity_volume_label.setText(
             f"{result.total_capacity_volume_cm3 / 1_000_000.0:.3f} m³"
         )
         self._used_volume_label.setText(f"{result.total_used_volume_cm3 / 1_000_000.0:.3f} m³")
-        self._volume_utilization_label.setText(f"{result.overall_volume_utilization_percent:.1f} %")
+        _apply_utilization_color(
+            self._volume_utilization_label,
+            f"{result.overall_volume_utilization_percent:.1f} %",
+        )
         self._weight_label.setText(f"{result.total_used_weight_kg:.1f} kg")
-        self._min_utilization_label.setText(f"{result.min_volume_utilization_percent:.1f} %")
-        self._avg_utilization_label.setText(f"{result.average_volume_utilization_percent:.1f} %")
-        self._max_utilization_label.setText(f"{result.max_volume_utilization_percent:.1f} %")
+        _apply_utilization_color(
+            self._min_utilization_label,
+            f"{result.min_volume_utilization_percent:.1f} %",
+        )
+        _apply_utilization_color(
+            self._avg_utilization_label,
+            f"{result.average_volume_utilization_percent:.1f} %",
+        )
+        _apply_utilization_color(
+            self._max_utilization_label,
+            f"{result.max_volume_utilization_percent:.1f} %",
+        )
         self._stop_reason_label.setText(
             _STOP_REASON_LABELS.get(result.stop_reason, result.stop_reason.value)
         )
@@ -206,8 +285,10 @@ class MultiSpaceResultsPanel(QWidget):
 
         self._space_combo.blockSignals(True)
         self._space_combo.clear()
-        for index in range(len(result.space_results)):
-            self._space_combo.addItem(f"Espacio {index + 1}")
+        for index, sr in enumerate(result.space_results):
+            space_name = getattr(getattr(sr, "loading_space", None), "name", None)
+            label = f"{index + 1}. {space_name}" if space_name else f"Espacio {index + 1}"
+            self._space_combo.addItem(label)
         self._space_combo.blockSignals(False)
         if result.space_results:
             self._space_combo.setCurrentIndex(0)
@@ -223,10 +304,18 @@ class MultiSpaceResultsPanel(QWidget):
         if self._result is None or not (0 <= index < len(self._result.space_results)):
             return
         space_result = self._result.space_results[index]
-        self._individual_packed_label.setText(
-            f"{space_result.packed_count} / {space_result.requested_count}"
+        packed_text = f"{space_result.packed_count} / {space_result.requested_count}"
+        self._individual_packed_label.setText(packed_text)
+        if space_result.packed_count >= space_result.requested_count:
+            self._individual_packed_label.setStyleSheet("color: #43A047; font-weight: 600;")
+        elif space_result.packed_count > 0:
+            self._individual_packed_label.setStyleSheet("color: #FB8C00; font-weight: 600;")
+        else:
+            self._individual_packed_label.setStyleSheet("color: #C62828; font-weight: 600;")
+        _apply_utilization_color(
+            self._individual_volume_label,
+            f"{space_result.volume_utilization_percent:.1f} %",
         )
-        self._individual_volume_label.setText(f"{space_result.volume_utilization_percent:.1f} %")
         self._individual_weight_label.setText(f"{space_result.used_weight_kg:.1f} kg")
 
         self._warnings_list.clear()
@@ -235,7 +324,10 @@ class MultiSpaceResultsPanel(QWidget):
             self._warnings_list.addItem(placeholder)
         else:
             for warning in space_result.warnings:
-                self._warnings_list.addItem(QListWidgetItem(warning))
+                item = QListWidgetItem(f"⚠  {warning}")
+                item.setBackground(_WARNING_BG)
+                item.setForeground(_WARNING_FG)
+                self._warnings_list.addItem(item)
 
         self._unpacked_model.set_unpacked_units(space_result.unpacked_units, self._load_units_by_id)
 

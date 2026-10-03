@@ -16,6 +16,9 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, QPersisten
 from PySide6.QtGui import QColor
 
 from cargo_optimizer.infrastructure.database.repositories import CatalogProductEntry
+from cargo_optimizer.presentation.desktop.viewer.color_registry import ColorRegistry
+
+_color_registry = ColorRegistry()
 
 COL_SKU = 0
 COL_NAME = 1
@@ -46,10 +49,16 @@ class ProductCatalogTableModel(QAbstractTableModel):
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._entries: list[CatalogProductEntry] = []
+        self._color_cache: dict[str, str] = {}
+
+    def _rebuild_color_cache(self) -> None:
+        sku_color_map = {e.load_unit.sku: e.load_unit.color_hex for e in self._entries}
+        self._color_cache = _color_registry.assign_unique_palette_colors(sku_color_map)
 
     def set_entries(self, entries: Sequence[CatalogProductEntry]) -> None:
         self.beginResetModel()
         self._entries = list(entries)
+        self._rebuild_color_cache()
         self.endResetModel()
 
     def entry_at(self, row: int) -> CatalogProductEntry:
@@ -88,8 +97,15 @@ class ProductCatalogTableModel(QAbstractTableModel):
         unit = entry.load_unit
         column = index.column()
 
+        resolved = self._color_cache.get(unit.sku, "#CCCCCC")
+
         if role == Qt.ItemDataRole.DecorationRole and column == COL_SKU:
-            return QColor(unit.color_hex)
+            return QColor(resolved)
+
+        if role == Qt.ItemDataRole.BackgroundRole:
+            color = QColor(resolved)
+            color.setAlpha(35)
+            return color
 
         if role == Qt.ItemDataRole.DisplayRole:
             if column == COL_SKU:

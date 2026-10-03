@@ -12,7 +12,7 @@ columna izquierda (rediseño UX: "workspace operativo").
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QDialog, QDialogButtonBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QDialogButtonBox, QFrame, QScrollArea, QVBoxLayout, QWidget
 
 from cargo_optimizer.presentation.desktop.panels.loading_space_form_panel import (
     LoadingSpaceFormPanel,
@@ -35,6 +35,11 @@ class LoadingSpaceEditorDialog(QDialog):
         button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close, self)
         button_box.rejected.connect(self.accept)
 
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(self.form_panel)
+
         layout = QVBoxLayout(self)
-        layout.addWidget(self.form_panel)
+        layout.addWidget(scroll, 1)
         layout.addWidget(button_box)

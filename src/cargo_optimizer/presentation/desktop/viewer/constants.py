@@ -13,37 +13,37 @@ from __future__ import annotations
 # generada), pensada para distinguirse tanto sobre fondo claro como
 # oscuro. El orden importa: es el orden de asignación por índice de hash.
 FALLBACK_PALETTE: tuple[str, ...] = (
-    "#4C78A8",
-    "#F58518",
-    "#54A24B",
-    "#E45756",
-    "#72B7B2",
-    "#EECA3B",
-    "#B279A2",
-    "#FF9DA6",
-    "#9D755D",
-    "#BAB0AC",
-    "#1F77B4",
-    "#FF7F0E",
-    "#2CA02C",
-    "#D62728",
-    "#9467BD",
-    "#8C564B",
-    "#E377C2",
-    "#7F7F7F",
-    "#BCBD22",
-    "#17BECF",
+    "#E53935",  # rojo vivo
+    "#FB8C00",  # naranja
+    "#FDD835",  # amarillo
+    "#43A047",  # verde
+    "#1E88E5",  # azul
+    "#8E24AA",  # violeta
+    "#00ACC1",  # cyan
+    "#F06292",  # rosa
+    "#FF7043",  # naranja oscuro
+    "#26A69A",  # teal
+    "#C0CA33",  # lima
+    "#AB47BC",  # lila
+    "#5C6BC0",  # índigo
+    "#EC407A",  # fucsia
+    "#66BB6A",  # verde claro
+    "#42A5F5",  # azul claro
+    "#FFCA28",  # ámbar
+    "#EF5350",  # rojo claro
+    "#26C6DA",  # cyan claro
+    "#D4E157",  # lima claro
 )
 
 # Opacidades (0.0 - 1.0). Las cajas son siempre sólidas: la
 # transparencia es del LoadingSpace, para no ocultar las cajas.
-WALL_OPACITY = 0.12
-FLOOR_OPACITY = 0.25
+WALL_OPACITY = 0.08   # paredes muy tenues — solo insinuadas, como en EasyCargo
+FLOOR_OPACITY = 0.35  # piso más visible para dar sensación de superficie
 BOX_OPACITY = 1.0
 
 # Grosores de línea (unidades de PyVista/VTK, aprox. píxeles de pantalla).
-WIREFRAME_LINE_WIDTH = 1.5
-BOX_EDGE_LINE_WIDTH = 1.0
+WIREFRAME_LINE_WIDTH = 2.0  # borde del contenedor más definido
+BOX_EDGE_LINE_WIDTH = 1.5
 DOOR_HIGHLIGHT_LINE_WIDTH = 4.0
 SELECTION_LINE_WIDTH = 3.0
 
@@ -56,30 +56,30 @@ _ACCENT = "#3D6E8C"
 
 THEME_COLORS: dict[str, dict[str, str]] = {
     THEME_LIGHT: {
-        "background": "#F2F2F2",
-        "wall": "#8A8A8A",
-        "floor": "#B5B5B5",
-        "edge": "#404040",
-        "axis_x": "#B00020",
-        "axis_y": "#1B5E20",
-        "axis_z": "#0D47A1",
+        "background": "#ECEEF2",  # ligeramente azulado-gris: más neutro que gris puro
+        "wall": "#9AACBA",        # azul-gris suave: distinguible del fondo sin saturar
+        "floor": "#C8CDD6",       # gris claro azulado: sensación de superficie limpia
+        "edge": "#3A4A5A",        # azul oscuro: borde del contenedor bien definido
+        "axis_x": "#C62828",
+        "axis_y": "#2E7D32",
+        "axis_z": "#1565C0",
         "selection": _ACCENT,
         "door_highlight": _ACCENT,
         "text": "#202020",
-        "fallback_background": "#F2F2F2",
+        "fallback_background": "#ECEEF2",
     },
     THEME_DARK: {
-        "background": "#2B2B2B",
-        "wall": "#9A9A9A",
-        "floor": "#6E6E6E",
-        "edge": "#D0D0D0",
+        "background": "#252830",  # azul-oscuro: más rico que gris neutro
+        "wall": "#7A8B99",
+        "floor": "#5A6470",
+        "edge": "#C8D0DA",
         "axis_x": "#FF6B6B",
         "axis_y": "#66BB6A",
         "axis_z": "#64B5F6",
         "selection": _ACCENT,
         "door_highlight": _ACCENT,
         "text": "#E0E0E0",
-        "fallback_background": "#2B2B2B",
+        "fallback_background": "#252830",
     },
 }
 

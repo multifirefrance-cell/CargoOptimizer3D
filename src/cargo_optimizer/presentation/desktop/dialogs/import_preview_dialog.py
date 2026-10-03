@@ -72,8 +72,13 @@ class ImportPreviewDialog(QDialog):
         button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
         )
-        button_box.button(QDialogButtonBox.StandardButton.Ok).setText("Continuar")
-        button_box.button(QDialogButtonBox.StandardButton.Cancel).setText("Cancelar")
+        ok_btn = button_box.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_btn is not None:
+            ok_btn.setText("Continuar")
+            ok_btn.setProperty("class", "primary")
+        cancel_btn = button_box.button(QDialogButtonBox.StandardButton.Cancel)
+        if cancel_btn is not None:
+            cancel_btn.setText("Cancelar")
         button_box.accepted.connect(self._on_accept)
         button_box.rejected.connect(self.reject)
 

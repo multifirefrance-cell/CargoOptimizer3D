@@ -101,6 +101,7 @@ class PyVistaPlotterLike(Protocol):
     background_color: Any
 
     def add_mesh(self, mesh: Any, **kwargs: Any) -> Any: ...
+    def add_point_labels(self, points: Any, labels: Any, **kwargs: Any) -> Any: ...
     def remove_actor(self, actor: Any, render: bool = True) -> bool: ...
     def reset_camera(self, render: bool = True, bounds: Any = None) -> None: ...
     def view_isometric(self) -> None: ...
@@ -158,6 +159,7 @@ class SceneController:
         self._selection_actor: Any | None = None  # contorno de resalte, independiente del grupo
         self._container_actors: list[Any] = []
         self._axes_actors: list[Any] = []
+        self._label_actors: list[Any] = []
         self._selected_sequence_number: int | None = None
         self._on_selection_changed: Callable[[int | None], None] | None = None
         self.apply_theme(theme)
@@ -199,12 +201,15 @@ class SceneController:
             self._plotter.remove_actor(actor, render=False)
         for actor in self._axes_actors:
             self._plotter.remove_actor(actor, render=False)
+        for actor in self._label_actors:
+            self._plotter.remove_actor(actor, render=False)
         self._group_actors.clear()
         self._actor_group_by_id.clear()
         self._box_records.clear()
         self._group_members.clear()
         self._container_actors.clear()
         self._axes_actors.clear()
+        self._label_actors.clear()
         self._selected_sequence_number = None
         self._scene = None
         self._plotter.render()
@@ -327,6 +332,8 @@ class SceneController:
         caja mantiene su propio `_BoxRecord` (centro, longitudes) indexado por
         `sequence_number`, independientemente de a qué grupo/actor pertenezca.
         """
+        import numpy as np  # noqa: PLC0415 - numpy garantizado por dependencia de pyvista
+
         groups: dict[_GroupKey, list[PlacementVisualModel]] = {}
         for visual in scene.placement_visuals:
             key: _GroupKey = (visual.oriented_dimensions, visual.color_hex)
@@ -336,6 +343,9 @@ class SceneController:
                 group_key=key, center=center, lengths=lengths
             )
             self._group_members.setdefault(key, []).append(visual.sequence_number)
+
+        label_points: list[tuple[float, float, float]] = []
+        label_texts: list[str] = []
 
         for group_index, (key, visuals) in enumerate(groups.items()):
             _dimensions, color_hex = key
@@ -364,6 +374,40 @@ class SceneController:
             )
             self._group_actors[key] = actor
             self._actor_group_by_id[id(actor)] = key
+
+            # Etiqueta de SKU al tope del centroide del grupo (estilo EasyCargo)
+            records = [self._box_records[v.sequence_number] for v in visuals]
+            cx = sum(r.center[0] for r in records) / len(records)
+            cy = sum(r.center[1] for r in records) / len(records)
+            cz_top = max(r.center[2] + r.lengths[2] / 2 for r in records)
+            label_points.append((cx, cy, cz_top))
+            count = len(visuals)
+            sku = visuals[0].sku
+            label_texts.append(f"{sku}  ×{count}" if count > 1 else sku)
+
+        if label_points:
+            colors = theme_colors(self._theme)
+            dark = self._theme != THEME_LIGHT
+            shape_color = "#1E2028" if dark else "#FFFFFF"
+            text_color = "#E0E0E0" if dark else "#202020"
+            try:
+                label_actor = self._plotter.add_point_labels(
+                    np.array(label_points, dtype=float),
+                    label_texts,
+                    font_size=9,
+                    bold=True,
+                    always_visible=True,
+                    show_points=False,
+                    shape="rounded_box",
+                    shape_color=shape_color,
+                    shape_opacity=0.75,
+                    text_color=text_color,
+                    name="viewer-sku-labels",
+                )
+                if label_actor is not None:
+                    self._label_actors.append(label_actor)
+            except Exception:  # noqa: BLE001 - las etiquetas son decorativas; nunca bloquean la carga
+                pass
 
     def _build_axes(self, scene: SceneModel) -> None:
         colors = theme_colors(self._theme)
@@ -396,11 +440,18 @@ class SceneController:
             actor.visibility = visible
         if self._selection_actor is not None:
             self._selection_actor.visibility = visible
+        for actor in self._label_actors:
+            actor.SetVisibility(1 if visible else 0)
         self._plotter.render()
 
     def set_axes_visible(self, visible: bool) -> None:
         for actor in self._axes_actors:
             actor.visibility = visible
+        self._plotter.render()
+
+    def set_labels_visible(self, visible: bool) -> None:
+        for actor in self._label_actors:
+            actor.SetVisibility(1 if visible else 0)
         self._plotter.render()
 
     # ------------------------------------------------------------------

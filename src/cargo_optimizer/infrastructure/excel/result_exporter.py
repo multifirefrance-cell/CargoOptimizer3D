@@ -14,6 +14,7 @@ corresponden.
 
 from __future__ import annotations
 
+import csv
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -244,3 +245,37 @@ def export_packing_result(
         result, load_units_by_id, application_version=application_version
     )
     save_workbook_atomic(workbook, path)
+
+
+def export_packing_result_csv(
+    result: PackingResult,
+    load_units_by_id: Mapping[UUID, LoadUnit],
+    path: Path,
+) -> None:
+    """Escribe las colocaciones de `result` a `path` como CSV UTF-8 con BOM.
+
+    El archivo contiene una fila por cada unidad cargada (ordenada por
+    `sequence_number`), con las mismas columnas que la hoja «Productos
+    cargados» del xlsx. El BOM (U+FEFF) permite que Excel lo abra
+    directamente con codificación correcta.
+    """
+    with path.open("w", newline="", encoding="utf-8-sig") as fh:
+        writer = csv.writer(fh)
+        writer.writerow(list(_PACKED_COLUMNS))
+        for placement in sorted(result.placements, key=lambda p: p.sequence_number):
+            sku, name = _unit_label(load_units_by_id, placement.load_unit_id)
+            writer.writerow(
+                [
+                    sku,
+                    name,
+                    placement.instance_number,
+                    round(placement.x_cm, 2),
+                    round(placement.y_cm, 2),
+                    round(placement.z_cm, 2),
+                    ORIENTATION_LABELS[placement.orientation.code],
+                    round(placement.length_cm, 2),
+                    round(placement.width_cm, 2),
+                    round(placement.height_cm, 2),
+                    placement.sequence_number,
+                ]
+            )

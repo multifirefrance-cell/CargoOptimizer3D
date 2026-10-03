@@ -9,7 +9,7 @@ aplicado aquí igual que al catálogo).
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QDialog, QDialogButtonBox, QMessageBox, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QDialogButtonBox, QFrame, QMessageBox, QScrollArea, QVBoxLayout, QWidget
 
 from cargo_optimizer.domain.loading_space import LoadingSpace
 from cargo_optimizer.presentation.desktop.panels.loading_space_form_panel import (
@@ -40,9 +40,17 @@ class LoadingSpaceProfileEditorDialog(QDialog):
         )
         self._button_box.accepted.connect(self._on_accept)
         self._button_box.rejected.connect(self.reject)
+        ok_btn = self._button_box.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_btn is not None:
+            ok_btn.setProperty("class", "primary")
+
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(self.form_panel)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(self.form_panel)
+        layout.addWidget(scroll, 1)
         layout.addWidget(self._button_box)
 
     def _on_accept(self) -> None:

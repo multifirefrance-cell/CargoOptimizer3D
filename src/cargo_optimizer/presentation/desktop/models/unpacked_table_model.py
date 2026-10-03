@@ -14,9 +14,13 @@ from typing import Any
 from uuid import UUID
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, QPersistentModelIndex, Qt
+from PySide6.QtGui import QColor
 
 from cargo_optimizer.domain.load_unit import LoadUnit
 from cargo_optimizer.domain.unpacked_unit import UnpackedUnit
+from cargo_optimizer.presentation.desktop.viewer.color_registry import ColorRegistry
+
+_color_registry = ColorRegistry()
 
 COL_SKU = 0
 COL_INSTANCE = 1
@@ -33,6 +37,11 @@ class UnpackedUnitTableModel(QAbstractTableModel):
         super().__init__(parent)
         self._rows: list[UnpackedUnit] = []
         self._load_units_by_id: dict[UUID, LoadUnit] = {}
+        self._color_cache: dict[str, str] = {}
+
+    def _rebuild_color_cache(self) -> None:
+        sku_color_map = {u.sku: u.color_hex for u in self._load_units_by_id.values()}
+        self._color_cache = _color_registry.assign_unique_palette_colors(sku_color_map)
 
     def set_unpacked_units(
         self,
@@ -42,6 +51,7 @@ class UnpackedUnitTableModel(QAbstractTableModel):
         self.beginResetModel()
         self._rows = list(unpacked_units)
         self._load_units_by_id = dict(load_units_by_id)
+        self._rebuild_color_cache()
         self.endResetModel()
 
     def clear(self) -> None:
@@ -69,13 +79,27 @@ class UnpackedUnitTableModel(QAbstractTableModel):
     def data(
         self, index: QModelIndex | QPersistentModelIndex, role: int = Qt.ItemDataRole.DisplayRole
     ) -> Any:
-        if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
+        if not index.isValid():
             return None
         unpacked = self._rows[index.row()]
         column = index.column()
+        load_unit = self._load_units_by_id.get(unpacked.load_unit_id)
+        sku = load_unit.sku if load_unit is not None else str(unpacked.load_unit_id)
+        resolved = self._color_cache.get(sku, "#CCCCCC")
+
+        if role == Qt.ItemDataRole.DecorationRole and column == COL_SKU:
+            return QColor(resolved)
+
+        if role == Qt.ItemDataRole.BackgroundRole:
+            color = QColor(resolved)
+            color.setAlpha(35)
+            return color
+
+        if role != Qt.ItemDataRole.DisplayRole:
+            return None
+
         if column == COL_SKU:
-            load_unit = self._load_units_by_id.get(unpacked.load_unit_id)
-            return load_unit.sku if load_unit is not None else str(unpacked.load_unit_id)
+            return sku
         if column == COL_INSTANCE:
             return unpacked.instance_number
         if column == COL_REASON:

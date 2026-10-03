@@ -28,10 +28,10 @@ Qt, con una ventana real) este caso nunca se activa.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtWidgets import QApplication, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from cargo_optimizer.domain.load_unit import LoadUnit
@@ -40,7 +40,9 @@ from cargo_optimizer.domain.packing_result import PackingResult
 from cargo_optimizer.presentation.desktop.viewer.constants import THEME_DARK, THEME_LIGHT
 from cargo_optimizer.presentation.desktop.viewer.models import PlacementVisualModel, SceneModel
 from cargo_optimizer.presentation.desktop.viewer.scene_builder import SceneBuilder
-from cargo_optimizer.presentation.desktop.viewer.scene_controller import SceneController
+
+if TYPE_CHECKING:
+    from cargo_optimizer.presentation.desktop.viewer.scene_controller import SceneController
 
 _FALLBACK_TITLE = "Vista 3D no disponible"
 
@@ -49,6 +51,7 @@ class Packing3DViewer(QWidget):
     """Visor 3D interactivo de un `PackingResult`, con degradación segura si el 3D no arranca."""
 
     placement_selected = Signal(object)  # int | None — PySide6 no admite Signal(int | None)
+    scene_color_mapping_ready = Signal(object)  # dict[str, str] — sku → color_hex tras cargar escena
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -58,22 +61,55 @@ class Packing3DViewer(QWidget):
         self._controller: SceneController | None = None
         self._unavailable_reason: str | None = None
         self._theme = THEME_LIGHT
+        self._init_placeholder: QWidget | None = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
+        # Mostrar placeholder inmediatamente; VTK se carga de forma diferida
+        # para que la ventana principal sea visible antes de que el motor 3D
+        # se inicialice (~14 s en frío). El QTimer con delay 0 dispara tras
+        # el primer ciclo del event-loop, es decir, después de que Qt pinte
+        # la ventana por primera vez.
+        self._init_placeholder = self._build_loading_placeholder()
+        layout.addWidget(self._init_placeholder)
+        QTimer.singleShot(0, self._deferred_init)
+
+    # ------------------------------------------------------------------
+    # Inicialización diferida / fallback
+    # ------------------------------------------------------------------
+
+    def _build_loading_placeholder(self) -> QWidget:
+        container = QWidget(self)
+        container.setObjectName("packing3DViewerLoading")
+        label = QLabel("Inicializando visor 3D…", container)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setEnabled(False)
+        inner = QVBoxLayout(container)
+        inner.addStretch(1)
+        inner.addWidget(label)
+        inner.addStretch(1)
+        return container
+
+    def _deferred_init(self) -> None:
+        """Carga VTK/PyVista y construye el interactor 3D después de que la ventana sea visible."""
         interactor = self._try_create_interactor()
+
+        layout = self.layout()
+        if self._init_placeholder is not None:
+            layout.removeWidget(self._init_placeholder)
+            self._init_placeholder.deleteLater()
+            self._init_placeholder = None
+
         if interactor is None:
             layout.addWidget(self._build_fallback_widget())
             return
 
+        from cargo_optimizer.presentation.desktop.viewer.scene_controller import SceneController  # noqa: PLC0415
+
         self._controller = SceneController(interactor, self._theme)
         self._controller.set_selection_changed_callback(self._on_selection_changed)
         layout.addWidget(interactor)
-
-    # ------------------------------------------------------------------
-    # Inicialización / fallback
-    # ------------------------------------------------------------------
 
     def _try_create_interactor(self) -> Any:
         """Devuelve un `QtInteractor` (QWidget + API de `pyvista.Plotter`) o `None`.
@@ -165,6 +201,8 @@ class Packing3DViewer(QWidget):
             return
         scene = SceneBuilder().build(result, load_units_by_id)
         self._controller.load_scene(scene)
+        if scene.color_mapping:
+            self.scene_color_mapping_ready.emit(scene.color_mapping)
 
     def display_empty_space(self, loading_space: LoadingSpace) -> None:
         """Muestra solo el contenedor vacío (sin cajas) — antes de la primera optimización.
@@ -210,6 +248,10 @@ class Packing3DViewer(QWidget):
     def set_axes_visible(self, visible: bool) -> None:
         if self._controller is not None:
             self._controller.set_axes_visible(visible)
+
+    def set_labels_visible(self, visible: bool) -> None:
+        if self._controller is not None:
+            self._controller.set_labels_visible(visible)
 
     def set_selected_placement(self, sequence_number: int | None) -> None:
         """Actualiza la selección sin emitir `placement_selected` (uso externo, p. ej. tabla)."""

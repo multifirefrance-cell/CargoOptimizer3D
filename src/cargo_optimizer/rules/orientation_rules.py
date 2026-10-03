@@ -7,6 +7,7 @@ No comprueba todavía colisiones ni límites: esa combinación ocurre en
 from __future__ import annotations
 
 from cargo_optimizer.domain.dimensions import Dimensions3D
+from cargo_optimizer.domain.enums import OrientationCode
 from cargo_optimizer.domain.load_unit import LoadUnit
 from cargo_optimizer.domain.loading_space import LoadingSpace
 from cargo_optimizer.domain.orientation import Orientation
@@ -34,23 +35,36 @@ def allowed_orientations_for_load_unit(
 ) -> tuple[Orientation, ...]:
     """Orientaciones geométricamente distintas permitidas para este LoadUnit.
 
-    Parte de `load_unit.candidate_orientations()` (que ya deduplica por
-    `OrientationCode`), elimina además las orientaciones cuyas
-    `Dimensions3D` resultantes coinciden (p. ej. cuando dos dimensiones
-    originales son iguales, dos códigos distintos producen la misma
-    caja), mantiene un orden determinista, y aplica las reglas
-    especiales de extintores: para un extintor individual >= 3 kg, solo
-    quedan las orientaciones que dejan `length_cm` sobre X. No
-    comprueba todavía colisiones ni límites.
+    Para extintores individuales >= 3 kg se expanden automáticamente los
+    candidatos a los 6 códigos posibles (independientemente de los códigos
+    almacenados en el catálogo) y la regla de extintores filtra la única
+    orientación no permitida: la vertical (eje longitudinal sobre Z). El
+    resultado son exactamente dos orientaciones distintas por simetría:
+    la **paralela** (eje largo sobre X) y la **perpendicular** (eje largo
+    sobre Y). La orientación paralela puntúa más en ``select_preferred_orientation``
+    para contenedores estándar, por lo que se elige en la ronda 1; la
+    perpendicular queda disponible en la ronda 2 para llenar el hueco
+    residual al final del contenedor cuando el espacio paralelo se agota.
+
+    Para cualquier otro LoadUnit se usa ``candidate_orientations()`` tal
+    como está en el catálogo, eliminando duplicados geométricos.
+    No comprueba colisiones ni límites (eso ocurre en
+    `placement_rules.evaluate_candidate_placement`).
     """
+    if is_individual_large_extinguisher(load_unit):
+        all_six = _dedupe_geometrically(
+            tuple(
+                Orientation.from_base_dimensions(load_unit.dimensions, code)
+                for code in OrientationCode
+            )
+        )
+        return tuple(
+            o for o in all_six
+            if evaluate_extinguisher_orientation(load_unit, loading_space, o).is_allowed
+        )
+
     candidates = _dedupe_geometrically(load_unit.candidate_orientations())
-    if not is_individual_large_extinguisher(load_unit):
-        return candidates
-    return tuple(
-        orientation
-        for orientation in candidates
-        if evaluate_extinguisher_orientation(load_unit, loading_space, orientation).is_allowed
-    )
+    return candidates
 
 
 def evaluate_orientation(
@@ -63,10 +77,20 @@ def evaluate_orientation(
     Combina la regla de extintores (si aplica) con la comprobación de
     que el código esté entre los declarados en
     `load_unit.allowed_orientation_codes`.
+
+    Para extintores individuales grandes, `allowed_orientations_for_load_unit`
+    ya ignora `allowed_orientation_codes` y usa exclusivamente la regla de
+    extintor (horizontal/vertical). El chequeo de códigos se omite aquí para
+    que ambas funciones sean consistentes: el deduplicador geométrico puede
+    elegir `lhw_xyz` como representante de la clase {whl_xyz, lhw_xyz} aunque
+    solo `whl_xyz` esté en `allowed_orientation_codes`.
     """
     extinguisher_result = evaluate_extinguisher_orientation(load_unit, loading_space, orientation)
     if not extinguisher_result.is_allowed:
         return extinguisher_result
+
+    if is_individual_large_extinguisher(load_unit):
+        return RuleEvaluation.allowed()
 
     if orientation.code not in load_unit.allowed_orientation_codes:
         return RuleEvaluation.rejected(

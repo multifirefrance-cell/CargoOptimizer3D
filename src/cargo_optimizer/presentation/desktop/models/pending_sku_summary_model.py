@@ -16,10 +16,14 @@ from typing import Any
 from uuid import UUID
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QObject, QPersistentModelIndex, Qt
+from PySide6.QtGui import QColor
 
 from cargo_optimizer.domain.load_unit import LoadUnit
 from cargo_optimizer.domain.placement import Placement
 from cargo_optimizer.domain.unpacked_unit import UnpackedUnit
+from cargo_optimizer.presentation.desktop.viewer.color_registry import ColorRegistry
+
+_color_registry = ColorRegistry()
 
 COL_SKU = 0
 COL_NAME = 1
@@ -31,14 +35,23 @@ _HEADERS = ("SKU", "Nombre", "Solicitado", "Cargado", "Pendiente")
 
 
 class _PendingRow:
-    __slots__ = ("sku", "name", "requested", "packed", "pending")
+    __slots__ = ("sku", "name", "requested", "packed", "pending", "color_hex")
 
-    def __init__(self, sku: str, name: str, requested: int, packed: int, pending: int) -> None:
+    def __init__(
+        self,
+        sku: str,
+        name: str,
+        requested: int,
+        packed: int,
+        pending: int,
+        color_hex: str | None = None,
+    ) -> None:
         self.sku = sku
         self.name = name
         self.requested = requested
         self.packed = packed
         self.pending = pending
+        self.color_hex = color_hex
 
 
 class PendingSkuSummaryModel(QAbstractTableModel):
@@ -47,6 +60,11 @@ class PendingSkuSummaryModel(QAbstractTableModel):
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._rows: list[_PendingRow] = []
+        self._color_cache: dict[str, str] = {}
+
+    def _rebuild_color_cache(self) -> None:
+        sku_color_map = {row.sku: row.color_hex for row in self._rows}
+        self._color_cache = _color_registry.assign_unique_palette_colors(sku_color_map)
 
     def set_result(
         self,
@@ -65,16 +83,19 @@ class PendingSkuSummaryModel(QAbstractTableModel):
             unit = load_units_by_id.get(load_unit_id)
             sku = unit.sku if unit is not None else str(load_unit_id)
             name = unit.name if unit is not None else "—"
-            rows.append(_PendingRow(sku, name, packed + pending, packed, pending))
+            color_hex = unit.color_hex if unit is not None else None
+            rows.append(_PendingRow(sku, name, packed + pending, packed, pending, color_hex))
         rows.sort(key=lambda row: row.sku)
 
         self.beginResetModel()
         self._rows = rows
+        self._rebuild_color_cache()
         self.endResetModel()
 
     def clear(self) -> None:
         self.beginResetModel()
         self._rows = []
+        self._color_cache = {}
         self.endResetModel()
 
     def rowCount(  # noqa: N802
@@ -99,10 +120,23 @@ class PendingSkuSummaryModel(QAbstractTableModel):
     def data(
         self, index: QModelIndex | QPersistentModelIndex, role: int = Qt.ItemDataRole.DisplayRole
     ) -> Any:
-        if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
+        if not index.isValid():
             return None
         row = self._rows[index.row()]
         column = index.column()
+        resolved = self._color_cache.get(row.sku, "#CCCCCC")
+
+        if role == Qt.ItemDataRole.DecorationRole and column == COL_SKU:
+            return QColor(resolved)
+
+        if role == Qt.ItemDataRole.BackgroundRole:
+            color = QColor(resolved)
+            color.setAlpha(40)
+            return color
+
+        if role != Qt.ItemDataRole.DisplayRole:
+            return None
+
         if column == COL_SKU:
             return row.sku
         if column == COL_NAME:

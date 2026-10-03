@@ -11,6 +11,7 @@ from __future__ import annotations
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
+    QHeaderView,
     QHBoxLayout,
     QInputDialog,
     QLineEdit,
@@ -31,6 +32,12 @@ from cargo_optimizer.presentation.desktop.dialogs.loading_space_profile_editor_d
     LoadingSpaceProfileEditorDialog,
 )
 from cargo_optimizer.presentation.desktop.models.loading_space_profile_table_model import (
+    COL_CATEGORY,
+    COL_DIMENSIONS,
+    COL_DOOR_POSITION,
+    COL_MAX_WEIGHT,
+    COL_NAME,
+    COL_ORIGIN,
     LoadingSpaceProfileTableModel,
 )
 
@@ -56,9 +63,21 @@ class LoadingSpaceProfilesDialog(QDialog):
         self.table_view.setObjectName("loadingSpaceProfilesTableView")
         self.table_view.setModel(self.model)
         self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table_view.setAlternatingRowColors(True)
-        self.table_view.horizontalHeader().setStretchLastSection(True)
+        self.table_view.setAlternatingRowColors(False)
         self.table_view.verticalHeader().setVisible(False)
+        _ph = self.table_view.horizontalHeader()
+        _ph.setStretchLastSection(False)
+        _ph.setSectionResizeMode(COL_NAME, QHeaderView.ResizeMode.Stretch)
+        _ph.setSectionResizeMode(COL_CATEGORY, QHeaderView.ResizeMode.Interactive)
+        _ph.setSectionResizeMode(COL_DIMENSIONS, QHeaderView.ResizeMode.Interactive)
+        _ph.setSectionResizeMode(COL_MAX_WEIGHT, QHeaderView.ResizeMode.Interactive)
+        _ph.setSectionResizeMode(COL_DOOR_POSITION, QHeaderView.ResizeMode.Interactive)
+        _ph.setSectionResizeMode(COL_ORIGIN, QHeaderView.ResizeMode.Interactive)
+        _ph.resizeSection(COL_CATEGORY, 100)
+        _ph.resizeSection(COL_DIMENSIONS, 160)
+        _ph.resizeSection(COL_MAX_WEIGHT, 110)
+        _ph.resizeSection(COL_DOOR_POSITION, 80)
+        _ph.resizeSection(COL_ORIGIN, 80)
 
         self._add_button = QPushButton("Nuevo…", self)
         self._edit_button = QPushButton("Editar…", self)
@@ -66,6 +85,7 @@ class LoadingSpaceProfilesDialog(QDialog):
         self._archive_button = QPushButton("Archivar", self)
         self._restore_button = QPushButton("Restaurar", self)
         self._apply_button = QPushButton("Aplicar al proyecto", self)
+        self._apply_button.setProperty("class", "primary")
         self._close_button = QPushButton("Cerrar", self)
 
         self._add_button.clicked.connect(self._on_add)

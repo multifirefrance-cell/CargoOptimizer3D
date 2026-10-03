@@ -26,6 +26,7 @@ from PySide6.QtCore import QModelIndex, QPersistentModelIndex, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
+    QHeaderView,
     QInputDialog,
     QLabel,
     QMessageBox,
@@ -46,8 +47,8 @@ from cargo_optimizer.presentation.desktop.models.product_table_model import (
     COL_WEIGHT_TOTAL,
     ProductTableModel,
 )
-from cargo_optimizer.presentation.desktop.panels.product_quick_add_panel import (
-    ProductQuickAddPanel,
+from cargo_optimizer.presentation.desktop.panels.catalog_load_panel import (
+    CatalogLoadPanel,
 )
 from cargo_optimizer.presentation.desktop.style import SPACING_SM, SPACING_XS
 
@@ -70,6 +71,7 @@ class ProductTablePanel(QWidget):
     # nuevo) lo decide quien conecte esta señal (`MainWindow`, que ya
     # importa `CatalogService` para el flujo "Añadir desde catálogo…").
     add_requested = Signal(object, int)
+    optimize_requested = Signal()
 
     def __init__(
         self, parent: QWidget | None = None, *, repository: ProductCatalogRepository | None = None
@@ -78,19 +80,28 @@ class ProductTablePanel(QWidget):
         self.setObjectName("productTablePanel")
 
         self.model = ProductTableModel(parent=self)
-        self.quick_add_panel = ProductQuickAddPanel(self, repository=repository)
+        self.quick_add_panel = CatalogLoadPanel(self, repository=repository)
         self.quick_add_panel.add_requested.connect(self._on_add_requested)
 
         self.table_view = QTableView(self)
         self.table_view.setObjectName("productTableView")
         self.table_view.setModel(self.model)
-        self.table_view.setAlternatingRowColors(True)
+        self.table_view.setAlternatingRowColors(False)  # el color viene del BackgroundRole por producto
         self.table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table_view.horizontalHeader().setStretchLastSection(True)
         self.table_view.verticalHeader().setVisible(False)
         self.table_view.doubleClicked.connect(self._on_row_double_clicked)
         for column in range(self.model.columnCount()):
             self.table_view.setColumnHidden(column, column not in _VISIBLE_COLUMNS)
+
+        header = self.table_view.horizontalHeader()
+        # Peso (última visible) se estira para llenar el espacio sobrante;
+        # Nombre usa ResizeToContents para que nunca trunque el texto.
+        # Todas las ocultas quedan en Fixed para no robar espacio.
+        header.setStretchLastSection(True)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        header.setSectionResizeMode(COL_NAME, QHeaderView.ResizeMode.ResizeToContents)
+        header.resizeSection(COL_SKU, 52)
+        header.resizeSection(COL_QUANTITY, 40)
 
         empty_label = QLabel(_EMPTY_LOAD_MESSAGE, self)
         empty_label.setWordWrap(True)
@@ -104,39 +115,60 @@ class ProductTablePanel(QWidget):
         self._stack = QStackedWidget(self)
         self._stack.insertWidget(_PAGE_EMPTY, empty_page)
         self._stack.insertWidget(_PAGE_TABLE, self.table_view)
-        self._update_stack_page()
 
-        self._edit_quantity_button = QPushButton("Editar cantidad…", self)
+        self._optimize_button = QPushButton(icon("optimize"), "Optimizar", self)
+        self._optimize_button.setProperty("class", "primary")
+        self._optimize_button.setToolTip("Ejecutar optimización (F5)")
+        self._optimize_button.clicked.connect(self.optimize_requested)
+
+        self._edit_quantity_button = QPushButton("Editar QTY…", self)
         self._remove_button = QPushButton(icon("delete"), "Eliminar", self)
         self._edit_quantity_button.clicked.connect(self._on_edit_quantity_clicked)
         self._remove_button.clicked.connect(self.remove_selected_rows)
 
+        self._load_header_label = QLabel("Lista de carga", self)
+        self._load_header_label.setStyleSheet("font-weight: 700; font-size: 10pt;")
+
+        self._update_stack_page()
+
         toolbar_layout = QHBoxLayout()
         toolbar_layout.setContentsMargins(SPACING_SM, SPACING_XS, SPACING_SM, SPACING_XS)
         toolbar_layout.setSpacing(SPACING_XS)
-        toolbar_layout.addWidget(QLabel("<b>PRODUCTOS DE ESTA CARGA</b>", self))
-        toolbar_layout.addStretch(1)
+        toolbar_layout.addWidget(self._load_header_label, 1)
+        toolbar_layout.addWidget(self._optimize_button)
         toolbar_layout.addWidget(self._edit_quantity_button)
         toolbar_layout.addWidget(self._remove_button)
 
+        # quick_add_panel se coloca fuera de este widget (en MainWindow, Area 1).
+        # Este panel solo contiene la barra de acciones + la tabla.
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(SPACING_XS)
-        layout.addWidget(self.quick_add_panel)
+        layout.setSpacing(0)
         layout.addLayout(toolbar_layout)
         layout.addWidget(self._stack, 1)
 
         self.model.rowsInserted.connect(self._update_stack_page)
         self.model.rowsRemoved.connect(self._update_stack_page)
         self.model.modelReset.connect(self._update_stack_page)
+        self.model.dataChanged.connect(self._update_stack_page)
 
     def set_catalog_repository(self, repository: ProductCatalogRepository | None) -> None:
         """Propaga la disponibilidad del catálogo al buscador (modo limitado si es `None`)."""
         self.quick_add_panel.set_repository(repository)
 
     def _update_stack_page(self, *_args: object) -> None:
-        page = _PAGE_TABLE if self.model.rowCount() > 0 else _PAGE_EMPTY
+        count = self.model.rowCount()
+        page = _PAGE_TABLE if count > 0 else _PAGE_EMPTY
         self._stack.setCurrentIndex(page)
+        if count > 0:
+            self.table_view.resizeColumnToContents(COL_NAME)
+            units = self.model.load_units()
+            total_weight = sum(u.weight_kg * u.quantity for u in units)
+            self._load_header_label.setText(
+                f"Lista de carga  ({count})  ·  {total_weight:,.1f} kg".replace(",", ".")
+            )
+        else:
+            self._load_header_label.setText("Lista de carga")
 
     def _on_add_requested(self, catalog_unit: object, quantity: int) -> None:
         self.add_requested.emit(catalog_unit, quantity)
@@ -165,7 +197,7 @@ class ProductTablePanel(QWidget):
         unit = self.model.load_units()[row]
         new_quantity, accepted = QInputDialog.getInt(
             self,
-            "Editar cantidad",
+            "Editar QTY",
             f"Nueva cantidad para {unit.sku}:",
             unit.quantity,
             1,

@@ -54,7 +54,10 @@ from cargo_optimizer.infrastructure.excel.mapping import (
 )
 from cargo_optimizer.infrastructure.excel.packing_list_importer import import_packing_list
 from cargo_optimizer.infrastructure.excel.product_rows import CATALOG_SHEET_NAME, PRODUCT_COLUMNS
-from cargo_optimizer.infrastructure.excel.result_exporter import export_packing_result
+from cargo_optimizer.infrastructure.excel.result_exporter import (
+    export_packing_result,
+    export_packing_result_csv,
+)
 from cargo_optimizer.infrastructure.excel.results import (
     CatalogImportResult,
     LoadingSpaceImportResult,
@@ -111,6 +114,7 @@ __all__ = [
     "export_import_report",
     "export_packing_result",
     "export_packing_result_advanced",
+    "export_packing_result_csv",
     "generate_all_templates",
     "generate_catalog_template",
     "generate_loading_space_template",

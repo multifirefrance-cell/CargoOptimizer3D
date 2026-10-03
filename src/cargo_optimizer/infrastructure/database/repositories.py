@@ -75,6 +75,7 @@ def _apply_load_unit_fields(orm: ProductCatalogORM, load_unit: LoadUnit) -> None
     orm.extinguisher_nominal_kg = load_unit.extinguisher_nominal_kg
     orm.color_hex = load_unit.color_hex
     orm.notes = load_unit.notes
+    orm.loading_priority = load_unit.loading_priority
 
 
 def _new_product_catalog_orm(
@@ -101,6 +102,7 @@ def _new_product_catalog_orm(
         extinguisher_nominal_kg=load_unit.extinguisher_nominal_kg,
         color_hex=load_unit.color_hex,
         notes=load_unit.notes,
+        loading_priority=load_unit.loading_priority,
         created_at=now,
         updated_at=now,
         is_active=is_active,
@@ -137,6 +139,7 @@ def _orm_to_load_unit(orm: ProductCatalogORM) -> LoadUnit:
             extinguisher_nominal_kg=orm.extinguisher_nominal_kg,
             color_hex=orm.color_hex,
             notes=orm.notes,
+            loading_priority=orm.loading_priority or 0,
         )
     except (DomainValidationError, ValueError, KeyError) as exc:
         raise RepositoryError(f"Producto de catálogo corrupto (id={orm.id}): {exc}") from exc
@@ -240,6 +243,7 @@ class ProductCatalogRepository:
                 extinguisher_nominal_kg=orm.extinguisher_nominal_kg,
                 color_hex=orm.color_hex,
                 notes=orm.notes,
+                loading_priority=0,
                 created_at=now,
                 updated_at=now,
                 is_active=True,

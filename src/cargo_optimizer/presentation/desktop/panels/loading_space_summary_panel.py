@@ -63,6 +63,7 @@ class LoadingSpaceSummaryPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("loadingSpaceSummaryPanel")
+        self.setAutoFillBackground(True)
         self._grouped = _grouped_profile_names()
         self._updating = False
 
@@ -72,33 +73,43 @@ class LoadingSpaceSummaryPanel(QWidget):
 
         self._dimensions_label = QLabel(_EMPTY, self)
         self._dimensions_label.setStyleSheet("font-size: 13pt; font-weight: 600;")
+        self._volume_label = QLabel(_EMPTY, self)
+        self._volume_label.setProperty("class", "mutedLabel")
         self._weight_label = QLabel(_EMPTY, self)
 
         self._change_button = QPushButton("Cambiar medidas…", self)
+        self._change_button.setToolTip("Abrir el editor completo del espacio de carga")
 
         self._type_combo.currentTextChanged.connect(self._on_type_changed)
         self._profile_combo.currentTextChanged.connect(self._on_profile_changed)
         self._change_button.clicked.connect(self.change_requested)
 
         form = QFormLayout()
+        form.setSpacing(6)
         form.addRow("Tipo", self._type_combo)
         form.addRow("Perfil", self._profile_combo)
 
-        summary_row = QVBoxLayout()
-        summary_row.addWidget(QLabel("Resumen", self))
-        summary_row.addWidget(self._dimensions_label)
-        summary_row.addWidget(self._weight_label)
+        dims_sub = QVBoxLayout()
+        dims_sub.setSpacing(1)
+        dims_sub.addWidget(self._dimensions_label)
+        dims_sub.addWidget(self._volume_label)
 
-        button_row = QHBoxLayout()
-        button_row.addWidget(self._change_button)
-        button_row.addStretch(1)
+        dims_row = QHBoxLayout()
+        dims_row.addLayout(dims_sub, 1)
+        dims_row.addWidget(self._weight_label)
+        dims_row.addWidget(self._change_button)
+
+        section_label = QLabel("ESPACIO DE CARGA", self)
+        section_label.setStyleSheet(
+            "font-weight: 700; font-size: 9pt; color: #999; letter-spacing: 0.5px;"
+        )
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.addWidget(QLabel("<b>ESPACIO DE CARGA</b>", self))
+        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setSpacing(6)
+        layout.addWidget(section_label)
         layout.addLayout(form)
-        layout.addLayout(summary_row)
-        layout.addLayout(button_row)
+        layout.addLayout(dims_row)
 
         self._populate_profile_combo(self._type_combo.currentText())
 
@@ -155,12 +166,15 @@ class LoadingSpaceSummaryPanel(QWidget):
     def set_summary(self, space: LoadingSpace | None) -> None:
         if space is None:
             self._dimensions_label.setText(_EMPTY)
+            self._volume_label.setText(_EMPTY)
             self._weight_label.setText(_EMPTY)
             return
         dims = space.internal_dimensions
         self._dimensions_label.setText(
             f"{dims.length_cm:.0f} × {dims.width_cm:.0f} × {dims.height_cm:.0f} cm"
         )
+        volume_m3 = (dims.length_cm * dims.width_cm * dims.height_cm) / 1_000_000
+        self._volume_label.setText(f"{volume_m3:.2f} m³ disponibles")
         self._weight_label.setText(
             f"{space.max_weight_kg:,.0f} kg".replace(",", ".")
             if space.max_weight_kg is not None

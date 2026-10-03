@@ -15,9 +15,37 @@ instalado.
 from __future__ import annotations
 
 from datetime import datetime
+from html import escape
 
 from PySide6.QtGui import QFontDatabase
-from PySide6.QtWidgets import QPlainTextEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QHBoxLayout,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+
+# Prefijos que determinan el color del renglón
+_COLOR_ERROR = "#C62828"        # rojo — Error:
+_COLOR_CANCEL = "#FB8C00"       # naranja — Cancelación
+_COLOR_SUCCESS = "#2E7D32"      # verde oscuro — éxito / resultado
+_COLOR_INFO = "#1565C0"         # azul — Proyecto/actividad
+
+
+def _entry_color(message: str) -> str | None:
+    """Devuelve el color HTML para la línea, o None para el color por defecto."""
+    msg = message.lower()
+    if msg.startswith("error"):
+        return _COLOR_ERROR
+    if msg.startswith("cancelaci"):
+        return _COLOR_CANCEL
+    if any(kw in msg for kw in ("completada", "exitosamente", "resultado", "cargados")):
+        return _COLOR_SUCCESS
+    if any(kw in msg for kw in ("proyecto", "abiert", "guardad", "erp")):
+        return _COLOR_INFO
+    return None
 
 
 class LogPanel(QWidget):
@@ -27,21 +55,52 @@ class LogPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("logPanel")
 
-        self._text = QPlainTextEdit(self)
+        self._text = QTextEdit(self)
         self._text.setObjectName("logText")
         self._text.setReadOnly(True)
         self._text.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
 
+        self._copy_button = QPushButton("Copiar", self)
+        self._copy_button.setToolTip("Copiar el registro al portapapeles")
+        self._copy_button.setFixedHeight(24)
+        self._copy_button.setProperty("class", "compact")
+        self._copy_button.clicked.connect(self._copy_to_clipboard)
+
+        self._clear_button = QPushButton("Limpiar", self)
+        self._clear_button.setToolTip("Limpiar el registro de esta sesión")
+        self._clear_button.setFixedHeight(24)
+        self._clear_button.setProperty("class", "compact")
+        self._clear_button.clicked.connect(self.clear)
+
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(0, 2, 0, 0)
+        btn_row.addStretch(1)
+        btn_row.addWidget(self._copy_button)
+        btn_row.addWidget(self._clear_button)
+
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(2)
         layout.addWidget(self._text)
+        layout.addLayout(btn_row)
 
     def append_entry(self, message: str) -> None:
         timestamp = datetime.now().strftime("%H:%M:%S")
-        self._text.appendPlainText(f"[{timestamp}] {message}")
+        color = _entry_color(message)
+        ts_html = f'<span style="color:#888888;">[{timestamp}]</span>'
+        if color:
+            msg_html = f'<span style="color:{color};">{escape(message)}</span>'
+        else:
+            msg_html = escape(message)
+        self._text.append(f"{ts_html} {msg_html}")
 
     def clear(self) -> None:
         self._text.clear()
 
     def text(self) -> str:
         return self._text.toPlainText()
+
+    def _copy_to_clipboard(self) -> None:
+        clipboard = QApplication.clipboard()
+        if clipboard is not None:
+            clipboard.setText(self._text.toPlainText())

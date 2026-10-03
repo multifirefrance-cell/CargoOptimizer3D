@@ -18,24 +18,25 @@ from uuid import UUID, uuid4
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
     QCheckBox,
-    QColorDialog,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
-from cargo_optimizer.domain.color_suggestions import suggest_pastel_color
 from cargo_optimizer.domain.dimensions import Dimensions3D
 from cargo_optimizer.domain.enums import ExtinguisherAgent, OrientationCode, PackageType
 from cargo_optimizer.domain.exceptions import DomainValidationError
@@ -76,6 +77,81 @@ _ORIENTATION_LABELS: dict[OrientationCode, str] = {
 
 _DEFAULT_EXTINGUISHER_NOMINAL_KG = 1.0
 
+_PALETTE: tuple[str, ...] = (
+    "#E53935", "#E91E63", "#AB47BC", "#5C6BC0",
+    "#1E88E5", "#26C6DA", "#26A69A", "#66BB6A",
+    "#9CCC65", "#FFCA28", "#FFA726", "#FF7043",
+    "#8D6E63", "#78909C", "#BDBDBD", "#42A5F5",
+)
+_PALETTE_COLS = 8
+
+
+def _closest_palette_color(hex_color: str) -> str:
+    for c in _PALETTE:
+        if c.lower() == hex_color.lower():
+            return c
+    target = QColor(hex_color)
+    if not target.isValid():
+        return _PALETTE[0]
+    best, best_dist = _PALETTE[0], float("inf")
+    for c in _PALETTE:
+        pc = QColor(c)
+        dr, dg, db = target.red() - pc.red(), target.green() - pc.green(), target.blue() - pc.blue()
+        dist = dr * dr + dg * dg + db * db
+        if dist < best_dist:
+            best_dist, best = dist, c
+    return best
+
+
+class _ColorPaletteWidget(QWidget):
+    """Grilla de swatches de color; clic para seleccionar."""
+
+    def __init__(self, used_colors: Sequence[str] = (), parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._used = {c.lower() for c in used_colors}
+        self._buttons: dict[str, QPushButton] = {}
+        self._selected: str = _PALETTE[0]
+
+        grid = QGridLayout(self)
+        grid.setSpacing(5)
+        grid.setContentsMargins(0, 0, 0, 0)
+        for i, color in enumerate(_PALETTE):
+            btn = QPushButton(self)
+            btn.setFixedSize(28, 28)
+            used = color.lower() in self._used
+            btn.setToolTip(color + (" · ya en uso" if used else ""))
+            btn.clicked.connect(lambda *, c=color: self._select(c))
+            self._buttons[color] = btn
+            grid.addWidget(btn, i // _PALETTE_COLS, i % _PALETTE_COLS)
+
+        self._refresh_styles()
+
+    def _select(self, color: str) -> None:
+        self._selected = color
+        self._refresh_styles()
+
+    def _refresh_styles(self) -> None:
+        for color, btn in self._buttons.items():
+            selected = color == self._selected
+            used = color.lower() in self._used
+            if selected:
+                border = "3px solid #1a1a1a"
+            elif used:
+                border = "2px solid #FB8C00"
+            else:
+                border = "2px solid rgba(0,0,0,0.18)"
+            btn.setStyleSheet(
+                f"QPushButton {{ background: {color}; border: {border}; border-radius: 5px; }}"
+                f"QPushButton:hover {{ border: 2px solid #555; }}"
+            )
+
+    def select(self, hex_color: str) -> None:
+        match = _closest_palette_color(hex_color)
+        self._select(match)
+
+    def selected_color(self) -> str:
+        return self._selected
+
 
 class CatalogProductEditorDialog(QDialog):
     """Formulario modal para crear o editar un producto del catálogo."""
@@ -115,6 +191,14 @@ class CatalogProductEditorDialog(QDialog):
         self._max_stack_spin = QSpinBox(self)
         self._max_stack_spin.setRange(1, 100)
 
+        self._priority_spin = QSpinBox(self)
+        self._priority_spin.setRange(0, 99)
+        self._priority_spin.setSpecialValueText("0 — automático (por volumen)")
+        self._priority_spin.setToolTip(
+            "0 = el algoritmo ordena este SKU por volumen (comportamiento automático).\n"
+            "1–99 = posición en el contenedor: 1 queda al fondo, valores mayores quedan arriba."
+        )
+
         self._no_max_supported_weight_check = QCheckBox("Sin límite", self)
         self._max_supported_weight_spin = QDoubleSpinBox(self)
         self._max_supported_weight_spin.setRange(0.0, 1_000_000.0)
@@ -138,12 +222,8 @@ class CatalogProductEditorDialog(QDialog):
         self._extinguisher_nominal_spin.setSuffix(" kg")
         self._is_extinguisher_check.toggled.connect(self._on_is_extinguisher_toggled)
 
-        self._color_edit = QLineEdit(self)
-        self._color_edit.setPlaceholderText("#RRGGBB")
-        self._color_picker_button = QPushButton("...", self)
-        self._color_picker_button.setFixedWidth(32)
-        self._color_picker_button.setToolTip("Elegir color…")
-        self._color_picker_button.clicked.connect(self._on_pick_color)
+        used = [c for c in existing_colors if c]
+        self._palette_widget = _ColorPaletteWidget(used, self)
         self._notes_edit = QPlainTextEdit(self)
         self._notes_edit.setFixedHeight(60)
 
@@ -152,6 +232,9 @@ class CatalogProductEditorDialog(QDialog):
         )
         self._button_box.accepted.connect(self._on_accept)
         self._button_box.rejected.connect(self.reject)
+        ok_btn = self._button_box.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_btn is not None:
+            ok_btn.setProperty("class", "primary")
 
         self._build_layout()
         self._on_is_extinguisher_toggled(False)
@@ -159,10 +242,9 @@ class CatalogProductEditorDialog(QDialog):
         if load_unit is not None:
             self._populate_from(load_unit)
         else:
-            # Color pastel automático (fase OPT-17): solo para un SKU
-            # nuevo sin color todavía. Si el SKU ya tiene un color
-            # guardado (rama `_populate_from` de arriba), nunca se toca.
-            self._color_edit.setText(suggest_pastel_color(existing_colors))
+            used_lower = {c.lower() for c in existing_colors}
+            first_unused = next((c for c in _PALETTE if c.lower() not in used_lower), _PALETTE[0])
+            self._palette_widget.select(first_unused)
             # Orientaciones reducidas por defecto (fase OPT-17, ver
             # `DEFAULT_ORIENTATION_CODES`): un producto nuevo solo se
             # marca horizontal, largo paralelo al contenedor + su única
@@ -195,6 +277,7 @@ class CatalogProductEditorDialog(QDialog):
         form.addRow("Tipo de empaque", self._package_type_combo)
         form.addRow("Unidades por paquete", self._units_per_package_spin)
         form.addRow("Límite máximo de apilamiento", self._max_stack_spin)
+        form.addRow("Prioridad de carga", self._priority_spin)
 
         max_weight_row = QHBoxLayout()
         max_weight_row.addWidget(self._max_supported_weight_spin)
@@ -202,10 +285,7 @@ class CatalogProductEditorDialog(QDialog):
         form.addRow("Peso máximo soportado", max_weight_row)
 
         form.addRow("", self._fragile_check)
-        color_row = QHBoxLayout()
-        color_row.addWidget(self._color_edit)
-        color_row.addWidget(self._color_picker_button)
-        form.addRow("Color", color_row)
+        form.addRow("Color", self._palette_widget)
         form.addRow("Notas", self._notes_edit)
 
         orientations_group = QGroupBox("Orientaciones permitidas", self)
@@ -219,25 +299,26 @@ class CatalogProductEditorDialog(QDialog):
         extinguisher_layout.addRow("Agente", self._extinguisher_agent_combo)
         extinguisher_layout.addRow("Peso nominal", self._extinguisher_nominal_spin)
 
+        scroll_content = QWidget(self)
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+        scroll_layout.addLayout(form)
+        scroll_layout.addWidget(orientations_group)
+        scroll_layout.addWidget(extinguisher_group)
+        scroll_layout.addStretch(1)
+
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(scroll_content)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+
         layout = QVBoxLayout(self)
-        layout.addLayout(form)
-        layout.addWidget(orientations_group)
-        layout.addWidget(extinguisher_group)
+        layout.addWidget(scroll, 1)
         layout.addWidget(self._button_box)
 
     def _on_is_extinguisher_toggled(self, checked: bool) -> None:
         self._extinguisher_agent_combo.setEnabled(checked)
         self._extinguisher_nominal_spin.setEnabled(checked)
-
-    def _on_pick_color(self) -> None:
-        """Selector visual de color (fase OPT-17): el usuario siempre puede sobrescribir
-        el color pastel automático o el ya guardado con cualquier color de su elección."""
-        current = QColor(self._color_edit.text().strip() or "#CCCCCC")
-        if not current.isValid():
-            current = QColor("#CCCCCC")
-        chosen = QColorDialog.getColor(current, self, "Elegir color")
-        if chosen.isValid():
-            self._color_edit.setText(chosen.name().upper())
 
     def _populate_from(self, load_unit: LoadUnit) -> None:
         self._sku_edit.setText(load_unit.sku)
@@ -251,6 +332,7 @@ class CatalogProductEditorDialog(QDialog):
             self._package_type_combo.setCurrentIndex(index)
         self._units_per_package_spin.setValue(load_unit.units_per_package)
         self._max_stack_spin.setValue(load_unit.max_stack_count)
+        self._priority_spin.setValue(load_unit.loading_priority)
         self._no_max_supported_weight_check.setChecked(load_unit.max_supported_weight_kg is None)
         self._max_supported_weight_spin.setValue(load_unit.max_supported_weight_kg or 0.0)
         for code, check in self._orientation_checks.items():
@@ -264,7 +346,7 @@ class CatalogProductEditorDialog(QDialog):
             self._extinguisher_nominal_spin.setValue(
                 load_unit.extinguisher_nominal_kg or _DEFAULT_EXTINGUISHER_NOMINAL_KG
             )
-        self._color_edit.setText(load_unit.color_hex)
+        self._palette_widget.select(load_unit.color_hex)
         self._notes_edit.setPlainText(load_unit.notes)
 
     def _build_load_unit(self) -> LoadUnit:
@@ -311,8 +393,9 @@ class CatalogProductEditorDialog(QDialog):
             extinguisher_nominal_kg=(
                 self._extinguisher_nominal_spin.value() if is_extinguisher else None
             ),
-            color_hex=self._color_edit.text().strip() or "#CCCCCC",
+            color_hex=self._palette_widget.selected_color(),
             notes=self._notes_edit.toPlainText(),
+            loading_priority=self._priority_spin.value(),
         )
 
     def _on_accept(self) -> None:

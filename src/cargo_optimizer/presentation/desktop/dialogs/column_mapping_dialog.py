@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QHBoxLayout,
+    QHeaderView,
     QInputDialog,
     QLabel,
     QMessageBox,
@@ -58,8 +59,13 @@ class ColumnMappingDialog(QDialog):
 
         self._table = QTableWidget(len(source_headers), 2, self)
         self._table.setHorizontalHeaderLabels(["Columna del archivo", "Campo del sistema"])
-        self._table.horizontalHeader().setStretchLastSection(True)
+        self._table.setAlternatingRowColors(False)
         self._table.verticalHeader().setVisible(False)
+        _mh = self._table.horizontalHeader()
+        _mh.setStretchLastSection(False)
+        _mh.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        _mh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        _mh.resizeSection(0, 200)
         self._combos: list[QComboBox] = []
         for row, header in enumerate(source_headers):
             self._table.setItem(row, 0, QTableWidgetItem(header))
@@ -87,6 +93,9 @@ class ColumnMappingDialog(QDialog):
         button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, self
         )
+        ok_btn = button_box.button(QDialogButtonBox.StandardButton.Ok)
+        if ok_btn is not None:
+            ok_btn.setProperty("class", "primary")
         button_box.accepted.connect(self._on_accept)
         button_box.rejected.connect(self.reject)
 

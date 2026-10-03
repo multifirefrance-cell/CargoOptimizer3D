@@ -27,10 +27,13 @@ from PySide6.QtWidgets import (
 )
 
 from cargo_optimizer.presentation.desktop.style import (
+    ERROR_DARK,
     ERROR_LIGHT,
     SPACING_SM,
     SPACING_XS,
+    SUCCESS_DARK,
     SUCCESS_LIGHT,
+    WARNING_DARK,
     WARNING_LIGHT,
 )
 
@@ -42,6 +45,16 @@ _STALE_MESSAGE = "⚠ El resultado anterior fue invalidado porque el proyecto ca
 # truncado — ver `_tile()`).
 _VALUE_STYLE = "font-size: 15pt; font-weight: 700;"
 _TITLE_STYLE = "font-size: 8pt; font-weight: 600; text-transform: uppercase;"
+
+
+def _utilization_color(pct: float) -> str:
+    if pct >= 85:
+        return "#43A047"
+    if pct >= 60:
+        return "#FB8C00"
+    if pct > 0:
+        return "#1E88E5"
+    return "#888888"
 
 
 class _ClickableFrame(QFrame):
@@ -88,6 +101,7 @@ def _tile(title: str, *, clickable: bool = False) -> tuple[QFrame, QLabel]:
         frame.setCursor(Qt.CursorShape.PointingHandCursor)
         frame.setToolTip("Ver el detalle de unidades pendientes por SKU")
     title_label = QLabel(title, frame)
+    title_label.setObjectName("kpiTileTitle")
     title_label.setStyleSheet(_TITLE_STYLE)
     title_label.setWordWrap(True)
     value_label = QLabel(_EMPTY, frame)
@@ -111,6 +125,7 @@ class ResultsPanel(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("resultsPanel")
+        self._dark: bool = False
 
         self._stale_label = QLabel(_STALE_MESSAGE, self)
         self._stale_label.setObjectName("resultsStaleLabel")
@@ -118,14 +133,19 @@ class ResultsPanel(QWidget):
         self._stale_label.setStyleSheet(f"color: {WARNING_LIGHT.name()}; font-weight: 600;")
         self._stale_label.setVisible(False)
 
-        packed_tile, self._packed_label = _tile("Cantidad cargada")
-        pending_tile, self._pending_label = _tile("Cantidad pendiente", clickable=True)
-        assert isinstance(pending_tile, _ClickableFrame)
-        pending_tile.clicked.connect(self.pending_tile_clicked)
-        utilization_tile, self._utilization_label = _tile("Utilización")
+        self._packed_tile, self._packed_label = _tile("Cantidad cargada")
+        self._packed_tile.setToolTip("Unidades que caben en el espacio de carga")
+        self._pending_tile, self._pending_label = _tile("Cantidad pendiente", clickable=True)
+        assert isinstance(self._pending_tile, _ClickableFrame)
+        self._pending_tile.clicked.connect(self.pending_tile_clicked)
+        self._utilization_tile, self._utilization_label = _tile("Utilización")
+        self._utilization_tile.setToolTip("Porcentaje del volumen interior ocupado por las cajas")
         volume_tile, self._volume_label = _tile("Volumen")
+        volume_tile.setToolTip("Volumen total ocupado por las cajas cargadas")
         weight_tile, self._weight_label = _tile("Peso")
+        weight_tile.setToolTip("Peso total de las cajas cargadas")
         time_tile, self._time_label = _tile("Tiempo")
+        time_tile.setToolTip("Tiempo de cálculo del motor de optimización")
 
         # Una sola fila de 6 tarjetas (antes 2x3): la disposición en dos
         # filas casi duplicaba la altura mínima de este panel. `setColumnStretch`
@@ -137,7 +157,7 @@ class ResultsPanel(QWidget):
         grid = QGridLayout()
         grid.setSpacing(SPACING_XS)
         for column, tile in enumerate(
-            (utilization_tile, weight_tile, volume_tile, packed_tile, pending_tile, time_tile)
+            (self._utilization_tile, weight_tile, volume_tile, self._packed_tile, self._pending_tile, time_tile)
         ):
             grid.addWidget(tile, 0, column)
             grid.setColumnStretch(column, 1)
@@ -184,7 +204,24 @@ class ResultsPanel(QWidget):
         self._packed_label.setStyleSheet(_VALUE_STYLE)
         self._pending_label.setStyleSheet(_VALUE_STYLE)
         self._utilization_label.setStyleSheet(_VALUE_STYLE)
+        for tile in (self._packed_tile, self._pending_tile, self._utilization_tile):
+            self._clear_tile_accent(tile)
         self.set_stale(False)
+
+    @staticmethod
+    def _set_tile_accent(tile: QFrame, hex_color: str) -> None:
+        tile.setStyleSheet(
+            f"QFrame {{ border-left: 3px solid {hex_color}; border-radius: 4px; }}"
+        )
+
+    @staticmethod
+    def _clear_tile_accent(tile: QFrame) -> None:
+        tile.setStyleSheet("")
+
+    def set_dark_mode(self, dark: bool) -> None:
+        self._dark = dark
+        warning = WARNING_DARK if dark else WARNING_LIGHT
+        self._stale_label.setStyleSheet(f"color: {warning.name()}; font-weight: 600;")
 
     def set_stale(self, stale: bool) -> None:
         """Muestra u oculta el aviso de "resultado invalidado" (fase 7.0)."""
@@ -213,16 +250,20 @@ class ResultsPanel(QWidget):
         self._status_label.setText(status)
         self._warnings_label.setText("Ninguno" if warnings_count == 0 else str(warnings_count))
 
-        # Color de estado: verde cuando todo se cargó, ámbar cuando quedaron
-        # unidades pendientes, rojo si además la ejecución se canceló — el
-        # usuario entiende el resultado sin leer cada tarjeta (rediseño UX).
+        # Color de estado para cajas cargadas/pendientes (adaptado al tema)
         if pending_count == 0 and status != "Cancelado":
-            emphasis_color = SUCCESS_LIGHT
+            emphasis_color = SUCCESS_DARK if self._dark else SUCCESS_LIGHT
         elif status == "Cancelado":
-            emphasis_color = ERROR_LIGHT
+            emphasis_color = ERROR_DARK if self._dark else ERROR_LIGHT
         else:
-            emphasis_color = WARNING_LIGHT
-        emphasis_style = f"{_VALUE_STYLE} color: {emphasis_color.name()};"
+            emphasis_color = WARNING_DARK if self._dark else WARNING_LIGHT
+        emphasis_hex = emphasis_color.name()
+        emphasis_style = f"{_VALUE_STYLE} color: {emphasis_hex};"
         self._packed_label.setStyleSheet(emphasis_style)
         self._pending_label.setStyleSheet(emphasis_style)
-        self._utilization_label.setStyleSheet(emphasis_style)
+        self._set_tile_accent(self._packed_tile, emphasis_hex)
+        self._set_tile_accent(self._pending_tile, emphasis_hex)
+        # Utilización usa umbrales propios (coherente con ViewerStatsHeader)
+        util_color = _utilization_color(utilization_percent)
+        self._utilization_label.setStyleSheet(f"{_VALUE_STYLE} color: {util_color};")
+        self._set_tile_accent(self._utilization_tile, util_color)

@@ -20,7 +20,6 @@ from cargo_optimizer.domain.load_unit import LoadUnit
 from cargo_optimizer.domain.loading_space import LoadingSpace
 from cargo_optimizer.domain.orientation import Orientation
 from cargo_optimizer.rules.codes import (
-    EXTINGUISHER_AXIS_NOT_PARALLEL_TO_X,
     EXTINGUISHER_GROUPED_CAPACITY_NONSTANDARD,
     EXTINGUISHER_INDIVIDUAL_MUST_BE_HORIZONTAL,
 )
@@ -38,21 +37,14 @@ distintos (3 kg y 3.5 kg siguen siendo nominales distintos).
 _RECOMMENDED_UNITS_PER_PACKAGE: dict[float, int] = {1.0: 10, 2.0: 8, 3.0: 6}
 """Capacidades recomendadas (no obligatorias) por kg nominal de extintor."""
 
-# Eje (X/Y/Z) sobre el que queda la dimensión original `length_cm` de la caja
-# para cada OrientationCode. Ver el docstring de OrientationCode en
-# cargo_optimizer.domain.enums para la semántica exacta de cada código
-# (LWH_XYZ: length->X; WLH_XYZ: length->Y; LHW_XYZ: length->X;
-# HWL_XYZ: length->Z; WHL_XYZ: length->Z; HLW_XYZ: length->Y). No se deriva
-# dinámicamente porque OrientationCode es un enum pequeño y cerrado, estable
-# por contrato (ADR-0005); una prueba dedicada verifica que esta tabla no
-# haya divergido de la semántica real de `Orientation.from_base_dimensions`.
-_LENGTH_AXIS_BY_CODE: dict[OrientationCode, str] = {
-    OrientationCode.LWH_XYZ: "X",
-    OrientationCode.LHW_XYZ: "X",
-    OrientationCode.WLH_XYZ: "Y",
-    OrientationCode.HLW_XYZ: "Y",
-    OrientationCode.HWL_XYZ: "Z",
-    OrientationCode.WHL_XYZ: "Z",
+# Dimensión original que queda sobre el eje Z (vertical) para cada código.
+_Z_DIM_BY_CODE: dict[OrientationCode, str] = {
+    OrientationCode.LWH_XYZ: "height",
+    OrientationCode.LHW_XYZ: "width",
+    OrientationCode.WLH_XYZ: "height",
+    OrientationCode.WHL_XYZ: "length",
+    OrientationCode.HWL_XYZ: "length",
+    OrientationCode.HLW_XYZ: "width",
 }
 
 
@@ -129,27 +121,27 @@ def evaluate_extinguisher_orientation(
     loading_space: LoadingSpace,
     orientation: Orientation,
 ) -> RuleEvaluation:
-    """Para extintores individuales grandes: el eje `length_cm` original debe quedar sobre X.
+    """Para extintores individuales >= 3 kg: el eje longitudinal debe quedar horizontal.
 
-    Cualquier otra orientación se rechaza: si `length` termina en Z, la
-    caja quedaría vertical; si termina en Y, quedaría horizontal pero
-    no paralela a X. Para cualquier otro LoadUnit, la regla no aplica y
-    se permite siempre.
+    Se permiten dos variantes horizontales:
+    - **Paralela** (largo sobre X): orientación principal; el algoritmo la
+      elige como preferida en la ronda 1 porque maximiza la tesela del
+      piso a lo largo del contenedor.
+    - **Perpendicular** (largo sobre Y): fallback automático en ronda 2
+      para llenar el hueco residual cuando el espacio paralelo se agota.
 
-    `loading_space` se recibe por uniformidad con el resto de la API de
-    `rules` (todas las evaluaciones de orientación reciben el mismo
-    conjunto de argumentos); esta regla en concreto no depende de sus
-    dimensiones, porque el eje X es una propiedad fija del sistema de
-    coordenadas, no del espacio de carga concreto.
+    Solo se rechaza la orientación vertical (eje longitudinal sobre Z).
+    Para cualquier otro LoadUnit la regla no aplica.
     """
     if not is_individual_large_extinguisher(load_unit):
         return RuleEvaluation.allowed()
 
-    axis = _LENGTH_AXIS_BY_CODE[orientation.code]
-    if axis == "X":
-        return RuleEvaluation.allowed()
+    d = load_unit.dimensions
+    long = max(d.length_cm, d.width_cm, d.height_cm)
+    z_dim_name = _Z_DIM_BY_CODE[orientation.code]
+    z_val = getattr(d, f"{z_dim_name}_cm")
 
-    if axis == "Z":
+    if z_val >= long:
         return RuleEvaluation.rejected(
             (
                 RuleViolation(
@@ -164,17 +156,4 @@ def evaluate_extinguisher_orientation(
             )
         )
 
-    return RuleEvaluation.rejected(
-        (
-            RuleViolation(
-                code=EXTINGUISHER_AXIS_NOT_PARALLEL_TO_X,
-                message=(
-                    f"'{load_unit.sku}' es un extintor individual >= 3 kg: su eje "
-                    "longitudinal debe quedar paralelo a X; en esta orientación queda "
-                    "sobre Y."
-                ),
-                severity=RuleSeverity.ERROR,
-                load_unit_id=load_unit.id,
-            ),
-        )
-    )
+    return RuleEvaluation.allowed()

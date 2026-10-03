@@ -118,12 +118,14 @@ class LoadUnit:
     max_stack_count: int = DEFAULT_MAX_STACK_COUNT
     max_supported_weight_kg: float | None = None
     allowed_orientation_codes: tuple[OrientationCode, ...] = DEFAULT_ORIENTATION_CODES
+    gap_fill_orientation_codes: tuple[OrientationCode, ...] = ()
     fragile: bool = False
     is_extinguisher: bool = False
     extinguisher_agent: ExtinguisherAgent = ExtinguisherAgent.NOT_APPLICABLE
     extinguisher_nominal_kg: float | None = None
     color_hex: str = "#CCCCCC"
     notes: str = ""
+    loading_priority: int = 0
     id: UUID = field(default_factory=uuid4)
 
     def __post_init__(self) -> None:
@@ -131,6 +133,8 @@ class LoadUnit:
             raise DomainValidationError("El SKU del Load Unit no puede estar vacío.")
         if not self.name.strip():
             raise DomainValidationError("El nombre del Load Unit no puede estar vacío.")
+        if self.loading_priority < 0:
+            raise DomainValidationError("loading_priority no puede ser negativo.")
         if self.weight_kg < 0:
             raise DomainValidationError("weight_kg no puede ser negativo.")
         if self.quantity < 1:
@@ -155,6 +159,11 @@ class LoadUnit:
             self,
             "allowed_orientation_codes",
             _dedupe_preserving_order(self.allowed_orientation_codes),
+        )
+        object.__setattr__(
+            self,
+            "gap_fill_orientation_codes",
+            _dedupe_preserving_order(self.gap_fill_orientation_codes),
         )
 
     def _validate_extinguisher_fields(self) -> None:

@@ -23,8 +23,11 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFormLayout,
+    QFrame,
+    QHBoxLayout,
     QLabel,
     QPlainTextEdit,
+    QScrollArea,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -50,7 +53,17 @@ class SelectionDetailsPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("selectionDetailsPanel")
 
+        self._color_swatch = QLabel(self)
+        self._color_swatch.setFixedSize(14, 14)
+        self._color_swatch.setStyleSheet("border-radius: 3px; border: 1px solid rgba(0,0,0,0.15);")
         self._sku_label = QLabel(_EMPTY, self)
+        self._sku_label.setStyleSheet("font-weight: 700;")
+        self._sku_row_widget = QWidget(self)
+        sku_row = QHBoxLayout(self._sku_row_widget)
+        sku_row.setContentsMargins(0, 0, 0, 0)
+        sku_row.setSpacing(6)
+        sku_row.addWidget(self._color_swatch)
+        sku_row.addWidget(self._sku_label, 1)
         self._name_label = QLabel(_EMPTY, self)
         self._instance_label = QLabel(_EMPTY, self)
         self._sequence_label = QLabel(_EMPTY, self)
@@ -71,13 +84,18 @@ class SelectionDetailsPanel(QWidget):
         details_page = QWidget(self)
         self._form = QFormLayout(details_page)
         self._form.setContentsMargins(8, 4, 8, 4)
-        self._form.addRow("SKU", self._sku_label)
+        # Grupo 1: Identificación
+        self._form.addRow("SKU", self._sku_row_widget)
         self._form.addRow("Nombre", self._name_label)
         self._form.addRow("Instancia", self._instance_label)
+        self._form.addRow(self._make_sep())
+        # Grupo 2: Posición y orientación
         self._form.addRow("Secuencia de carga", self._sequence_label)
         self._form.addRow("Posición X/Y/Z (cm)", self._position_label)
         self._form.addRow("Largo/Ancho/Alto (cm)", self._dimensions_label)
         self._form.addRow("Orientación", self._orientation_label)
+        self._form.addRow(self._make_sep())
+        # Grupo 3: Propiedades físicas y logísticas
         self._form.addRow("Peso bruto", self._weight_label)
         self._form.addRow("Tipo de empaque", self._package_type_label)
         self._form.addRow("Unidades por paquete", self._units_per_package_label)
@@ -97,14 +115,27 @@ class SelectionDetailsPanel(QWidget):
         placeholder_layout.addWidget(placeholder_label)
         placeholder_layout.addStretch(1)
 
+        details_scroll = QScrollArea(self)
+        details_scroll.setWidgetResizable(True)
+        details_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        details_scroll.setWidget(details_page)
+
         self._stack = QStackedWidget(self)
         self._stack.insertWidget(_PAGE_EMPTY, placeholder_page)
-        self._stack.insertWidget(_PAGE_DETAILS, details_page)
+        self._stack.insertWidget(_PAGE_DETAILS, details_scroll)
         self._stack.setCurrentIndex(_PAGE_EMPTY)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self._stack)
+
+    @staticmethod
+    def _make_sep() -> QFrame:
+        sep = QFrame()
+        sep.setObjectName("formSectionSep")
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setFrameShadow(QFrame.Shadow.Plain)
+        return sep
 
     def clear(self) -> None:
         for label in (
@@ -125,10 +156,17 @@ class SelectionDetailsPanel(QWidget):
         ):
             label.setText(_EMPTY)
         self._notes_text.setPlainText("")
+        self._sku_label.setStyleSheet("font-weight: 700;")
+        self._color_swatch.setStyleSheet("border-radius: 3px; border: 1px solid rgba(0,0,0,0.15);")
         self._stack.setCurrentIndex(_PAGE_EMPTY)
 
     def display_placement(self, model: PlacementVisualModel) -> None:
+        color = model.color_hex or "#CCCCCC"
+        self._color_swatch.setStyleSheet(
+            f"background: {color}; border-radius: 3px; border: 1px solid rgba(0,0,0,0.15);"
+        )
         self._sku_label.setText(model.sku)
+        self._sku_label.setStyleSheet("font-weight: 700;")
         self._name_label.setText(model.name)
         self._instance_label.setText(str(model.instance_number))
         self._sequence_label.setText(str(model.sequence_number))
