@@ -35,6 +35,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QDialog,
+    QFrame,
     QHeaderView,
     QHBoxLayout,
     QInputDialog,
@@ -137,6 +138,7 @@ class ProductCatalogDialog(QDialog):
         self._duplicate_button = QPushButton("Duplicar…", self)
         self._duplicate_button.setToolTip("Crear una copia del producto seleccionado con un SKU nuevo")
         self._archive_button = QPushButton("Archivar", self)
+        self._archive_button.setProperty("class", "warning")
         self._archive_button.setToolTip("Ocultar el producto del catálogo (reversible con Restaurar)")
         self._restore_button = QPushButton("Restaurar", self)
         self._restore_button.setToolTip("Reactivar un producto archivado")
@@ -166,14 +168,13 @@ class ProductCatalogDialog(QDialog):
         search_row.addWidget(self._show_archived_check)
 
         buttons_layout = QHBoxLayout()
-        for button in (
-            self._add_button,
-            self._edit_button,
-            self._duplicate_button,
-            self._archive_button,
-            self._restore_button,
-            self._sync_induprox_button,
-        ):
+        for button in (self._add_button, self._edit_button, self._duplicate_button):
+            buttons_layout.addWidget(button)
+        _sep = QFrame()
+        _sep.setFrameShape(QFrame.Shape.VLine)
+        _sep.setFrameShadow(QFrame.Shadow.Sunken)
+        buttons_layout.addWidget(_sep)
+        for button in (self._archive_button, self._restore_button, self._sync_induprox_button):
             buttons_layout.addWidget(button)
         buttons_layout.addStretch(1)
 

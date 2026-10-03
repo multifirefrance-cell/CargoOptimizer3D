@@ -67,6 +67,17 @@ def semantic_colors(theme: str) -> dict[str, QColor]:
     }
 
 
+def utilization_color(pct: float) -> str:
+    """Color de texto para un porcentaje de utilización del espacio de carga."""
+    if pct >= 85:
+        return "#43A047"
+    if pct >= 60:
+        return "#FB8C00"
+    if pct > 0:
+        return "#1E88E5"
+    return "#888888"
+
+
 def _light_palette() -> QPalette:
     palette = QPalette()
     palette.setColor(QPalette.ColorRole.Window, QColor("#F5F6F8"))
@@ -239,6 +250,24 @@ QLabel[class="kpi-value"]     { font-weight: 700; font-size: 14pt; }
 
 /* Botón Agregar: extra prominencia */
 #addToLoadButton { font-size: 10.5pt; }
+
+/* Botones de vista en la barra de estadísticas del visor 3D */
+#viewerStatsHeader QPushButton {
+    border: 1px solid #C0C4CC;
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-size: 8pt;
+    background: transparent;
+}
+#viewerStatsHeader QPushButton:hover   { background: #E8EBF0; border-color: #A0A4AC; }
+#viewerStatsHeader QPushButton:pressed { background: #D0D3D8; }
+
+/* Botón de acción de advertencia (destructivo reversible, p.ej. Archivar) */
+QPushButton[class="warning"] {
+    background: #FFF3E0; color: #B15C00; border: 1px solid #FFCC80;
+}
+QPushButton[class="warning"]:hover   { background: #FFE0B2; }
+QPushButton[class="warning"]:pressed { background: #FFCC80; }
 
 /* Panel de avisos: fondo ámbar sutil cuando hay contenido */
 #warningsList, #multiSpaceWarningsList {
@@ -461,6 +490,25 @@ QLabel[class="kpi-value"]     { font-weight: 700; font-size: 14pt; }
 /* Botón Agregar */
 #addToLoadButton { font-size: 10.5pt; }
 
+/* Botones de vista en la barra de estadísticas del visor 3D */
+#viewerStatsHeader QPushButton {
+    border: 1px solid #3A3F47;
+    border-radius: 4px;
+    padding: 2px 7px;
+    font-size: 8pt;
+    background: transparent;
+    color: #D0D0D0;
+}
+#viewerStatsHeader QPushButton:hover   { background: #33373F; border-color: #55595F; }
+#viewerStatsHeader QPushButton:pressed { background: #26292F; }
+
+/* Botón de acción de advertencia (destructivo reversible) */
+QPushButton[class="warning"] {
+    background: #2C1F0A; color: #F2A93B; border: 1px solid #5A3D00;
+}
+QPushButton[class="warning"]:hover   { background: #3A2910; }
+QPushButton[class="warning"]:pressed { background: #4A3515; }
+
 /* Panel de avisos: fondo ámbar oscuro muy sutil */
 #warningsList, #multiSpaceWarningsList {
     background: #252015;
@@ -590,4 +638,5 @@ __all__ = [
     "apply_theme",
     "other_theme",
     "semantic_colors",
+    "utilization_color",
 ]

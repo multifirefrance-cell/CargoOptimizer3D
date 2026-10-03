@@ -35,6 +35,7 @@ from cargo_optimizer.presentation.desktop.style import (
     SUCCESS_LIGHT,
     WARNING_DARK,
     WARNING_LIGHT,
+    utilization_color,
 )
 
 _EMPTY = "—"
@@ -45,16 +46,6 @@ _STALE_MESSAGE = "⚠ El resultado anterior fue invalidado porque el proyecto ca
 # truncado — ver `_tile()`).
 _VALUE_STYLE = "font-size: 15pt; font-weight: 700;"
 _TITLE_STYLE = "font-size: 8pt; font-weight: 600; text-transform: uppercase;"
-
-
-def _utilization_color(pct: float) -> str:
-    if pct >= 85:
-        return "#43A047"
-    if pct >= 60:
-        return "#FB8C00"
-    if pct > 0:
-        return "#1E88E5"
-    return "#888888"
 
 
 class _ClickableFrame(QFrame):
@@ -126,6 +117,9 @@ class ResultsPanel(QWidget):
         super().__init__(parent)
         self.setObjectName("resultsPanel")
         self._dark: bool = False
+        self._last_pending: int | None = None
+        self._last_status: str = ""
+        self._last_util_pct: float = 0.0
 
         self._stale_label = QLabel(_STALE_MESSAGE, self)
         self._stale_label.setObjectName("resultsStaleLabel")
@@ -189,6 +183,9 @@ class ResultsPanel(QWidget):
         layout.addStretch(1)
 
     def clear(self) -> None:
+        self._last_pending = None
+        self._last_status = ""
+        self._last_util_pct = 0.0
         for label in (
             self._requested_label,
             self._packed_label,
@@ -208,20 +205,48 @@ class ResultsPanel(QWidget):
             self._clear_tile_accent(tile)
         self.set_stale(False)
 
-    @staticmethod
-    def _set_tile_accent(tile: QFrame, hex_color: str) -> None:
+    def _set_tile_accent(self, tile: QFrame, hex_color: str) -> None:
+        if self._dark:
+            bg, hover_bg = "#23272E", "#2A2F38"
+            border, hover_border = "#343840", "#4A4F5A"
+        else:
+            bg, hover_bg = "#F5F7FA", "#EDF0F5"
+            border, hover_border = "#E0E3E8", "#C0C4CC"
         tile.setStyleSheet(
-            f"QFrame {{ border-left: 3px solid {hex_color}; border-radius: 4px; }}"
+            f"QFrame#kpiTile {{ background: {bg}; border: 1px solid {border}; "
+            f"border-left: 3px solid {hex_color}; border-radius: 6px; }}"
+            f"QFrame#kpiTile:hover {{ background: {hover_bg}; border: 1px solid {hover_border}; "
+            f"border-left: 3px solid {hex_color}; }}"
         )
 
     @staticmethod
     def _clear_tile_accent(tile: QFrame) -> None:
         tile.setStyleSheet("")
 
+    def _refresh_accent_colors(self) -> None:
+        if self._last_pending is None:
+            return
+        if self._last_pending == 0 and self._last_status != "Cancelado":
+            emphasis_color = SUCCESS_DARK if self._dark else SUCCESS_LIGHT
+        elif self._last_status == "Cancelado":
+            emphasis_color = ERROR_DARK if self._dark else ERROR_LIGHT
+        else:
+            emphasis_color = WARNING_DARK if self._dark else WARNING_LIGHT
+        emphasis_hex = emphasis_color.name()
+        emphasis_style = f"{_VALUE_STYLE} color: {emphasis_hex};"
+        self._packed_label.setStyleSheet(emphasis_style)
+        self._pending_label.setStyleSheet(emphasis_style)
+        self._set_tile_accent(self._packed_tile, emphasis_hex)
+        self._set_tile_accent(self._pending_tile, emphasis_hex)
+        util_color = utilization_color(self._last_util_pct)
+        self._utilization_label.setStyleSheet(f"{_VALUE_STYLE} color: {util_color};")
+        self._set_tile_accent(self._utilization_tile, util_color)
+
     def set_dark_mode(self, dark: bool) -> None:
         self._dark = dark
         warning = WARNING_DARK if dark else WARNING_LIGHT
         self._stale_label.setStyleSheet(f"color: {warning.name()}; font-weight: 600;")
+        self._refresh_accent_colors()
 
     def set_stale(self, stale: bool) -> None:
         """Muestra u oculta el aviso de "resultado invalidado" (fase 7.0)."""
@@ -250,20 +275,7 @@ class ResultsPanel(QWidget):
         self._status_label.setText(status)
         self._warnings_label.setText("Ninguno" if warnings_count == 0 else str(warnings_count))
 
-        # Color de estado para cajas cargadas/pendientes (adaptado al tema)
-        if pending_count == 0 and status != "Cancelado":
-            emphasis_color = SUCCESS_DARK if self._dark else SUCCESS_LIGHT
-        elif status == "Cancelado":
-            emphasis_color = ERROR_DARK if self._dark else ERROR_LIGHT
-        else:
-            emphasis_color = WARNING_DARK if self._dark else WARNING_LIGHT
-        emphasis_hex = emphasis_color.name()
-        emphasis_style = f"{_VALUE_STYLE} color: {emphasis_hex};"
-        self._packed_label.setStyleSheet(emphasis_style)
-        self._pending_label.setStyleSheet(emphasis_style)
-        self._set_tile_accent(self._packed_tile, emphasis_hex)
-        self._set_tile_accent(self._pending_tile, emphasis_hex)
-        # Utilización usa umbrales propios (coherente con ViewerStatsHeader)
-        util_color = _utilization_color(utilization_percent)
-        self._utilization_label.setStyleSheet(f"{_VALUE_STYLE} color: {util_color};")
-        self._set_tile_accent(self._utilization_tile, util_color)
+        self._last_pending = pending_count
+        self._last_status = status
+        self._last_util_pct = utilization_percent
+        self._refresh_accent_colors()

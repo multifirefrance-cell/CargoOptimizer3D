@@ -8,6 +8,8 @@ importan de aquí, nunca escriben un literal de color propio.
 
 from __future__ import annotations
 
+from cargo_optimizer.presentation.desktop.style import THEME_DARK, THEME_LIGHT
+
 # Paleta curada de alto contraste para ColorRegistry cuando un LoadUnit
 # es desconocido o no declara color_hex válido. Elegida a mano (no
 # generada), pensada para distinguirse tanto sobre fondo claro como
@@ -47,12 +49,9 @@ BOX_EDGE_LINE_WIDTH = 1.5
 DOOR_HIGHLIGHT_LINE_WIDTH = 4.0
 SELECTION_LINE_WIDTH = 3.0
 
-THEME_LIGHT = "light"
-THEME_DARK = "dark"
-
 # Colores por tema. Coherentes con `presentation/desktop/style.py`
-# (mismo `_ACCENT` para selección, mismo espíritu de paleta neutra).
-_ACCENT = "#3D6E8C"
+# (mismo `_ACCENT` para selección — rojo Induprox).
+_ACCENT = "#D32F2F"
 
 THEME_COLORS: dict[str, dict[str, str]] = {
     THEME_LIGHT: {

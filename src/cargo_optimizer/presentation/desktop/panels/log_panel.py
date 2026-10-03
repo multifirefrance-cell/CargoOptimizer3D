@@ -27,11 +27,18 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-# Prefijos que determinan el color del renglón
-_COLOR_ERROR = "#C62828"        # rojo — Error:
-_COLOR_CANCEL = "#FB8C00"       # naranja — Cancelación
-_COLOR_SUCCESS = "#2E7D32"      # verde oscuro — éxito / resultado
-_COLOR_INFO = "#1565C0"         # azul — Proyecto/actividad
+from cargo_optimizer.presentation.desktop.style import (
+    ERROR_LIGHT,
+    INFO_LIGHT,
+    SUCCESS_LIGHT,
+    WARNING_LIGHT,
+)
+
+# Colores de renglón alineados con style.py
+_COLOR_ERROR = ERROR_LIGHT.name()
+_COLOR_CANCEL = WARNING_LIGHT.name()
+_COLOR_SUCCESS = SUCCESS_LIGHT.name()
+_COLOR_INFO = INFO_LIGHT.name()
 
 
 def _entry_color(message: str) -> str | None:

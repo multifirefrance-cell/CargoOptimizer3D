@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 from cargo_optimizer.application.codes import MultiSpaceStopReason
 from cargo_optimizer.application.models import MultiSpaceAssignmentResult
 from cargo_optimizer.domain.load_unit import LoadUnit
+from cargo_optimizer.presentation.desktop.style import utilization_color
 from cargo_optimizer.presentation.desktop.models.unpacked_table_model import (
     COL_CODE as UNPACKED_COL_CODE,
     COL_INSTANCE as UNPACKED_COL_INSTANCE,
@@ -51,22 +52,12 @@ _WARNING_BG_DARK = QColor("#2A2010")
 _WARNING_FG_DARK = QColor("#F2A93B")
 
 
-def _utilization_color(pct: float) -> str:
-    if pct >= 85:
-        return "#43A047"
-    if pct >= 60:
-        return "#FB8C00"
-    if pct > 0:
-        return "#1E88E5"
-    return "#888888"
-
-
 def _apply_utilization_color(label: QLabel, text: str) -> None:
     """Sets label text and colors it by the percentage value contained in the text."""
     label.setText(text)
     try:
         pct = float(text.split("%")[0].strip())
-        label.setStyleSheet(f"color: {_utilization_color(pct)}; font-weight: 600;")
+        label.setStyleSheet(f"color: {utilization_color(pct)}; font-weight: 600;")
     except (ValueError, IndexError):
         label.setStyleSheet("")
 
@@ -191,6 +182,10 @@ class MultiSpaceResultsPanel(QWidget):
 
     def set_dark_mode(self, dark: bool) -> None:
         self._dark = dark
+        if self._result is not None:
+            current = self._space_combo.currentIndex()
+            if current >= 0:
+                self._display_space(current)
 
     def clear(self) -> None:
         self._result = None

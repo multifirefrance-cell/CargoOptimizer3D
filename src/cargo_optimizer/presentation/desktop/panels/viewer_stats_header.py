@@ -27,33 +27,9 @@ from PySide6.QtWidgets import (
 )
 
 from cargo_optimizer.domain.loading_space import LoadingSpace
+from cargo_optimizer.presentation.desktop.style import utilization_color
 
 _EMPTY = "—"
-
-_VIEW_BUTTON_STYLE = """
-QPushButton {
-    border: 1px solid #C0C4CC;
-    border-radius: 4px;
-    padding: 2px 7px;
-    font-size: 8pt;
-    background: transparent;
-}
-QPushButton:hover  { background: #E8EBF0; border-color: #A0A4AC; }
-QPushButton:pressed { background: #D0D3D8; }
-"""
-
-_VIEW_BUTTON_STYLE_DARK = """
-QPushButton {
-    border: 1px solid #3A3F47;
-    border-radius: 4px;
-    padding: 2px 7px;
-    font-size: 8pt;
-    background: transparent;
-    color: #D0D0D0;
-}
-QPushButton:hover  { background: #33373F; border-color: #55595F; }
-QPushButton:pressed { background: #26292F; }
-"""
 
 
 class ViewerStatsHeader(QWidget):
@@ -130,7 +106,7 @@ class ViewerStatsHeader(QWidget):
         self._btn_top = self._view_button("⬜ Superior")
         self._btn_top.setToolTip("Vista superior  (Ctrl+2)")
         self._btn_side = self._view_button("▭ Lateral")
-        self._btn_side.setToolTip("Vista lateral  (Ctrl+4)")
+        self._btn_side.setToolTip("Vista lateral  (Ctrl+3)")
 
         self._btn_iso.clicked.connect(self.reset_camera_requested)
         self._btn_front.clicked.connect(self.view_front_requested)
@@ -190,7 +166,7 @@ class ViewerStatsHeader(QWidget):
         self._utilization_bar.setValue(int(round(pct)))
         self._utilization_bar.setStyleSheet(self._bar_stylesheet(pct, dark=self._dark))
         self._utilization_value_label.setText(f"{pct:.1f} %")
-        color = self._utilization_color(pct)
+        color = utilization_color(pct)
         self._utilization_value_label.setStyleSheet(
             f"font-weight: 700; font-size: 10pt; color: {color};"
         )
@@ -233,9 +209,6 @@ class ViewerStatsHeader(QWidget):
 
     def set_dark_mode(self, dark: bool) -> None:
         self._dark = dark
-        style = _VIEW_BUTTON_STYLE_DARK if dark else _VIEW_BUTTON_STYLE
-        for btn in (self._btn_iso, self._btn_front, self._btn_top, self._btn_side):
-            btn.setStyleSheet(style)
         dim_color = "#AAAAAA" if dark else "#888"
         self._dimensions_label.setStyleSheet(f"color: {dim_color}; font-size: 9pt;")
         current_pct = float(self._utilization_bar.value())
@@ -247,20 +220,9 @@ class ViewerStatsHeader(QWidget):
 
     def _view_button(self, text: str) -> QPushButton:
         btn = QPushButton(text, self)
-        btn.setStyleSheet(_VIEW_BUTTON_STYLE)
         btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         return btn
-
-    @staticmethod
-    def _utilization_color(pct: float) -> str:
-        if pct >= 85:
-            return "#43A047"   # verde — alta utilización
-        if pct >= 60:
-            return "#FB8C00"   # naranja — media
-        if pct > 0:
-            return "#1E88E5"   # azul — baja
-        return "#888888"       # gris — sin resultado
 
     @staticmethod
     def _bar_stylesheet(pct: float, *, dark: bool = False) -> str:

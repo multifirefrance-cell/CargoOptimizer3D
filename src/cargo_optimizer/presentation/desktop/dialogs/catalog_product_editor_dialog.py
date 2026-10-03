@@ -135,7 +135,7 @@ class _ColorPaletteWidget(QWidget):
             selected = color == self._selected
             used = color.lower() in self._used
             if selected:
-                border = "3px solid #1a1a1a"
+                border = "3px solid rgba(255,255,255,0.9)"
             elif used:
                 border = "2px solid #FB8C00"
             else:
