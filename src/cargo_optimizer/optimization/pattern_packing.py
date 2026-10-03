@@ -45,6 +45,7 @@ def generate_grid_positions(
     length_cm: float,
     width_cm: float,
     height_cm: float,
+    max_start_z: float | None = None,
 ) -> Iterator[Position3D]:
     """Rejilla regular a partir de `anchor`, avanzando primero en X (fila), luego en
     Y (siguiente fila, misma capa), luego en Z (siguiente capa) — "filas completas,
@@ -52,12 +53,19 @@ def generate_grid_positions(
     el propio `anchor`; quien lo consuma para reutilizar una posición ya colocada
     debe descartar ese primer valor.
 
+    `max_start_z`: si se especifica, el generador se detiene antes de producir
+    cualquier posición cuyo z_cm sea >= max_start_z. Se usa cuando el cursor ancla
+    en la zona y_gap (z < min_z del bloque anterior) para evitar que escale
+    verticalmente por encima del techo del SKU anterior formando un "muro".
+
     No verifica colisiones, soporte, apilamiento ni ninguna otra regla: eso es
     responsabilidad de `RulesEngine.evaluate_placement` sobre cada posición
     producida. Esta función es pura geometría de rejilla, siempre determinista.
     """
     z = anchor.z_cm
     while z + z_size_cm <= height_cm + GEOMETRY_EPSILON_CM:
+        if max_start_z is not None and z >= max_start_z - GEOMETRY_EPSILON_CM:
+            return
         y = anchor.y_cm
         while y + y_size_cm <= width_cm + GEOMETRY_EPSILON_CM:
             x = anchor.x_cm
@@ -85,6 +93,7 @@ class PatternCursor:
     orientation_index: int
     positions: Iterator[Position3D]
     exhausted: bool = False
+    max_start_z: float | None = None
 
     def next_position(self) -> Position3D | None:
         """Siguiente posición de la rejilla, o `None` si ya no quedan dentro de límites."""

@@ -492,25 +492,28 @@ class GreedyExtremePointStrategy:
         positions, pruned_violation_codes = state.cached_pruned_candidate_positions(
             request.loading_space
         )
-        # Sealing XY: bloquea solo el hueco lateral Y (y >= seal_max_y) que
-        # también esté por debajo del techo (z < min_z) y dentro del footprint X
-        # (x < seal_max_x). Permite: dentro del footprint Y (any z), por encima
-        # del techo (any XY) y en el gap de fondo X (any Y).
+        # Sealing XY: prioriza el orden de llenado entre el bloque del SKU anterior
+        # y el espacio disponible para el siguiente SKU.
         # Orden de prioridad:
-        #   1. at_ceiling (z == min_z): el SKU siguiente empieza SOBRE el bloque
-        #      anterior → el cursor de patrón ancla en la capa plana superior y genera
-        #      capas horizontales en vez de columnas verticales ("muros").
-        #   2. y_gap (z < min_z, y >= seal_max_y, x < seal_max_x): posiciones en la
-        #      sección trasera aún disponible a la misma altura que la última capa
-        #      del SKU anterior → se llenan ANTES de escalar a z > min_z para que
-        #      la "capa inferior" quede completa antes de continuar hacia arriba.
+        #   1. y_gap (y >= seal_max_y, z < min_z, x < seal_max_x): posiciones en la
+        #      sección trasera del contenedor a la misma altura que la última capa
+        #      del SKU anterior → se llenan PRIMERO para completar la "capa inferior"
+        #      antes de subir. El cursor de patrón se limita a z < min_z para evitar
+        #      que escale verticalmente formando un "muro".
+        #   2. at_ceiling (z == min_z): el SKU siguiente empieza SOBRE el bloque
+        #      anterior → el cursor ancla en la capa plana superior y genera capas
+        #      horizontales.
         #   3. above_higher (z > min_z): niveles superiores al techo del SKU anterior.
-        #   4. in_footprint_y (z < min_z): huecos dentro del footprint Y del SKU
-        #      anterior (p.ej. última capa incompleta) — se llenan después.
+        #   4. in_footprint_y (z < min_z): huecos dentro del footprint Y (p.ej. última
+        #      capa incompleta) — solo los que no están bloqueados por sellado N-a-N.
         #   5. in_x_gap (x >= seal_max_x): hueco lateral X al fondo del contenedor.
+        _sealing_min_z: float = 0.0
+        _sealing_seal_max_y: float = 0.0
         if min_z > 0.0:
-            primary_at_ceiling: list[object] = []
+            _sealing_min_z = min_z
+            _sealing_seal_max_y = seal_max_y
             primary_y_gap: list[object] = []
+            primary_at_ceiling: list[object] = []
             primary_above_higher: list[object] = []
             primary_below: list[object] = []
             secondary: list[object] = []
@@ -518,13 +521,6 @@ class GreedyExtremePointStrategy:
                 (sy, sx, sz) for sy, sx, sz in (seal_history or []) if sz > 0.0
             ]
             for p in positions:
-                # Sellado N-a-N: bloquear posiciones que caen en el hueco lateral
-                # de cualquier SKU anterior (no solo el más reciente).
-                if any(
-                    p.y_cm >= sy and p.z_cm < sz and p.x_cm < sx
-                    for sy, sx, sz in active_history
-                ):
-                    continue
                 in_footprint_y = p.y_cm < seal_max_y
                 above_ceiling = p.z_cm >= min_z
                 in_x_gap = p.x_cm >= seal_max_x
@@ -534,17 +530,24 @@ class GreedyExtremePointStrategy:
                     else:
                         primary_above_higher.append(p)
                 elif in_footprint_y:
-                    primary_below.append(p)
+                    # Sellado N-a-N: bloquear posiciones dentro del footprint Y que
+                    # caen en el hueco lateral de cualquier SKU anterior.
+                    if not any(
+                        p.y_cm >= sy and p.z_cm < sz and p.x_cm < sx
+                        for sy, sx, sz in active_history
+                    ):
+                        primary_below.append(p)
                 elif in_x_gap:
                     secondary.append(p)
                 else:
-                    # y >= seal_max_y, z < min_z, x < seal_max_x: hueco trasero
-                    # a la altura de la última capa del SKU anterior → rellenar
-                    # antes de escalar verticalmente.
+                    # y >= seal_max_y, z < min_z, x < seal_max_x: sección trasera
+                    # disponible a la altura de la última capa del SKU anterior.
+                    # No se aplica active_history: se llenará con cursor limitado a
+                    # z < min_z (ver _start_pattern_cursor con max_start_z).
                     primary_y_gap.append(p)
             positions = (
-                tuple(primary_at_ceiling)
-                + tuple(primary_y_gap)
+                tuple(primary_y_gap)
+                + tuple(primary_at_ceiling)
                 + tuple(primary_above_higher)
                 + tuple(primary_below)
                 + tuple(secondary)
@@ -580,8 +583,20 @@ class GreedyExtremePointStrategy:
                 # OPT-20: reiniciar siempre el cursor desde la nueva posición
                 # (incluso si ya existía uno agotado), para recuperar el patrón
                 # después de que la búsqueda completa encontró un nuevo ancla.
+                # Si el ancla está en la zona y_gap (z < min_z, y >= seal_max_y),
+                # limitar el cursor a z < _sealing_min_z para evitar que escale
+                # verticalmente formando un "muro" por encima del bloque anterior.
+                _in_y_gap = (
+                    _sealing_min_z > 0.0
+                    and best.position.z_cm < _sealing_min_z
+                    and best.position.y_cm >= _sealing_seal_max_y
+                )
                 pattern_cursors[load_unit.id] = self._start_pattern_cursor(
-                    request, preferred_index, preferred_orientation, best.position
+                    request,
+                    preferred_index,
+                    preferred_orientation,
+                    best.position,
+                    max_start_z=_sealing_min_z if _in_y_gap else None,
                 )
             return True
 
@@ -608,6 +623,7 @@ class GreedyExtremePointStrategy:
         orientation_index: int,
         orientation: Orientation,
         anchor: Position3D,
+        max_start_z: float | None = None,
     ) -> PatternCursor:
         """Inicia un patrón de filas/capas a partir de la primera colocación real
         (`anchor`) de un `LoadUnit` con cantidad grande — fase OPT-17.
@@ -616,6 +632,11 @@ class GreedyExtremePointStrategy:
         así que ya respeta cualquier otra caja u otro SKU colocado antes; el
         patrón solo avanza geométricamente desde ahí (fila, luego capa),
         dejando que `RulesEngine` valide cada posición generada.
+
+        `max_start_z`: si se especifica, el cursor se detiene antes de generar
+        posiciones con z_cm >= max_start_z. Se usa cuando el ancla está en la
+        zona y_gap (z < min_z, y >= seal_max_y) para evitar que el cursor escale
+        verticalmente por encima del bloque del SKU anterior.
         """
         dims = request.loading_space.internal_dimensions
         positions = generate_grid_positions(
@@ -626,10 +647,14 @@ class GreedyExtremePointStrategy:
             length_cm=dims.length_cm,
             width_cm=dims.width_cm,
             height_cm=dims.height_cm,
+            max_start_z=max_start_z,
         )
         next(positions, None)  # `anchor` ya está colocado: se descarta.
         return PatternCursor(
-            orientation=orientation, orientation_index=orientation_index, positions=positions
+            orientation=orientation,
+            orientation_index=orientation_index,
+            positions=positions,
+            max_start_z=max_start_z,
         )
 
     @staticmethod
