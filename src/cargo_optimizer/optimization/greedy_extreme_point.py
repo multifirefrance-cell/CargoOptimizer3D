@@ -20,6 +20,7 @@ from cargo_optimizer.domain.packing_result import PackingResult
 from cargo_optimizer.domain.placement import Placement
 from cargo_optimizer.domain.position import Position3D
 from cargo_optimizer.geometry.box import AxisAlignedBox
+from cargo_optimizer.geometry.constants import GEOMETRY_EPSILON_CM
 from cargo_optimizer.optimization.cancellation import CancellationToken
 from cargo_optimizer.optimization.candidates import (
     build_candidate,
@@ -108,7 +109,7 @@ class GreedyExtremePointStrategy:
         self._emit_progress(progress_callback, state, total, None, start_time)
 
         stop_reason: UnpackedReason | None = None
-        _PendingItem = tuple[PhysicalLoadInstance, float, float, float, list[tuple[float, float, float]]]
+        _PendingItem = tuple[PhysicalLoadInstance, float, float, float, float, list[tuple[float, float, float]]]
         pending_after_round_one: list[_PendingItem] = []
         pending_after_round_two: list[_PendingItem] = []
 
@@ -127,6 +128,7 @@ class GreedyExtremePointStrategy:
         _layer_floor_z: float = 0.0
         _seal_max_x: float = 0.0
         _seal_max_y: float = 0.0
+        _seal_partial_top_y: float = 0.0  # max_y del bloque en la capa superior parcial del SKU anterior
         _seal_history: list[tuple[float, float, float]] = []  # (seal_max_y, seal_max_x, floor_z)
 
         # Ronda 1: cada instancia se coloca usando únicamente la
@@ -161,6 +163,12 @@ class GreedyExtremePointStrategy:
                         _layer_floor_z = max(p.max_z_cm for p in prev)
                         _seal_max_x = max(p.max_x_cm for p in prev)
                         _seal_max_y = max(p.max_y_cm for p in prev)
+                        # max_y de la capa superior del SKU anterior (puede ser menor
+                        # que _seal_max_y si la última capa quedó incompleta en Y).
+                        _seal_partial_top_y = max(
+                            (p.max_y_cm for p in prev if p.max_z_cm >= _layer_floor_z - GEOMETRY_EPSILON_CM),
+                            default=_seal_max_y,
+                        )
                 _current_sku_start_count = len(state.placements)
                 _current_sku_id = instance.load_unit.id
 
@@ -178,11 +186,12 @@ class GreedyExtremePointStrategy:
                 min_z=_layer_floor_z,
                 seal_max_x=_seal_max_x,
                 seal_max_y=_seal_max_y,
+                seal_partial_top_y=_seal_partial_top_y,
                 seal_history=_seal_history,
             )
             if not placed:
                 pending_after_round_one.append(
-                    (instance, _layer_floor_z, _seal_max_x, _seal_max_y, list(_seal_history))
+                    (instance, _layer_floor_z, _seal_max_x, _seal_max_y, _seal_partial_top_y, list(_seal_history))
                 )
             state.iteration_count += 1
             self._emit_progress(progress_callback, state, total, instance.load_unit.sku, start_time)
@@ -198,7 +207,7 @@ class GreedyExtremePointStrategy:
         # instancias pendientes se marcan igual que antes en
         # `_mark_remaining`.
         if stop_reason is None:
-            for instance, min_z, seal_max_x, seal_max_y, seal_history in pending_after_round_one:
+            for instance, min_z, seal_max_x, seal_max_y, seal_partial_top_y, seal_history in pending_after_round_one:
                 if cancellation_token.is_cancelled():
                     stop_reason = UnpackedReason.CANCELLED
                     break
@@ -225,12 +234,13 @@ class GreedyExtremePointStrategy:
                     min_z=min_z,
                     seal_max_x=seal_max_x,
                     seal_max_y=seal_max_y,
+                    seal_partial_top_y=seal_partial_top_y,
                     seal_history=seal_history,
                     reject_if_fails=not has_gap_fill,
                 )
                 if not placed and has_gap_fill:
                     pending_after_round_two.append(
-                        (instance, min_z, seal_max_x, seal_max_y, seal_history)
+                        (instance, min_z, seal_max_x, seal_max_y, seal_partial_top_y, seal_history)
                     )
                 state.iteration_count += 1
                 self._emit_progress(
@@ -244,7 +254,7 @@ class GreedyExtremePointStrategy:
             gap_orientation_cache: dict[object, tuple[Orientation, ...]] = {}
             gap_preferred_cache: dict[UUID, tuple[int, Orientation]] = {}
             gap_exhausted_at: dict[UUID, tuple[int, UnpackedReason]] = {}
-            for instance, min_z, seal_max_x, seal_max_y, seal_history in pending_after_round_two:
+            for instance, min_z, seal_max_x, seal_max_y, seal_partial_top_y, seal_history in pending_after_round_two:
                 if cancellation_token.is_cancelled():
                     stop_reason = UnpackedReason.CANCELLED
                     break
@@ -279,6 +289,7 @@ class GreedyExtremePointStrategy:
                     min_z=min_z,
                     seal_max_x=seal_max_x,
                     seal_max_y=seal_max_y,
+                    seal_partial_top_y=seal_partial_top_y,
                     seal_history=seal_history,
                     reject_if_fails=True,
                 )
@@ -329,6 +340,7 @@ class GreedyExtremePointStrategy:
         min_z: float = 0.0,
         seal_max_x: float = 0.0,
         seal_max_y: float = 0.0,
+        seal_partial_top_y: float = 0.0,
         seal_history: list[tuple[float, float, float]] | None = None,
         reject_if_fails: bool = True,
     ) -> bool:
@@ -509,10 +521,13 @@ class GreedyExtremePointStrategy:
         #   5. in_x_gap (x >= seal_max_x): hueco lateral X al fondo del contenedor.
         _sealing_min_z: float = 0.0
         _sealing_seal_max_y: float = 0.0
+        _sealing_partial_top_y: float = 0.0
         if min_z > 0.0:
             _sealing_min_z = min_z
             _sealing_seal_max_y = seal_max_y
-            primary_y_gap: list[object] = []
+            _sealing_partial_top_y = seal_partial_top_y
+            primary_partial_gap: list[object] = []  # y >= partial_top_y, z < min_z: hueco en capa superior parcial
+            primary_y_gap: list[object] = []         # y >= seal_max_y, z < min_z: hueco lateral completo
             primary_at_ceiling: list[object] = []
             primary_above_higher: list[object] = []
             primary_below: list[object] = []
@@ -536,18 +551,23 @@ class GreedyExtremePointStrategy:
                         p.y_cm >= sy and p.z_cm < sz and p.x_cm < sx
                         for sy, sx, sz in active_history
                     ):
-                        primary_below.append(p)
+                        # Si la capa superior del SKU anterior es parcial, las
+                        # posiciones en el hueco disponible (y >= partial_top_y)
+                        # se llenan ANTES de subir a z >= min_z.
+                        if seal_partial_top_y > 0.0 and p.y_cm >= seal_partial_top_y:
+                            primary_partial_gap.append(p)
+                        else:
+                            primary_below.append(p)
                 elif in_x_gap:
                     secondary.append(p)
                 else:
                     # y >= seal_max_y, z < min_z, x < seal_max_x: sección trasera
                     # disponible a la altura de la última capa del SKU anterior.
-                    # No se aplica active_history: se llenará con cursor limitado a
-                    # z < min_z (ver _start_pattern_cursor con max_start_z).
                     primary_y_gap.append(p)
             positions = (
-                tuple(primary_y_gap)
-                + tuple(primary_at_ceiling)
+                tuple(primary_partial_gap)   # PRIMERO: hueco de la capa superior parcial
+                + tuple(primary_y_gap)       # SEGUNDO: hueco lateral completo (raro)
+                + tuple(primary_at_ceiling)  # TERCERO: capa plana sobre el bloque anterior
                 + tuple(primary_above_higher)
                 + tuple(primary_below)
                 + tuple(secondary)
@@ -583,20 +603,21 @@ class GreedyExtremePointStrategy:
                 # OPT-20: reiniciar siempre el cursor desde la nueva posición
                 # (incluso si ya existía uno agotado), para recuperar el patrón
                 # después de que la búsqueda completa encontró un nuevo ancla.
-                # Si el ancla está en la zona y_gap (z < min_z, y >= seal_max_y),
-                # limitar el cursor a z < _sealing_min_z para evitar que escale
-                # verticalmente formando un "muro" por encima del bloque anterior.
-                _in_y_gap = (
+                # Si el ancla está en la zona de hueco (z < min_z, y >= partial_top_y),
+                # limitar el cursor a z < _sealing_min_z para que solo llene el hueco
+                # a nivel de la capa inferior y no escale verticalmente formando un "muro".
+                _in_gap_zone = (
                     _sealing_min_z > 0.0
                     and best.position.z_cm < _sealing_min_z
-                    and best.position.y_cm >= _sealing_seal_max_y
+                    and _sealing_partial_top_y > 0.0
+                    and best.position.y_cm >= _sealing_partial_top_y
                 )
                 pattern_cursors[load_unit.id] = self._start_pattern_cursor(
                     request,
                     preferred_index,
                     preferred_orientation,
                     best.position,
-                    max_start_z=_sealing_min_z if _in_y_gap else None,
+                    max_start_z=_sealing_min_z if _in_gap_zone else None,
                 )
             return True
 
