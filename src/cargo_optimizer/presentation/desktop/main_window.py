@@ -19,6 +19,7 @@ importar nada de `viewer/` más allá de ese widget y su modelo visual
 
 from __future__ import annotations
 
+import subprocess
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import replace
@@ -26,6 +27,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
+
+# Ruta al script de arranque del ERP INDUPROX (opcional: si no existe, el botón lo indica)
+_ERP_STARTUP_SCRIPT = Path(r"C:\Users\PC\OneDrive\TESIS\GitHub\INDUPROX github\iniciar_erp.bat")
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QAction, QCloseEvent, QDragEnterEvent, QDropEvent
@@ -77,6 +81,7 @@ from cargo_optimizer.infrastructure.excel import (
     export_catalog,
     export_import_report,
     export_packing_result,
+    export_packing_result_csv,
     generate_product_import_template,
     import_catalog,
     import_catalog_with_mapping,
@@ -115,6 +120,7 @@ from cargo_optimizer.presentation.desktop.dialogs.product_catalog_dialog import 
 )
 from cargo_optimizer.presentation.desktop.drag_drop import all_excel_paths, has_excel_url
 from cargo_optimizer.presentation.desktop.icons import icon
+from cargo_optimizer.presentation.desktop.panels.catalog_load_panel import seed_induprox_catalog
 from cargo_optimizer.presentation.desktop.panels.loading_space_form_panel import (
     LoadingSpaceFormPanel,
 )
@@ -259,7 +265,10 @@ class MainWindow(QMainWindow):
             self._restore_ui_state()
         finally:
             self._suspend_change_tracking = False
-        self.viewer_widget.set_dark_theme(self._settings.theme() == THEME_DARK)
+        dark = self._settings.theme() == THEME_DARK
+        self.viewer_widget.set_dark_theme(dark)
+        self.viewer_stats_header.set_dark_mode(dark)
+        self.results_panel.set_dark_mode(dark)
         self._update_window_title()
 
         self._apply_catalog_availability()
@@ -297,7 +306,16 @@ class MainWindow(QMainWindow):
         self.viewer_widget.placement_selected.connect(self._on_placement_selected)
         self.multi_space_results_panel.space_selected.connect(self._on_multi_space_space_selected)
         self.product_table_panel.add_requested.connect(self._on_quick_add_requested)
+        self.product_table_panel.optimize_requested.connect(self._on_run_optimization)
         self.results_panel.pending_tile_clicked.connect(self._on_pending_tile_clicked)
+
+        # Botones de vista en ViewerStatsHeader → acciones de cámara existentes
+        self.viewer_stats_header.reset_camera_requested.connect(self._on_reset_camera)
+        self.viewer_stats_header.view_front_requested.connect(self._on_view_front)
+        self.viewer_stats_header.view_top_requested.connect(self._on_view_top)
+        self.viewer_stats_header.view_side_requested.connect(self._on_view_side)
+        # Leyenda de colores SKU: cuando el visor carga una escena, propaga el color_mapping
+        self.viewer_widget.scene_color_mapping_ready.connect(self.viewer_stats_header.set_sku_legend)
 
         self.loading_space_summary_panel.profile_selected.connect(
             self.loading_space_form_panel.set_current_profile_name
@@ -330,16 +348,24 @@ class MainWindow(QMainWindow):
         self.selection_details_dock.setVisible(False)
 
     def _build_central_layout(self) -> None:
-        # Panel izquierdo: "Espacio de carga" ocupa su altura natural y
-        # "Agregar productos"/"Lista de carga" se reparten el resto
-        # (mejoras UX: la tabla crece con el espacio vertical disponible).
-        self.left_work_container = QWidget(self)
-        left_work_layout = QVBoxLayout(self.left_work_container)
-        left_work_layout.setContentsMargins(0, 0, 0, 0)
-        left_work_layout.setSpacing(0)
-        left_work_layout.addWidget(self.loading_space_summary_panel, 0)
-        left_work_layout.addWidget(self.product_table_panel, 1)
-        self.left_work_container.setMinimumWidth(_LEFT_PANEL_MIN_WIDTH)
+        # Area 1 (columna izquierda): Espacio de Carga + Agregar Carga.
+        self.left_column_widget = QWidget(self)
+        left_column_layout = QVBoxLayout(self.left_column_widget)
+        left_column_layout.setContentsMargins(0, 0, 0, 0)
+        left_column_layout.setSpacing(0)
+        left_column_layout.addWidget(self.loading_space_summary_panel, 0)
+        _area1_sep = QWidget(self.left_column_widget)
+        _area1_sep.setFixedHeight(1)
+        _area1_sep.setStyleSheet("background: #D0D3D8;")
+        left_column_layout.addWidget(_area1_sep, 0)
+        # quick_add_panel viene de product_table_panel (que ya no lo incluye
+        # en su propio layout), y se coloca aquí como Area 1.
+        left_column_layout.addWidget(self.product_table_panel.quick_add_panel, 1)
+        self.left_column_widget.setMinimumWidth(_LEFT_PANEL_MIN_WIDTH)
+
+        # Area 2 (columna central): Lista de carga + Optimizar/Editar QTY/Eliminar.
+        # product_table_panel ya contiene solo la barra de acciones + la tabla.
+        self.product_table_panel.setMinimumWidth(_LEFT_PANEL_MIN_WIDTH)
 
         # Zona derecha: visor 3D + el panel de resultados completo (sus
         # cinco pestañas) apilados debajo, nunca por separado — así el
@@ -378,7 +404,7 @@ class MainWindow(QMainWindow):
         self.results_tabs.setMinimumHeight(_RESULTS_TABS_MIN_HEIGHT)
         self.viewer_results_splitter.setStretchFactor(0, _VIEWER_STRETCH)
         self.viewer_results_splitter.setStretchFactor(1, _RESULTS_TABS_STRETCH)
-        self.viewer_results_splitter.setSizes([_VIEWER_STRETCH * 100, _RESULTS_TABS_STRETCH * 100])
+        self.viewer_results_splitter.setSizes([_VIEWER_STRETCH * 100, _RESULTS_TABS_STRETCH * 280])
 
         self.right_column_container = QWidget(self)
         right_column_layout = QVBoxLayout(self.right_column_container)
@@ -396,16 +422,17 @@ class MainWindow(QMainWindow):
         # garantía. La proporción por defecto (3:7, visor protagonista)
         # reutiliza exactamente `_WORK_AREA_LEFT_STRETCH`/
         # `_WORK_AREA_VIEWER_STRETCH` ya existentes.
+        # Splitter horizontal principal: Area 1 | Area 2 | Area 3.
         self.work_area_splitter = QSplitter(Qt.Orientation.Horizontal, self)
         self.work_area_splitter.setObjectName("workAreaSplitter")
         self.work_area_splitter.setChildrenCollapsible(False)
-        self.work_area_splitter.addWidget(self.left_work_container)
-        self.work_area_splitter.addWidget(self.right_column_container)
-        self.work_area_splitter.setStretchFactor(0, _WORK_AREA_LEFT_STRETCH)
-        self.work_area_splitter.setStretchFactor(1, _WORK_AREA_VIEWER_STRETCH)
-        self.work_area_splitter.setSizes(
-            [_WORK_AREA_LEFT_STRETCH * 100, _WORK_AREA_VIEWER_STRETCH * 100]
-        )
+        self.work_area_splitter.addWidget(self.left_column_widget)      # Area 1
+        self.work_area_splitter.addWidget(self.product_table_panel)     # Area 2
+        self.work_area_splitter.addWidget(self.right_column_container)  # Area 3
+        self.work_area_splitter.setStretchFactor(0, 2)   # Area 1: espacio fijo compacto
+        self.work_area_splitter.setStretchFactor(1, 2)   # Area 2: espacio fijo compacto
+        self.work_area_splitter.setStretchFactor(2, _WORK_AREA_VIEWER_STRETCH)  # Area 3: protagonista
+        self.work_area_splitter.setSizes([200, 200, _WORK_AREA_VIEWER_STRETCH * 100])
 
         # Handle discreto pero descubrible en ambos splitters: por defecto
         # Qt lo dibuja casi invisible (un par de píxeles del mismo color
@@ -552,6 +579,9 @@ class MainWindow(QMainWindow):
         self.action_export_result_excel = self._make_action(
             "import", "Exportar resul&tado…", None, self._on_export_result_excel
         )
+        self.action_export_result_csv = self._make_action(
+            "import", "Exportar resultado CSV…", None, self._on_export_result_csv
+        )
 
         self.action_run_optimization = self._make_action(
             "optimize", "&Ejecutar optimización", "F5", self._on_run_optimization
@@ -611,6 +641,11 @@ class MainWindow(QMainWindow):
         )
         self.action_toggle_axes_visible.setCheckable(True)
         self.action_toggle_axes_visible.setChecked(True)
+        self.action_toggle_labels_visible = self._make_action(
+            "view3d", "Mostrar &etiquetas SKU", None, self._on_toggle_labels_visible
+        )
+        self.action_toggle_labels_visible.setCheckable(True)
+        self.action_toggle_labels_visible.setChecked(True)
 
         self.action_light_theme = self._make_action(
             "preferences", "Tema &claro", None, lambda: self._set_theme(THEME_LIGHT)
@@ -628,6 +663,11 @@ class MainWindow(QMainWindow):
         self.action_check_updates = self._make_action(
             "import", "&Comprobar actualizaciones", None, self._stub("Comprobar actualizaciones")
         )
+
+        self.action_open_erp = self._make_action(
+            "erp", "Abrir &ERP INDUPROX", "Ctrl+E", self._on_open_erp
+        )
+        self.action_open_erp.setToolTip("Abrir el sistema ERP INDUPROX en el navegador")
 
         self.action_about = self._make_action(
             "preferences", "&Acerca de CargoOptimizer3D…", None, self._on_about
@@ -684,6 +724,7 @@ class MainWindow(QMainWindow):
         project_menu.addSeparator()
         project_menu.addAction(self.action_import_packing_list_excel)
         project_menu.addAction(self.action_export_result_excel)
+        project_menu.addAction(self.action_export_result_csv)
         project_menu.addSeparator()
         project_menu.addAction(self.action_project_properties)
 
@@ -732,11 +773,14 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.action_toggle_container_visible)
         view_menu.addAction(self.action_toggle_boxes_visible)
         view_menu.addAction(self.action_toggle_axes_visible)
+        view_menu.addAction(self.action_toggle_labels_visible)
         view_menu.addSeparator()
         view_menu.addAction(self.action_light_theme)
         view_menu.addAction(self.action_dark_theme)
 
         tools_menu = menu_bar.addMenu("&Herramientas")
+        tools_menu.addAction(self.action_open_erp)
+        tools_menu.addSeparator()
         tools_menu.addAction(self.action_preferences)
         tools_menu.addAction(self.action_event_log)
         tools_menu.addAction(self.action_check_updates)
@@ -769,6 +813,8 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.action_cancel_optimization)
         toolbar.addSeparator()
         toolbar.addAction(self.action_export_pdf)
+        toolbar.addSeparator()
+        toolbar.addAction(self.action_open_erp)
 
         self.addToolBar(toolbar)
 
@@ -821,6 +867,7 @@ class MainWindow(QMainWindow):
             self.unpacked_table_panel.clear()
             self._update_pending_tab_label(0)
             self.warnings_panel.clear()
+            self._update_warnings_tab_label(0)
             self.multi_space_results_panel.clear()
             self._show_empty_space_preview(self.loading_space_form_panel.build_loading_space())
             self.selection_details_panel.clear()
@@ -889,6 +936,7 @@ class MainWindow(QMainWindow):
                 self.unpacked_table_panel.clear()
                 self._update_pending_tab_label(0)
                 self.warnings_panel.clear()
+                self._update_warnings_tab_label(0)
                 self._show_empty_space_preview(loaded.project.loading_space)
             self.results_panel.set_stale(self._result_stale)
 
@@ -1376,6 +1424,31 @@ class MainWindow(QMainWindow):
             return
         self.statusBar().showMessage(f"Resultado exportado a '{path.name}'.", _STATUS_MESSAGE_MS)
 
+    def _on_export_result_csv(self) -> None:
+        if self._last_result is None:
+            self._show_warning(
+                "Sin resultado", "Ejecuta una optimización antes de exportar el resultado."
+            )
+            return
+        path_str, _filter = QFileDialog.getSaveFileName(
+            self,
+            "Exportar resultado CSV",
+            str(Path(self._settings.last_directory()) / "Resultado_optimizacion.csv"),
+            "Archivos CSV (*.csv)",
+        )
+        if not path_str:
+            return
+        self._remember_directory_of(path_str)
+        path = Path(path_str)
+        if path.suffix.casefold() != ".csv":
+            path = path.with_suffix(".csv")
+        try:
+            export_packing_result_csv(self._last_result, self._last_load_units_by_id, path)
+        except OSError as exc:
+            self._show_error("No se pudo exportar el CSV", str(exc))
+            return
+        self.statusBar().showMessage(f"CSV exportado a '{path.name}'.", _STATUS_MESSAGE_MS)
+
     def _on_export_pdf(self) -> None:
         """Genera uno de los cinco informes PDF oficiales (fase 9.1, `docs/PdfReports.md`).
 
@@ -1512,6 +1585,7 @@ class MainWindow(QMainWindow):
             self,
             repository=self._catalog_service.products,
             on_excel_dropped=lambda path: self._on_catalog_dialog_excel_dropped(path, dialog),
+            on_sync_induprox=lambda: seed_induprox_catalog(self._catalog_service.products),
         )
         result = dialog.exec()
         # Se sincroniza siempre, se haya pulsado "Añadir seleccionados" o
@@ -1861,12 +1935,21 @@ class MainWindow(QMainWindow):
         )
         self.results_tabs.setTabText(index, label)
 
+    def _update_warnings_tab_label(self, warnings_count: int) -> None:
+        """Muestra "(N)" en la pestaña "Avisos" cuando hay avisos, la limpia si no."""
+        index = self.results_tabs.indexOf(self.warnings_panel)
+        if index < 0:
+            return
+        label = "Avisos" if warnings_count <= 0 else f"Avisos ({warnings_count})"
+        self.results_tabs.setTabText(index, label)
+
     def _on_toggle_3d_focus(self, checked: bool) -> None:
         # Oculta la columna izquierda por completo en vez de mover un
         # separador: sin `QSplitter` en el workspace (celdas fijas, sin
         # barras móviles), este es el único mecanismo que le da al visor
         # 3D el 100% del ancho bajo demanda.
-        self.left_work_container.setVisible(not checked)
+        self.left_column_widget.setVisible(not checked)
+        self.product_table_panel.setVisible(not checked)
 
     def _on_reset_camera(self) -> None:
         self.viewer_widget.reset_camera()
@@ -1889,6 +1972,9 @@ class MainWindow(QMainWindow):
     def _on_toggle_axes_visible(self, checked: bool) -> None:
         self.viewer_widget.set_axes_visible(checked)
 
+    def _on_toggle_labels_visible(self, checked: bool) -> None:
+        self.viewer_widget.set_labels_visible(checked)
+
     def _on_placement_selected(self, sequence_number: object) -> None:
         if not isinstance(sequence_number, int):
             self.selection_details_panel.clear()
@@ -1906,7 +1992,10 @@ class MainWindow(QMainWindow):
         app = QApplication.instance()
         if isinstance(app, QApplication):
             apply_theme(app, theme)
-        self.viewer_widget.set_dark_theme(theme == THEME_DARK)
+        dark = theme == THEME_DARK
+        self.viewer_widget.set_dark_theme(dark)
+        self.viewer_stats_header.set_dark_mode(dark)
+        self.results_panel.set_dark_mode(dark)
         self._settings.set_theme(theme)
 
     def _on_about(self) -> None:
@@ -1916,6 +2005,25 @@ class MainWindow(QMainWindow):
             f"<b>CargoOptimizer3D</b> v{__version__} (Beta 1.0)<br>"
             "Software de optimización de carga 3D para espacios de carga universales.",
         )
+
+    def _on_open_erp(self) -> None:
+        """Arranca el ERP INDUPROX ejecutando `iniciar_erp.bat` como proceso independiente."""
+        if not _ERP_STARTUP_SCRIPT.is_file():
+            self._show_warning(
+                "ERP no encontrado",
+                f"No se encontró el archivo de arranque del ERP en:\n{_ERP_STARTUP_SCRIPT}\n\n"
+                "Verifica que el ERP INDUPROX esté instalado en esta máquina.",
+            )
+            return
+        try:
+            subprocess.Popen(
+                [str(_ERP_STARTUP_SCRIPT)],
+                cwd=str(_ERP_STARTUP_SCRIPT.parent),
+                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+            )
+            self.statusBar().showMessage("ERP INDUPROX iniciado.", _STATUS_MESSAGE_MS)
+        except Exception as exc:
+            self._show_error("No se pudo abrir el ERP", str(exc))
 
     # ------------------------------------------------------------------
     # Ejecución del motor de optimización
@@ -1947,7 +2055,11 @@ class MainWindow(QMainWindow):
             return None
 
         try:
-            return PackingRequest(loading_space=loading_space, load_units=load_units)
+            return PackingRequest(
+                loading_space=loading_space,
+                load_units=load_units,
+                minimum_support_ratio=0.5,
+            )
         except PackingRequestValidationError as exc:
             self._show_warning("Solicitud de optimización inválida", str(exc))
             return None
@@ -1977,6 +2089,7 @@ class MainWindow(QMainWindow):
         self.unpacked_table_panel.clear()
         self._update_pending_tab_label(0)
         self.warnings_panel.clear()
+        self._update_warnings_tab_label(0)
         # Un resultado multi-espacio de una ejecución anterior queda
         # obsoleto en cuanto se ejecuta una optimización normal — si no
         # se limpiara, el selector de la pestaña "Multi-espacio" seguiría
@@ -2229,6 +2342,7 @@ class MainWindow(QMainWindow):
         )
         self._update_pending_tab_label(result.unpacked_count)
         self.warnings_panel.set_warnings(result.warnings)
+        self._update_warnings_tab_label(len(result.warnings))
         self.results_panel.set_stale(self._result_stale)
 
     def _set_running_controls_enabled(self, enabled: bool) -> None:
@@ -2244,6 +2358,7 @@ class MainWindow(QMainWindow):
             self.action_export,
             self.action_export_pdf,
             self.action_export_result_excel,
+            self.action_export_result_csv,
             self.action_import_loading_space_excel,
         ):
             action.setEnabled(enabled)
@@ -2264,6 +2379,14 @@ class MainWindow(QMainWindow):
 
     def _set_state(self, state: str) -> None:
         self._state_status_label.setText(f"Estado: {state}")
+        if state == STATE_OPTIMIZING:
+            self._state_status_label.setStyleSheet("color: #1E88E5; font-weight: 600;")
+        elif state == STATE_ERROR:
+            self._state_status_label.setStyleSheet("color: #C62828; font-weight: 600;")
+        elif state == STATE_CANCELLING:
+            self._state_status_label.setStyleSheet("color: #FB8C00; font-weight: 600;")
+        else:
+            self._state_status_label.setStyleSheet("")
 
     def _show_warning(self, title: str, message: str) -> None:
         QMessageBox.warning(self, title, message)

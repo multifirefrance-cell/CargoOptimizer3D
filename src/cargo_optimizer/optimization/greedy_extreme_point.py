@@ -497,15 +497,21 @@ class GreedyExtremePointStrategy:
         # (x < seal_max_x). Permite: dentro del footprint Y (any z), por encima
         # del techo (any XY) y en el gap de fondo X (any Y).
         # Orden de prioridad:
-        #   1. above_ceiling (z >= min_z): el SKU siguiente empieza SOBRE el bloque
+        #   1. at_ceiling (z == min_z): el SKU siguiente empieza SOBRE el bloque
         #      anterior → el cursor de patrón ancla en la capa plana superior y genera
         #      capas horizontales en vez de columnas verticales ("muros").
-        #   2. in_footprint_y (z < min_z): huecos dentro del footprint Y del SKU
-        #      anterior (p.ej. última capa incompleta) — se llenan DESPUÉS de agotar
-        #      las posiciones sobre el techo.
-        #   3. in_x_gap (x >= seal_max_x): hueco lateral X al fondo del contenedor.
+        #   2. y_gap (z < min_z, y >= seal_max_y, x < seal_max_x): posiciones en la
+        #      sección trasera aún disponible a la misma altura que la última capa
+        #      del SKU anterior → se llenan ANTES de escalar a z > min_z para que
+        #      la "capa inferior" quede completa antes de continuar hacia arriba.
+        #   3. above_higher (z > min_z): niveles superiores al techo del SKU anterior.
+        #   4. in_footprint_y (z < min_z): huecos dentro del footprint Y del SKU
+        #      anterior (p.ej. última capa incompleta) — se llenan después.
+        #   5. in_x_gap (x >= seal_max_x): hueco lateral X al fondo del contenedor.
         if min_z > 0.0:
-            primary_above: list[object] = []
+            primary_at_ceiling: list[object] = []
+            primary_y_gap: list[object] = []
+            primary_above_higher: list[object] = []
             primary_below: list[object] = []
             secondary: list[object] = []
             active_history = [
@@ -523,12 +529,26 @@ class GreedyExtremePointStrategy:
                 above_ceiling = p.z_cm >= min_z
                 in_x_gap = p.x_cm >= seal_max_x
                 if above_ceiling:
-                    primary_above.append(p)
+                    if p.z_cm <= min_z:
+                        primary_at_ceiling.append(p)
+                    else:
+                        primary_above_higher.append(p)
                 elif in_footprint_y:
                     primary_below.append(p)
                 elif in_x_gap:
                     secondary.append(p)
-            positions = tuple(primary_above) + tuple(primary_below) + tuple(secondary)
+                else:
+                    # y >= seal_max_y, z < min_z, x < seal_max_x: hueco trasero
+                    # a la altura de la última capa del SKU anterior → rellenar
+                    # antes de escalar verticalmente.
+                    primary_y_gap.append(p)
+            positions = (
+                tuple(primary_at_ceiling)
+                + tuple(primary_y_gap)
+                + tuple(primary_above_higher)
+                + tuple(primary_below)
+                + tuple(secondary)
+            )
         violation_codes_seen: set[str] = set(pruned_violation_codes)
         orientation_options = (
             ((preferred_index, preferred_orientation),) if strict else tuple(feasible_orientations)
