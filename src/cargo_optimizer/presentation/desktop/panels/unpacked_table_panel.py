@@ -65,9 +65,9 @@ class UnpackedTablePanel(QWidget):
         _sh.setSectionResizeMode(PSUMMARY_COL_PACKED, QHeaderView.ResizeMode.Interactive)
         _sh.setSectionResizeMode(PSUMMARY_COL_PENDING, QHeaderView.ResizeMode.Interactive)
         _sh.resizeSection(PSUMMARY_COL_SKU, 90)
-        _sh.resizeSection(PSUMMARY_COL_REQUESTED, 80)
-        _sh.resizeSection(PSUMMARY_COL_PACKED, 80)
-        _sh.resizeSection(PSUMMARY_COL_PENDING, 80)
+        _sh.resizeSection(PSUMMARY_COL_REQUESTED, 95)
+        _sh.resizeSection(PSUMMARY_COL_PACKED, 95)
+        _sh.resizeSection(PSUMMARY_COL_PENDING, 95)
 
         self.model = UnpackedUnitTableModel(self)
         self.table_view = QTableView(self)
@@ -89,19 +89,14 @@ class UnpackedTablePanel(QWidget):
 
         summary_header = QLabel("PENDIENTE POR SKU", self)
         summary_header.setProperty("class", "sectionLabel")
-        detail_header = QLabel("DETALLE POR INSTANCIA", self)
-        detail_header.setProperty("class", "sectionLabel")
 
-        self.table_view.setMinimumHeight(80)
+        self.table_view.setVisible(False)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(SPACING_SM, SPACING_SM, SPACING_SM, SPACING_XS)
         layout.setSpacing(SPACING_XS)
         layout.addWidget(summary_header)
         layout.addWidget(self.summary_table_view, 1)
-        layout.addSpacing(SPACING_XS)
-        layout.addWidget(detail_header)
-        layout.addWidget(self.table_view, 2)
 
     def set_result(
         self,

@@ -55,7 +55,7 @@ class _PendingRow:
 
 
 class PendingSkuSummaryModel(QAbstractTableModel):
-    """Una fila por SKU con unidades pendientes (`pending > 0`), nunca por SKU ya completo."""
+    """Una fila por SKU solicitado, incluyendo los que fueron cargados al 100%."""
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -74,12 +74,12 @@ class PendingSkuSummaryModel(QAbstractTableModel):
     ) -> None:
         packed_counts: Counter[UUID] = Counter(p.load_unit_id for p in placements)
         pending_counts: Counter[UUID] = Counter(u.load_unit_id for u in unpacked_units)
+        all_ids = set(packed_counts) | set(pending_counts)
 
         rows: list[_PendingRow] = []
-        for load_unit_id, pending in pending_counts.items():
-            if pending <= 0:
-                continue
+        for load_unit_id in all_ids:
             packed = packed_counts.get(load_unit_id, 0)
+            pending = pending_counts.get(load_unit_id, 0)
             unit = load_units_by_id.get(load_unit_id)
             sku = unit.sku if unit is not None else str(load_unit_id)
             name = unit.name if unit is not None else "—"

@@ -73,6 +73,14 @@ def _sku_def_to_load_unit(sd: _SkuDef, color_hex: str) -> LoadUnit:
     )
 
 
+class _SpinBox(QSpinBox):
+    """QSpinBox que selecciona todo al ganar foco, para que el primer dígito reemplace el texto especial "—"."""
+
+    def focusInEvent(self, event) -> None:
+        super().focusInEvent(event)
+        self.lineEdit().selectAll()
+
+
 _PALETTE: tuple[str, ...] = (
     "#E53935", "#E91E63", "#AB47BC", "#5C6BC0",
     "#1E88E5", "#26C6DA", "#26A69A", "#66BB6A",
@@ -198,7 +206,7 @@ class CatalogLoadPanel(QWidget):
         _h.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
         self._table.setColumnWidth(0, 34)
         self._table.setColumnWidth(1, 80)
-        self._table.setColumnWidth(3, 58)
+        self._table.setColumnWidth(3, 105)
         self._table.setMinimumHeight(80)  # permite que el splitter encoja el panel si falta espacio
 
         # ── Layout ───────────────────────────────────────────────────────
@@ -289,9 +297,10 @@ class CatalogLoadPanel(QWidget):
         self._table.setItem(row, 2, name_item)
 
         # ── Cantidad (SpinBox embebido) ───────────────────────────────
-        spin = QSpinBox()
-        spin.setRange(0, 9999)
+        spin = _SpinBox()
+        spin.setRange(0, 99999999)
         spin.setValue(0)
+        spin.setSpecialValueText("—")
         spin.setButtonSymbols(QSpinBox.ButtonSymbols.UpDownArrows)
         spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._qty_spins.append(spin)

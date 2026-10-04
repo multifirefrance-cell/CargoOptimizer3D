@@ -188,6 +188,8 @@ QTableView::item:selected, QTreeView::item:selected   { background: #FDECEA; col
 QTableView::item:hover,    QTreeView::item:hover      { background: #FFF5F5; }
 
 #productCatalogTableView { font-size: 9pt; }
+#productTableView         { font-size: 9pt; }
+#catalogLoadTable         { font-size: 9pt; }
 
 QTabBar::tab {
     padding: 8px 18px; border: none; margin-right: 2px;
@@ -427,6 +429,8 @@ QTableView::item:selected, QTreeView::item:selected   { background: #4A2020; }
 QTableView::item:hover,    QTreeView::item:hover      { background: #3A2525; }
 
 #productCatalogTableView { font-size: 9pt; }
+#productTableView         { font-size: 9pt; }
+#catalogLoadTable         { font-size: 9pt; }
 
 QTabBar::tab {
     padding: 8px 18px; border: none; margin-right: 2px;
