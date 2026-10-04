@@ -157,6 +157,7 @@ class SceneController:
         self._box_records: dict[int, _BoxRecord] = {}  # sequence_number -> centro/longitudes
         self._group_members: dict[_GroupKey, list[int]] = {}  # clave de grupo -> sequence_number
         self._sku_groups: dict[str, list[_GroupKey]] = {}  # sku -> claves de grupo que le pertenecen
+        self._sku_label_actors: dict[str, Any] = {}  # sku -> actor de labels por caja
         self._selection_actor: Any | None = None  # contorno de resalte, independiente del grupo
         self._container_actors: list[Any] = []
         self._axes_actors: list[Any] = []
@@ -209,6 +210,7 @@ class SceneController:
         self._box_records.clear()
         self._group_members.clear()
         self._sku_groups.clear()
+        self._sku_label_actors.clear()
         self._container_actors.clear()
         self._axes_actors.clear()
         self._label_actors.clear()
@@ -350,8 +352,8 @@ class SceneController:
                 if key not in self._sku_groups[visual.sku]:
                     self._sku_groups[visual.sku].append(key)
 
-        label_points: list[tuple[float, float, float]] = []
-        label_texts: list[str] = []
+        # centros por SKU para los labels por caja
+        sku_centers: dict[str, list[tuple[float, float, float]]] = {}
 
         for group_index, (key, visuals) in enumerate(groups.items()):
             _dimensions, color_hex = key
@@ -381,36 +383,34 @@ class SceneController:
             self._group_actors[key] = actor
             self._actor_group_by_id[id(actor)] = key
 
-            # Etiqueta de SKU al tope del centroide del grupo (estilo EasyCargo)
-            records = [self._box_records[v.sequence_number] for v in visuals]
-            cx = sum(r.center[0] for r in records) / len(records)
-            cy = sum(r.center[1] for r in records) / len(records)
-            cz_top = max(r.center[2] + r.lengths[2] / 2 for r in records)
-            label_points.append((cx, cy, cz_top))
-            count = len(visuals)
+            # Acumular centros por SKU para labels longitudinales por caja
             sku = visuals[0].sku
-            label_texts.append(f"{sku}  ×{count}" if count > 1 else sku)
+            for visual in visuals:
+                sku_centers.setdefault(sku, []).append(
+                    self._box_records[visual.sequence_number].center
+                )
 
-        if label_points:
-            colors = theme_colors(self._theme)
-            dark = self._theme != THEME_LIGHT
-            shape_color = "#1E2028" if dark else "#FFFFFF"
-            text_color = "#E0E0E0" if dark else "#202020"
+        # Un actor de labels por SKU → set_sku_visible puede ocultarlos individualmente
+        dark = self._theme != THEME_LIGHT
+        shape_color = "#1E2028" if dark else "#FFFFFF"
+        text_color = "#E0E0E0" if dark else "#202020"
+        for sku_idx, (sku, centers) in enumerate(sku_centers.items()):
             try:
                 label_actor = self._plotter.add_point_labels(
-                    np.array(label_points, dtype=float),
-                    label_texts,
-                    font_size=9,
-                    bold=True,
-                    always_visible=True,
+                    np.array(centers, dtype=float),
+                    [sku] * len(centers),
+                    font_size=7,
+                    bold=False,
+                    always_visible=False,
                     show_points=False,
                     shape="rounded_box",
                     shape_color=shape_color,
-                    shape_opacity=0.75,
+                    shape_opacity=0.55,
                     text_color=text_color,
-                    name="viewer-sku-labels",
+                    name=f"viewer-box-label-{sku_idx}",
                 )
                 if label_actor is not None:
+                    self._sku_label_actors[sku] = label_actor
                     self._label_actors.append(label_actor)
             except Exception:  # noqa: BLE001 - las etiquetas son decorativas; nunca bloquean la carga
                 pass
@@ -461,11 +461,14 @@ class SceneController:
         self._plotter.render()
 
     def set_sku_visible(self, sku: str, visible: bool) -> None:
-        """Muestra u oculta todos los actores que pertenecen a un SKU concreto."""
+        """Muestra u oculta las cajas y sus labels para un SKU concreto."""
         for key in self._sku_groups.get(sku, []):
             actor = self._group_actors.get(key)
             if actor is not None:
                 actor.visibility = visible
+        label_actor = self._sku_label_actors.get(sku)
+        if label_actor is not None:
+            label_actor.SetVisibility(1 if visible else 0)
         self._plotter.render()
 
     # ------------------------------------------------------------------
