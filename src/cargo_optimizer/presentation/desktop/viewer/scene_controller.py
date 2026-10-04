@@ -394,43 +394,45 @@ class SceneController:
         if _vtk is not None:
             seq_to_sku = {v.sequence_number: v.sku for v in scene.placement_visuals}
 
-            # Agrupar boxes por SKU y elegir la más visible (front + top)
+            # Agrupar boxes por SKU y elegir la más visible (mínima Y = más al frente).
+            # El label va en la cara frontal (-Y) que siempre mira hacia el usuario
+            # en la vista isométrica estándar y en la vista frontal.
             sku_best: dict[str, _BoxRecord] = {}
             for seq_num, rec in self._box_records.items():
                 sku = seq_to_sku.get(seq_num, "")
                 if not sku:
                     continue
-                score = rec.center[0] * 0.6 + rec.center[2] * 0.4  # mayor X y Z
-                if sku not in sku_best or score > (
-                    sku_best[sku].center[0] * 0.6 + sku_best[sku].center[2] * 0.4
-                ):
+                cx, cy, cz = rec.center
+                # Prioridad: mínima Y (cara frontal expuesta), desempate por Z y X
+                score = -cy * 1000.0 + cz * 0.5 + cx * 0.3
+                if sku not in sku_best:
                     sku_best[sku] = rec
+                else:
+                    bc = sku_best[sku].center
+                    best_score = -bc[1] * 1000.0 + bc[2] * 0.5 + bc[0] * 0.3
+                    if score > best_score:
+                        sku_best[sku] = rec
 
             _FONT = 48
             for sku, rec in sku_best.items():
                 cx, cy, cz = rec.center
                 dx, dy, dz = rec.lengths
 
-                # ── Cara lateral derecha del contenedor (+Y), siempre visible
-                # desde la vista isométrica estándar (frente-derecha-arriba).
-                # Orientación: SetOrientation(-90, 0, 180) → normal = +Y,
-                # texto corre a lo largo de X (longitudinal del contenedor).
-                # Si dx < dz (caja más alta que larga), girar 90° para que
-                # el texto corra a lo largo de Z (longitudinal de la cara).
-                face_w = dx   # ancho de cara lateral = profundidad de caja
-                face_h = dz   # alto de cara lateral = altura de caja
+                # Cara frontal de la caja (-Y): visible en vista frontal e isométrica.
+                # SetOrientation(90, 0, 0): Rx(90°) → normal = -Y, right = +X, up = +Z.
+                # El texto corre longitudinalmente a lo largo de X (eje del contenedor).
+                face_w = dx   # ancho de la cara frontal (eje X)
+                face_h = dz   # altura de la cara frontal (eje Z)
                 use_vertical = face_h > face_w * 1.4
                 target_dim = face_h if use_vertical else face_w
                 natural_w_px = _FONT * 0.55 * len(sku)
                 scale = target_dim * 0.72 / max(natural_w_px, 1.0)
 
-                # Posición en el centro de la cara lateral (+Y)
-                face_y = cy + dy / 2.0 + 0.15
+                # Ligeramente por delante de la cara (-Y) para evitar z-fighting
+                face_y = cy - dy / 2.0 - 0.05
 
-                # SetOrientation(-90, 0, 180): normal→+Y, right→−X (legible
-                # desde +Y), up→+Z. Con use_vertical se agrega Rz adicional
-                # para que el texto corra a lo largo de Z en vez de X.
-                orient = (-90.0, 0.0, 90.0 if use_vertical else 180.0)
+                # Rx(90): (x,y,z)→(x,−z,y) → normal(0,0,1)→(0,−1,0)=−Y ✓
+                orient = (90.0, 0.0, 90.0 if use_vertical else 0.0)
 
                 try:
                     ta = _vtk.vtkTextActor3D()
