@@ -18,8 +18,8 @@ from __future__ import annotations
 from dataclasses import replace
 from uuid import uuid4
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QValidator
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
@@ -74,11 +74,29 @@ def _sku_def_to_load_unit(sd: _SkuDef, color_hex: str) -> LoadUnit:
 
 
 class _SpinBox(QSpinBox):
-    """QSpinBox que selecciona todo al ganar foco, para que el primer dígito reemplace el texto especial "—"."""
+    """QSpinBox que muestra '—' para cero sin usar setSpecialValueText.
+
+    setSpecialValueText bloquea el teclado porque el validador de enteros
+    rechaza cualquier dígito añadido a "—". Esta implementación muestra "—"
+    via textFromValue/valueFromText/validate, lo que deja el validador limpio
+    para tipeo normal. Al ganar foco selecciona todo para que el primer dígito
+    reemplace el "—" visible.
+    """
+
+    def textFromValue(self, value: int) -> str:
+        return "—" if value == 0 else super().textFromValue(value)
+
+    def valueFromText(self, text: str) -> int:
+        return 0 if text.strip() in ("—", "") else super().valueFromText(text)
+
+    def validate(self, text: str, pos: int):
+        if text.strip() in ("—", ""):
+            return (QValidator.State.Acceptable, text, pos)
+        return super().validate(text, pos)
 
     def focusInEvent(self, event) -> None:
         super().focusInEvent(event)
-        self.lineEdit().selectAll()
+        QTimer.singleShot(0, self.lineEdit().selectAll)
 
 
 _PALETTE: tuple[str, ...] = (
@@ -207,6 +225,7 @@ class CatalogLoadPanel(QWidget):
         self._table.setColumnWidth(0, 34)
         self._table.setColumnWidth(1, 80)
         self._table.setColumnWidth(3, 105)
+        self._table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._table.setMinimumHeight(80)  # permite que el splitter encoja el panel si falta espacio
 
         # ── Layout ───────────────────────────────────────────────────────
@@ -300,7 +319,6 @@ class CatalogLoadPanel(QWidget):
         spin = _SpinBox()
         spin.setRange(0, 99999999)
         spin.setValue(0)
-        spin.setSpecialValueText("—")
         spin.setButtonSymbols(QSpinBox.ButtonSymbols.UpDownArrows)
         spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._qty_spins.append(spin)
