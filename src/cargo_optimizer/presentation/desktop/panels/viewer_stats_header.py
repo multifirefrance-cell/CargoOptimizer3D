@@ -190,12 +190,20 @@ class ViewerStatsHeader(QWidget):
         if not color_by_sku:
             return
         for sku, color_hex in sorted(color_by_sku.items()):
-            swatch = QLabel(self._legend_row)
+            # Usar QWidget contenedor (no sub-layout) para que _clear_legend
+            # pueda destruirlo con deleteLater() — item.widget() es None para
+            # sub-layouts y los chips viejos quedarían superpuestos al redibujar.
+            chip = QWidget(self._legend_row)
+            chip_layout = QHBoxLayout(chip)
+            chip_layout.setSpacing(4)
+            chip_layout.setContentsMargins(0, 0, 0, 0)
+
+            swatch = QLabel(chip)
             swatch.setFixedSize(12, 12)
             swatch.setStyleSheet(
                 f"background: {color_hex}; border-radius: 2px; border: 1px solid rgba(0,0,0,0.15);"
             )
-            cb = QCheckBox(sku, self._legend_row)
+            cb = QCheckBox(sku, chip)
             cb.setChecked(True)
             cb.setStyleSheet("font-size: 8pt;")
             cb.checkStateChanged.connect(
@@ -203,12 +211,9 @@ class ViewerStatsHeader(QWidget):
                     s, state == Qt.CheckState.Checked
                 )
             )
-            item = QHBoxLayout()
-            item.setSpacing(4)
-            item.setContentsMargins(0, 0, 0, 0)
-            item.addWidget(swatch)
-            item.addWidget(cb)
-            self._legend_row_layout.addLayout(item)
+            chip_layout.addWidget(swatch)
+            chip_layout.addWidget(cb)
+            self._legend_row_layout.addWidget(chip)
         self._legend_row_layout.addStretch(1)
         self._legend_row.setVisible(True)
 
