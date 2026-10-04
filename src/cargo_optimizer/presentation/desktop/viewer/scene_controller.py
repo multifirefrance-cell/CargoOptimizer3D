@@ -411,18 +411,32 @@ class SceneController:
                 cx, cy, cz = rec.center
                 dx, dy, dz = rec.lengths
 
-                face_x = cx + dx / 2.0 + 0.15
-                face_h, face_w = dz, dy
-                rotate_vertical = face_h > face_w * 1.5
-                target_dim = face_h if rotate_vertical else face_w
+                # ── Cara lateral derecha del contenedor (+Y), siempre visible
+                # desde la vista isométrica estándar (frente-derecha-arriba).
+                # Orientación: SetOrientation(-90, 0, 180) → normal = +Y,
+                # texto corre a lo largo de X (longitudinal del contenedor).
+                # Si dx < dz (caja más alta que larga), girar 90° para que
+                # el texto corra a lo largo de Z (longitudinal de la cara).
+                face_w = dx   # ancho de cara lateral = profundidad de caja
+                face_h = dz   # alto de cara lateral = altura de caja
+                use_vertical = face_h > face_w * 1.4
+                target_dim = face_h if use_vertical else face_w
                 natural_w_px = _FONT * 0.55 * len(sku)
                 scale = target_dim * 0.72 / max(natural_w_px, 1.0)
+
+                # Posición en el centro de la cara lateral (+Y)
+                face_y = cy + dy / 2.0 + 0.15
+
+                # SetOrientation(-90, 0, 180): normal→+Y, right→−X (legible
+                # desde +Y), up→+Z. Con use_vertical se agrega Rz adicional
+                # para que el texto corra a lo largo de Z en vez de X.
+                orient = (-90.0, 0.0, 90.0 if use_vertical else 180.0)
 
                 try:
                     ta = _vtk.vtkTextActor3D()
                     ta.SetInput(sku)
-                    ta.SetPosition(face_x, cy, cz)
-                    ta.SetOrientation(0.0, 90.0, 90.0 if rotate_vertical else 0.0)
+                    ta.SetPosition(cx, face_y, cz)
+                    ta.SetOrientation(*orient)
                     ta.SetScale(scale, scale, 1.0)
 
                     tp = ta.GetTextProperty()
