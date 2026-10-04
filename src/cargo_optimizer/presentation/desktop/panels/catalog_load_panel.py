@@ -297,7 +297,7 @@ class CatalogLoadPanel(QWidget):
             unit = _sku_def_to_load_unit(sd, color_map[sd.sku])
             if sd.sku in db_units:
                 db = db_units[sd.sku]
-                unit = replace(unit, dimensions=db.dimensions, weight_kg=db.weight_kg, name=db.name)
+                unit = replace(unit, id=db.id, dimensions=db.dimensions, weight_kg=db.weight_kg, name=db.name, color_hex=db.color_hex)
             self._append_row(unit)
 
         # Encadenar TAB entre campos QTY consecutivos
@@ -390,7 +390,11 @@ class CatalogLoadPanel(QWidget):
         if updated is None:
             return
         try:
-            self._repository.update(updated)
+            existing_by_sku = {u.sku: u for u in self._repository.list_active()}
+            if updated.sku in existing_by_sku:
+                self._repository.update(updated)
+            else:
+                self._repository.add(updated)
         except RepositoryError as exc:
             QMessageBox.warning(self, "Error al guardar", str(exc))
             return
