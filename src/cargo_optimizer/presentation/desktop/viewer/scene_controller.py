@@ -384,12 +384,8 @@ class SceneController:
 
         dark = self._theme != THEME_LIGHT
 
-        # vtkTextActor3D: quad real en 3D con orientación fija (no billboard).
-        # El texto aparece "impreso" en la cara frontal de cada caja — visible
-        # al mirar desde la puerta del contenedor, invisible desde atrás (como
-        # un sticker real).  Un actor compartido por SKU sería más ligero pero
-        # no permite escalar por tamaño de caja; con cientos de cajas el coste
-        # sigue siendo aceptable porque VTK reutiliza la textura del texto.
+        # Un único vtkTextActor3D por SKU en la caja más visible (mayor X + Z).
+        # Mantiene el aspecto "impreso en cara" con costo mínimo (N_SKU actores).
         try:
             import vtk as _vtk  # noqa: PLC0415
         except ImportError:
@@ -397,34 +393,28 @@ class SceneController:
 
         if _vtk is not None:
             seq_to_sku = {v.sequence_number: v.sku for v in scene.placement_visuals}
-            # Tamaño de fuente alto → textura de alta resolución; la escala del
-            # actor la reduce a las dimensiones reales de la cara en cm.
-            _FONT = 48
 
+            # Agrupar boxes por SKU y elegir la más visible (front + top)
+            sku_best: dict[str, _BoxRecord] = {}
             for seq_num, rec in self._box_records.items():
                 sku = seq_to_sku.get(seq_num, "")
                 if not sku:
                     continue
+                score = rec.center[0] * 0.6 + rec.center[2] * 0.4  # mayor X y Z
+                if sku not in sku_best or score > (
+                    sku_best[sku].center[0] * 0.6 + sku_best[sku].center[2] * 0.4
+                ):
+                    sku_best[sku] = rec
+
+            _FONT = 48
+            for sku, rec in sku_best.items():
                 cx, cy, cz = rec.center
                 dx, dy, dz = rec.lengths
 
-                # Cara frontal: la que mira hacia el frente del contenedor (+X).
-                # El texto queda en el plano YZ (normal +X) gracias a RotateY(90°).
-                face_x = cx + dx / 2.0 + 0.15   # ligeramente por delante
-                face_h = dz   # alto de la cara
-                face_w = dy   # ancho de la cara
-
-                # ¿El texto va horizontal (ancho >= alto) o vertical (alto > ancho)?
-                # vtkTextActor3D por defecto: texto horizontal en plano XY.
-                # Tras RotateY(90°), el eje horizontal del texto queda en Z del mundo.
-                # Si face_h > face_w, girar el texto 90° adicionales para que quede
-                # horizontal en el mundo Y (vertical en el plano de la cara).
-                rotate_text_vertical = face_h > face_w * 1.5
-
-                # Dimensiones útiles de la cara para la escala
-                target_dim = face_h if rotate_text_vertical else face_w
-                # Estimación de ancho natural del texto a _FONT px:
-                # cada carácter ≈ _FONT * 0.55 px de ancho
+                face_x = cx + dx / 2.0 + 0.15
+                face_h, face_w = dz, dy
+                rotate_vertical = face_h > face_w * 1.5
+                target_dim = face_h if rotate_vertical else face_w
                 natural_w_px = _FONT * 0.55 * len(sku)
                 scale = target_dim * 0.72 / max(natural_w_px, 1.0)
 
@@ -432,15 +422,7 @@ class SceneController:
                     ta = _vtk.vtkTextActor3D()
                     ta.SetInput(sku)
                     ta.SetPosition(face_x, cy, cz)
-
-                    # Girar actor: texto en plano YZ, mirando hacia +X
-                    if rotate_text_vertical:
-                        # Horizontal en mundo → texto vertical en cara: Ry(90) + Rz(90)
-                        ta.SetOrientation(0.0, 90.0, 90.0)
-                    else:
-                        # Texto horizontal en cara: solo Ry(90)
-                        ta.SetOrientation(0.0, 90.0, 0.0)
-
+                    ta.SetOrientation(0.0, 90.0, 90.0 if rotate_vertical else 0.0)
                     ta.SetScale(scale, scale, 1.0)
 
                     tp = ta.GetTextProperty()
