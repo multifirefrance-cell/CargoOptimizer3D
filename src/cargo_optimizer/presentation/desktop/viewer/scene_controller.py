@@ -338,6 +338,9 @@ class SceneController:
         """
         import numpy as np  # noqa: PLC0415 - numpy garantizado por dependencia de pyvista
 
+        _label_points: list[tuple[float, float, float]] = []
+        _label_texts: list[str] = []
+
         groups: dict[_GroupKey, list[PlacementVisualModel]] = {}
         for visual in scene.placement_visuals:
             key: _GroupKey = (visual.oriented_dimensions, visual.color_hex)
@@ -351,14 +354,6 @@ class SceneController:
                 self._sku_groups.setdefault(visual.sku, [])
                 if key not in self._sku_groups[visual.sku]:
                     self._sku_groups[visual.sku].append(key)
-
-        # Un label por SKU: centroide XY, posicionado sobre la caja más alta del grupo.
-        # VTK deduplica labels que se proyectan al mismo píxel, por lo que 1500 labels
-        # superpuestos quedan reducidos a cero visibles. Un solo punto por SKU evita eso.
-        sku_sum_x: dict[str, float] = {}
-        sku_sum_y: dict[str, float] = {}
-        sku_max_top_z: dict[str, float] = {}
-        sku_count: dict[str, int] = {}
 
         for group_index, (key, visuals) in enumerate(groups.items()):
             _dimensions, color_hex = key
@@ -388,50 +383,41 @@ class SceneController:
             self._group_actors[key] = actor
             self._actor_group_by_id[id(actor)] = key
 
+            # Acumular centros por caja para el label colectivo
             sku = visuals[0].sku
             for visual in visuals:
                 rec = self._box_records[visual.sequence_number]
-                cx, cy, cz = rec.center
-                top_z = cz + rec.lengths[2] / 2
-                sku_sum_x[sku] = sku_sum_x.get(sku, 0.0) + cx
-                sku_sum_y[sku] = sku_sum_y.get(sku, 0.0) + cy
-                sku_max_top_z[sku] = max(sku_max_top_z.get(sku, top_z), top_z)
-                sku_count[sku] = sku_count.get(sku, 0) + 1
+                _label_points.append(rec.center)
+                _label_texts.append(sku)
 
         dark = self._theme != THEME_LIGHT
-        # vtkBillboardTextActor3D: siempre mira a la cámara, no sufre oclusión
-        # ni deduplicación de VTK (problemas que afectaban a add_point_labels).
-        try:
-            import vtk as _vtk  # noqa: PLC0415
-        except ImportError:
-            _vtk = None  # type: ignore[assignment]
-
-        if _vtk is not None:
-            for sku in sku_count:
-                n = sku_count[sku]
-                cx = sku_sum_x[sku] / n
-                cy = sku_sum_y[sku] / n
-                cz = sku_max_top_z[sku]
-                try:
-                    text_actor = _vtk.vtkBillboardTextActor3D()
-                    text_actor.SetInput(sku)
-                    text_actor.SetPosition(cx, cy, cz)
-                    tp = text_actor.GetTextProperty()
-                    tp.SetFontSize(13)
-                    tp.SetBold(True)
-                    tp.SetJustificationToCentered()
-                    if dark:
-                        tp.SetColor(0.88, 0.88, 0.88)
-                        tp.SetBackgroundColor(0.12, 0.13, 0.16)
-                    else:
-                        tp.SetColor(0.08, 0.08, 0.08)
-                        tp.SetBackgroundColor(1.0, 1.0, 1.0)
-                    tp.SetBackgroundOpacity(0.80)
-                    self._plotter.add_actor(text_actor, reset_camera=False)
-                    self._sku_label_actors[sku] = text_actor
-                    self._label_actors.append(text_actor)
-                except Exception:  # noqa: BLE001
-                    pass
+        # Un único add_point_labels con tolerance=0 (sin deduplicación) para
+        # todas las cajas: un actor/mapper compartido es mucho más liviano que
+        # N vtkBillboardTextActor3D individuales.  always_visible=True evita
+        # que cajas tapadas pierdan su etiqueta al girar la escena.
+        if _label_points:
+            text_color = "#E0E0E0" if dark else "#111111"
+            shape_color = "#1e2229" if dark else "#FFFFFF"
+            try:
+                label_actor = self._plotter.add_point_labels(
+                    np.array(_label_points, dtype=float),
+                    _label_texts,
+                    show_points=False,
+                    always_visible=True,
+                    bold=True,
+                    font_size=9,
+                    text_color=text_color,
+                    fill_shape=True,
+                    shape_color=shape_color,
+                    shape_opacity=0.75,
+                    margin=2,
+                    tolerance=0,
+                    reset_camera=False,
+                    name="viewer-sku-labels",
+                )
+                self._label_actors.append(label_actor)
+            except Exception:  # noqa: BLE001
+                pass
 
     def _build_axes(self, scene: SceneModel) -> None:
         colors = theme_colors(self._theme)
