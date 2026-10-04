@@ -94,6 +94,19 @@ class _SpinBox(QSpinBox):
             return (QValidator.State.Acceptable, text, pos)
         return super().validate(text, pos)
 
+    def keyPressEvent(self, event) -> None:
+        if event.modifiers() & Qt.KeyboardModifier.KeypadModifier:
+            from PySide6.QtGui import QKeyEvent
+            remapped = QKeyEvent(
+                event.type(),
+                event.key(),
+                Qt.KeyboardModifier.NoModifier,
+                event.text(),
+            )
+            super().keyPressEvent(remapped)
+        else:
+            super().keyPressEvent(event)
+
     def focusInEvent(self, event) -> None:
         super().focusInEvent(event)
         QTimer.singleShot(0, self.lineEdit().selectAll)
