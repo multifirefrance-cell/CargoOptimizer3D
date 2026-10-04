@@ -553,9 +553,20 @@ class GreedyExtremePointStrategy:
                     ):
                         # Si la capa superior del SKU anterior es parcial, las
                         # posiciones en el hueco disponible (y >= partial_top_y)
-                        # se llenan ANTES de subir a z >= min_z.
+                        # se llenan ANTES de subir a z >= min_z — pero solo si el
+                        # ítem cabe sin superar min_z. Si lo superara, bloquearía
+                        # posiciones en z == min_z (ceiling) y empujaría instancias
+                        # subsiguientes innecesariamente hacia arriba.
                         if seal_partial_top_y > 0.0 and p.y_cm >= seal_partial_top_y:
-                            primary_partial_gap.append(p)
+                            _min_z_size = (
+                                preferred_orientation.z_size_cm
+                                if strict
+                                else min(o.z_size_cm for _, o in feasible_orientations)
+                            )
+                            if p.z_cm + _min_z_size <= min_z + GEOMETRY_EPSILON_CM:
+                                primary_partial_gap.append(p)
+                            else:
+                                primary_below.append(p)
                         else:
                             primary_below.append(p)
                 elif in_x_gap:

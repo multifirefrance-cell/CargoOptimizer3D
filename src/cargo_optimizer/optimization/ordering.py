@@ -13,8 +13,9 @@ from cargo_optimizer.domain.loading_space import LoadingSpace
 from cargo_optimizer.optimization.models import PhysicalLoadInstance
 from cargo_optimizer.rules.engine import RulesEngine
 
-# (-total_volume, -max_dim, -weight, sku, instance_number, source_order)
-OrderKey = tuple[float, float, float, str, int, int]
+# (group, volume_key, -max_dim, -weight, sku, instance_number, source_order)
+# group: 0 = fondo-explícito (prio 1-49), 1 = auto, 2 = techo-explícito (prio 50-99)
+OrderKey = tuple[int, float, float, float, str, int, int]
 
 
 def order_instances(
@@ -26,6 +27,12 @@ def order_instances(
 
     Prioridad (menor valor = antes):
 
+    0. **loading_priority** del SKU (cuando > 0 anula el orden automático):
+       - 1–49: fondo del contenedor; 1 = absolutamente primero, 49 = justo antes del
+         grupo automático. Se ordenan entre sí por prioridad ascendente.
+       - 0: automático — por volumen total (comportamiento predeterminado).
+       - 50–99: techo del contenedor; 50 = inmediatamente después del grupo automático,
+         99 = absolutamente último. Se ordenan entre sí por prioridad ascendente.
     1. Mayor **volumen total** del SKU primero (cantidad × volumen unitario) —
        el SKU con más unidades o piezas más grandes ocupa el fondo. Agrupa
        todas las instancias del mismo SKU consecutivamente, produciendo
@@ -47,12 +54,23 @@ def order_instances(
 
     def sort_key(instance: PhysicalLoadInstance) -> OrderKey:
         unit = instance.load_unit
+        prio = unit.loading_priority
+        if prio == 0:
+            group = 1                                    # automático: por volumen
+            volume_key = -total_volume_cache[unit.id]
+        elif prio <= 49:
+            group = 0                                    # fondo explícito (1 = primero)
+            volume_key = float(prio)
+        else:
+            group = 2                                    # techo explícito (99 = último)
+            volume_key = float(prio)
         return (
-            -total_volume_cache[unit.id],           # mayor volumen total primero (fondo)
-            -max(unit.dimensions.as_tuple()),       # desempate: mayor dimensión unitaria
-            -unit.weight_kg,                        # desempate: mayor peso unitario
-            unit.sku,                               # desempate estable entre SKUs iguales
-            instance.instance_number,              # orden natural dentro del mismo SKU
+            group,
+            volume_key,
+            -max(unit.dimensions.as_tuple()),           # desempate: mayor dimensión unitaria
+            -unit.weight_kg,                            # desempate: mayor peso unitario
+            unit.sku,                                   # desempate estable entre SKUs iguales
+            instance.instance_number,                  # orden natural dentro del mismo SKU
             instance.source_order,
         )
 

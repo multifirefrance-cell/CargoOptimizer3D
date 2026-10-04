@@ -87,3 +87,84 @@ def test_determinism() -> None:
     ordered_1 = order_instances(instances, DEFAULT_SPACE, _ENGINE)
     ordered_2 = order_instances(instances, DEFAULT_SPACE, _ENGINE)
     assert ordered_1 == ordered_2
+
+
+# ── loading_priority ────────────────────────────────────────────────────────
+
+def test_loading_priority_1_goes_before_auto() -> None:
+    # SKU con prio=1 (fondo explícito) debe ir ANTES que SKU automático,
+    # incluso si el automático tiene mucho más volumen total.
+    big_auto = make_load_unit(
+        sku="BIG", dimensions=Dimensions3D(50.0, 50.0, 50.0), quantity=10
+    )  # volumen total = 1 250 000 cm³
+    small_prio1 = make_load_unit(
+        sku="SMALL", dimensions=Dimensions3D(10.0, 10.0, 10.0), quantity=1, loading_priority=1
+    )  # volumen total = 1 000 cm³
+    instances = expand_load_units((big_auto, small_prio1))
+    ordered = order_instances(instances, DEFAULT_SPACE, _ENGINE)
+    assert ordered[0].load_unit.sku == "SMALL"
+
+
+def test_loading_priority_99_goes_after_auto() -> None:
+    # SKU con prio=99 (techo explícito) debe ir DESPUÉS que SKU automático,
+    # incluso si el automático tiene mucho menos volumen total.
+    small_auto = make_load_unit(
+        sku="SMALL", dimensions=Dimensions3D(10.0, 10.0, 10.0), quantity=1
+    )
+    big_prio99 = make_load_unit(
+        sku="BIG", dimensions=Dimensions3D(50.0, 50.0, 50.0), quantity=10, loading_priority=99
+    )
+    instances = expand_load_units((big_prio99, small_auto))
+    ordered = order_instances(instances, DEFAULT_SPACE, _ENGINE)
+    assert ordered[0].load_unit.sku == "SMALL"
+    assert ordered[-1].load_unit.sku == "BIG"
+
+
+def test_loading_priority_bottom_tier_sorted_by_priority_asc() -> None:
+    # Entre SKUs del fondo explícito (prio 1-49), prio menor = antes.
+    prio5 = make_load_unit(sku="P5", quantity=1, loading_priority=5)
+    prio2 = make_load_unit(sku="P2", quantity=1, loading_priority=2)
+    prio10 = make_load_unit(sku="P10", quantity=1, loading_priority=10)
+    instances = expand_load_units((prio10, prio5, prio2))
+    ordered = order_instances(instances, DEFAULT_SPACE, _ENGINE)
+    skus = [inst.load_unit.sku for inst in ordered]
+    assert skus == ["P2", "P5", "P10"]
+
+
+def test_loading_priority_top_tier_sorted_by_priority_asc() -> None:
+    # Entre SKUs del techo explícito (prio 50-99), prio menor = antes.
+    prio60 = make_load_unit(sku="P60", quantity=1, loading_priority=60)
+    prio50 = make_load_unit(sku="P50", quantity=1, loading_priority=50)
+    prio99 = make_load_unit(sku="P99", quantity=1, loading_priority=99)
+    instances = expand_load_units((prio60, prio99, prio50))
+    ordered = order_instances(instances, DEFAULT_SPACE, _ENGINE)
+    skus = [inst.load_unit.sku for inst in ordered]
+    assert skus == ["P50", "P60", "P99"]
+
+
+def test_loading_priority_zero_behaves_as_auto_volume_order() -> None:
+    # loading_priority=0 no altera el orden por volumen (comportamiento anterior).
+    small = make_load_unit(sku="SMALL", dimensions=Dimensions3D(10.0, 10.0, 10.0), quantity=1, loading_priority=0)
+    large = make_load_unit(sku="LARGE", dimensions=Dimensions3D(50.0, 50.0, 50.0), quantity=1, loading_priority=0)
+    instances = expand_load_units((small, large))
+    ordered = order_instances(instances, DEFAULT_SPACE, _ENGINE)
+    assert ordered[0].load_unit.sku == "LARGE"
+
+
+def test_loading_priority_full_spectrum() -> None:
+    # Orden correcto: prio-fondo (1,10) → auto (por volumen) → prio-techo (50,99).
+    bottom1 = make_load_unit(sku="BOT1", dimensions=Dimensions3D(10.0, 10.0, 10.0), quantity=1, loading_priority=1)
+    bottom10 = make_load_unit(sku="BOT10", dimensions=Dimensions3D(10.0, 10.0, 10.0), quantity=1, loading_priority=10)
+    auto_big = make_load_unit(sku="AUTO_BIG", dimensions=Dimensions3D(50.0, 50.0, 50.0), quantity=1)
+    auto_small = make_load_unit(sku="AUTO_SMALL", dimensions=Dimensions3D(20.0, 20.0, 20.0), quantity=1)
+    top50 = make_load_unit(sku="TOP50", dimensions=Dimensions3D(10.0, 10.0, 10.0), quantity=1, loading_priority=50)
+    top99 = make_load_unit(sku="TOP99", dimensions=Dimensions3D(10.0, 10.0, 10.0), quantity=1, loading_priority=99)
+    instances = expand_load_units((top99, auto_small, bottom10, auto_big, top50, bottom1))
+    ordered = order_instances(instances, DEFAULT_SPACE, _ENGINE)
+    skus = [inst.load_unit.sku for inst in ordered]
+    assert skus[0] == "BOT1"
+    assert skus[1] == "BOT10"
+    assert skus[2] == "AUTO_BIG"    # mayor volumen entre los automáticos
+    assert skus[3] == "AUTO_SMALL"
+    assert skus[4] == "TOP50"
+    assert skus[5] == "TOP99"
