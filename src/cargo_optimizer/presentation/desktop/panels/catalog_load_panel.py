@@ -95,6 +95,15 @@ class _QtyEdit(QLineEdit):
     def setValue(self, v: int) -> None:
         self.setText("" if v == 0 else str(v))
 
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Tab:
+            self.focusNextPrevChild(True)
+            return
+        if event.key() == Qt.Key.Key_Backtab:
+            self.focusNextPrevChild(False)
+            return
+        super().keyPressEvent(event)
+
     def focusInEvent(self, event) -> None:
         super().focusInEvent(event)
         QTimer.singleShot(0, self.selectAll)
@@ -286,6 +295,10 @@ class CatalogLoadPanel(QWidget):
                 db = db_units[sd.sku]
                 unit = replace(unit, dimensions=db.dimensions, weight_kg=db.weight_kg, name=db.name)
             self._append_row(unit)
+
+        # Encadenar TAB entre campos QTY consecutivos
+        for i in range(len(self._qty_spins) - 1):
+            QWidget.setTabOrder(self._qty_spins[i], self._qty_spins[i + 1])
 
     def _append_row(self, unit: LoadUnit) -> None:
         row = self._table.rowCount()
