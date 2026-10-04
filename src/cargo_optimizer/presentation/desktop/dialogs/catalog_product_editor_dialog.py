@@ -18,13 +18,14 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QFileDialog, QPixmap
+from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QGridLayout,
     QGroupBox,
