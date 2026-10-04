@@ -19,16 +19,16 @@ from dataclasses import replace
 from uuid import uuid4
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QValidator
+from PySide6.QtGui import QColor, QIntValidator
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
     QGridLayout,
     QHeaderView,
     QHBoxLayout,
+    QLineEdit,
     QMessageBox,
     QPushButton,
-    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -73,43 +73,31 @@ def _sku_def_to_load_unit(sd: _SkuDef, color_hex: str) -> LoadUnit:
     )
 
 
-class _SpinBox(QSpinBox):
-    """QSpinBox que muestra '—' para cero sin usar setSpecialValueText.
+class _QtyEdit(QLineEdit):
+    """Campo de cantidad basado en QLineEdit: acepta cualquier teclado sin fricción.
 
-    setSpecialValueText bloquea el teclado porque el validador de enteros
-    rechaza cualquier dígito añadido a "—". Esta implementación muestra "—"
-    via textFromValue/valueFromText/validate, lo que deja el validador limpio
-    para tipeo normal. Al ganar foco selecciona todo para que el primer dígito
-    reemplace el "—" visible.
+    QSpinBox embebido en QTableWidget tiene problemas con el teclado numérico
+    porque los eventos de tecla van al QLineEdit interno y los modificadores
+    de keypad interfieren. QLineEdit + QIntValidator no tiene ese problema.
+    Muestra '—' como placeholder cuando está vacío (valor = 0).
     """
 
-    def textFromValue(self, value: int) -> str:
-        return "—" if value == 0 else super().textFromValue(value)
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setValidator(QIntValidator(0, 99_999_999, self))
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setPlaceholderText("—")
 
-    def valueFromText(self, text: str) -> int:
-        return 0 if text.strip() in ("—", "") else super().valueFromText(text)
+    def value(self) -> int:
+        t = self.text().strip()
+        return int(t) if t.isdigit() else 0
 
-    def validate(self, text: str, pos: int):
-        if text.strip() in ("—", ""):
-            return (QValidator.State.Acceptable, text, pos)
-        return super().validate(text, pos)
-
-    def keyPressEvent(self, event) -> None:
-        if event.modifiers() & Qt.KeyboardModifier.KeypadModifier:
-            from PySide6.QtGui import QKeyEvent
-            remapped = QKeyEvent(
-                event.type(),
-                event.key(),
-                Qt.KeyboardModifier.NoModifier,
-                event.text(),
-            )
-            super().keyPressEvent(remapped)
-        else:
-            super().keyPressEvent(event)
+    def setValue(self, v: int) -> None:
+        self.setText("" if v == 0 else str(v))
 
     def focusInEvent(self, event) -> None:
         super().focusInEvent(event)
-        QTimer.singleShot(0, self.lineEdit().selectAll)
+        QTimer.singleShot(0, self.selectAll)
 
 
 _PALETTE: tuple[str, ...] = (
@@ -212,7 +200,7 @@ class CatalogLoadPanel(QWidget):
         self._repository = repository
         self._units: list[LoadUnit] = []
         self._color_buttons: list[QPushButton] = []
-        self._qty_spins: list[QSpinBox] = []
+        self._qty_spins: list[_QtyEdit] = []
 
         # ── Botón principal ─────────────────────────────────────────────
         self._add_button = QPushButton("Agregar a la carga", self)
@@ -328,14 +316,10 @@ class CatalogLoadPanel(QWidget):
         name_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
         self._table.setItem(row, 2, name_item)
 
-        # ── Cantidad (SpinBox embebido) ───────────────────────────────
-        spin = _SpinBox()
-        spin.setRange(0, 99999999)
-        spin.setValue(0)
-        spin.setButtonSymbols(QSpinBox.ButtonSymbols.UpDownArrows)
-        spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._qty_spins.append(spin)
-        self._table.setCellWidget(row, 3, spin)
+        # ── Cantidad (QLineEdit embebido) ─────────────────────────────
+        edit = _QtyEdit()
+        self._qty_spins.append(edit)
+        self._table.setCellWidget(row, 3, edit)
 
     @staticmethod
     def _apply_swatch_style(btn: QPushButton, hex_color: str) -> None:
