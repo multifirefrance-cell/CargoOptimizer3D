@@ -384,81 +384,53 @@ class SceneController:
 
         dark = self._theme != THEME_LIGHT
 
-        # Un único vtkTextActor3D por SKU en la caja más visible (mayor X + Z).
-        # Mantiene el aspecto "impreso en cara" con costo mínimo (N_SKU actores).
-        try:
-            import vtk as _vtk  # noqa: PLC0415
-        except ImportError:
-            _vtk = None  # type: ignore[assignment]
+        # Un label por SKU usando add_point_labels de PyVista (overlay 2D que
+        # siempre mira hacia la cámara — "de cara al usuario" en cualquier vista).
+        seq_to_sku = {v.sequence_number: v.sku for v in scene.placement_visuals}
 
-        if _vtk is not None:
-            seq_to_sku = {v.sequence_number: v.sku for v in scene.placement_visuals}
-
-            # Agrupar boxes por SKU y elegir la más visible (mínima Y = más al frente).
-            # El label va en la cara frontal (-Y) que siempre mira hacia el usuario
-            # en la vista isométrica estándar y en la vista frontal.
-            sku_best: dict[str, _BoxRecord] = {}
-            for seq_num, rec in self._box_records.items():
-                sku = seq_to_sku.get(seq_num, "")
-                if not sku:
-                    continue
-                cx, cy, cz = rec.center
-                # Prioridad: mínima Y (cara frontal expuesta), desempate por Z y X
-                score = -cy * 1000.0 + cz * 0.5 + cx * 0.3
-                if sku not in sku_best:
+        # Elegir la caja más al frente (-Y mínima) y más arriba por SKU
+        sku_best: dict[str, _BoxRecord] = {}
+        for seq_num, rec in self._box_records.items():
+            sku = seq_to_sku.get(seq_num, "")
+            if not sku:
+                continue
+            cx, cy, cz = rec.center
+            score = -cy * 1000.0 + cz * 0.5 + cx * 0.3
+            if sku not in sku_best:
+                sku_best[sku] = rec
+            else:
+                bc = sku_best[sku].center
+                if score > -bc[1] * 1000.0 + bc[2] * 0.5 + bc[0] * 0.3:
                     sku_best[sku] = rec
-                else:
-                    bc = sku_best[sku].center
-                    best_score = -bc[1] * 1000.0 + bc[2] * 0.5 + bc[0] * 0.3
-                    if score > best_score:
-                        sku_best[sku] = rec
 
-            _FONT = 48
-            for sku, rec in sku_best.items():
+        if sku_best:
+            import numpy as _np  # noqa: PLC0415
+
+            pts: list[list[float]] = []
+            lbls: list[str] = []
+            for sku, rec in sorted(sku_best.items()):
                 cx, cy, cz = rec.center
-                dx, dy, dz = rec.lengths
+                _, dy, _ = rec.lengths
+                # Punto en el centro de la cara frontal, ligeramente exterior
+                pts.append([cx, cy - dy / 2.0 - 0.02, cz])
+                lbls.append(sku)
 
-                # Cara frontal de la caja (-Y): visible en vista frontal e isométrica.
-                # SetOrientation(90, 0, 0): Rx(90°) → normal = -Y, right = +X, up = +Z.
-                # El texto corre longitudinalmente a lo largo de X (eje del contenedor).
-                face_w = dx   # ancho de la cara frontal (eje X)
-                face_h = dz   # altura de la cara frontal (eje Z)
-                use_vertical = face_h > face_w * 1.4
-                target_dim = face_h if use_vertical else face_w
-                natural_w_px = _FONT * 0.55 * len(sku)
-                scale = target_dim * 0.72 / max(natural_w_px, 1.0)
-
-                # Ligeramente por delante de la cara (-Y) para evitar z-fighting
-                face_y = cy - dy / 2.0 - 0.05
-
-                # Rx(90): (x,y,z)→(x,−z,y) → normal(0,0,1)→(0,−1,0)=−Y ✓
-                orient = (90.0, 0.0, 90.0 if use_vertical else 0.0)
-
-                try:
-                    ta = _vtk.vtkTextActor3D()
-                    ta.SetInput(sku)
-                    ta.SetPosition(cx, face_y, cz)
-                    ta.SetOrientation(*orient)
-                    ta.SetScale(scale, scale, 1.0)
-
-                    tp = ta.GetTextProperty()
-                    tp.SetFontSize(_FONT)
-                    tp.SetBold(True)
-                    tp.SetJustificationToCentered()
-                    tp.SetVerticalJustificationToCentered()
-                    if dark:
-                        tp.SetColor(0.94, 0.94, 0.94)
-                        tp.SetBackgroundColor(0.10, 0.11, 0.15)
-                    else:
-                        tp.SetColor(0.04, 0.04, 0.04)
-                        tp.SetBackgroundColor(0.98, 0.98, 0.98)
-                    tp.SetBackgroundOpacity(0.82)
-
-                    self._plotter.add_actor(ta, reset_camera=False)
-                    self._sku_label_actors.setdefault(sku, []).append(ta)
-                    self._label_actors.append(ta)
-                except Exception:  # noqa: BLE001
-                    pass
+            text_color = (0.94, 0.94, 0.94) if dark else (0.04, 0.04, 0.04)
+            bg_color = (0.10, 0.11, 0.15) if dark else (0.97, 0.97, 0.97)
+            actor = self._plotter.add_point_labels(
+                _np.array(pts, dtype=float),
+                lbls,
+                font_size=16,
+                bold=True,
+                text_color=text_color,
+                background_color=bg_color,
+                shape_opacity=0.85,
+                always_visible=True,
+                reset_camera=False,
+            )
+            self._label_actors.append(actor)
+            for sku in sku_best:
+                self._sku_label_actors.setdefault(sku, []).append(actor)
 
     def _build_axes(self, scene: SceneModel) -> None:
         colors = theme_colors(self._theme)
