@@ -352,7 +352,8 @@ class SceneController:
                 if key not in self._sku_groups[visual.sku]:
                     self._sku_groups[visual.sku].append(key)
 
-        # centros por SKU para los labels por caja
+        # labels por SKU: un punto por caja, un actor por SKU
+        # always_visible=True para que los labels atraviesen la geometría y sean siempre legibles
         sku_centers: dict[str, list[tuple[float, float, float]]] = {}
 
         for group_index, (key, visuals) in enumerate(groups.items()):
@@ -383,14 +384,12 @@ class SceneController:
             self._group_actors[key] = actor
             self._actor_group_by_id[id(actor)] = key
 
-            # Acumular centros por SKU para labels longitudinales por caja
             sku = visuals[0].sku
             for visual in visuals:
                 sku_centers.setdefault(sku, []).append(
                     self._box_records[visual.sequence_number].center
                 )
 
-        # Un actor de labels por SKU → set_sku_visible puede ocultarlos individualmente
         dark = self._theme != THEME_LIGHT
         shape_color = "#1E2028" if dark else "#FFFFFF"
         text_color = "#E0E0E0" if dark else "#202020"
@@ -401,11 +400,11 @@ class SceneController:
                     [sku] * len(centers),
                     font_size=7,
                     bold=False,
-                    always_visible=False,
+                    always_visible=True,
                     show_points=False,
                     shape="rounded_box",
                     shape_color=shape_color,
-                    shape_opacity=0.55,
+                    shape_opacity=0.65,
                     text_color=text_color,
                     name=f"viewer-box-label-{sku_idx}",
                 )

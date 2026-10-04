@@ -331,6 +331,7 @@ class CatalogLoadPanel(QWidget):
 
         # ── Cantidad (QLineEdit embebido) ─────────────────────────────
         edit = _QtyEdit()
+        edit.returnPressed.connect(self._on_add_clicked)
         self._qty_spins.append(edit)
         self._table.setCellWidget(row, 3, edit)
 

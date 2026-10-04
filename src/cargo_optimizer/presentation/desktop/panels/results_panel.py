@@ -14,18 +14,35 @@ cambia cómo se presentan, nunca el contrato con `MainWindow.set_results`.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from uuid import UUID
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QFrame,
     QGridLayout,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QSizePolicy,
+    QTableView,
     QVBoxLayout,
     QWidget,
 )
 
+from cargo_optimizer.domain.load_unit import LoadUnit
+from cargo_optimizer.domain.placement import Placement
+from cargo_optimizer.domain.unpacked_unit import UnpackedUnit
+from cargo_optimizer.presentation.desktop.models.pending_sku_summary_model import (
+    COL_NAME as _PSUMMARY_COL_NAME,
+    COL_PACKED as _PSUMMARY_COL_PACKED,
+    COL_PENDING as _PSUMMARY_COL_PENDING,
+    COL_REQUESTED as _PSUMMARY_COL_REQUESTED,
+    COL_SKU as _PSUMMARY_COL_SKU,
+    PendingSkuSummaryModel,
+)
 from cargo_optimizer.presentation.desktop.style import (
     ERROR_DARK,
     ERROR_LIGHT,
@@ -174,13 +191,39 @@ class ResultsPanel(QWidget):
             detail_row.addSpacing(SPACING_SM)
         detail_row.addStretch(1)
 
+        # ── Tabla PENDIENTE POR SKU ──────────────────────────────────────────
+        self.pending_summary_model = PendingSkuSummaryModel(self)
+        self._sku_table = QTableView(self)
+        self._sku_table.setObjectName("pendingSkuSummaryTableView")
+        self._sku_table.setModel(self.pending_summary_model)
+        self._sku_table.setAlternatingRowColors(False)
+        self._sku_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._sku_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._sku_table.verticalHeader().setVisible(False)
+        _sh = self._sku_table.horizontalHeader()
+        _sh.setStretchLastSection(False)
+        _sh.setSectionResizeMode(_PSUMMARY_COL_SKU, QHeaderView.ResizeMode.Interactive)
+        _sh.setSectionResizeMode(_PSUMMARY_COL_NAME, QHeaderView.ResizeMode.Stretch)
+        _sh.setSectionResizeMode(_PSUMMARY_COL_REQUESTED, QHeaderView.ResizeMode.Interactive)
+        _sh.setSectionResizeMode(_PSUMMARY_COL_PACKED, QHeaderView.ResizeMode.Interactive)
+        _sh.setSectionResizeMode(_PSUMMARY_COL_PENDING, QHeaderView.ResizeMode.Interactive)
+        _sh.resizeSection(_PSUMMARY_COL_SKU, 90)
+        _sh.resizeSection(_PSUMMARY_COL_REQUESTED, 95)
+        _sh.resizeSection(_PSUMMARY_COL_PACKED, 95)
+        _sh.resizeSection(_PSUMMARY_COL_PENDING, 95)
+
+        sku_section_label = QLabel("PENDIENTE POR SKU", self)
+        sku_section_label.setProperty("class", "sectionLabel")
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(SPACING_SM, SPACING_XS, SPACING_SM, SPACING_XS)
         layout.setSpacing(SPACING_XS)
         layout.addWidget(self._stale_label)
         layout.addLayout(grid)
         layout.addLayout(detail_row)
-        layout.addStretch(1)
+        layout.addSpacing(SPACING_XS)
+        layout.addWidget(sku_section_label)
+        layout.addWidget(self._sku_table, 1)
 
     def clear(self) -> None:
         self._last_pending = None
@@ -204,6 +247,16 @@ class ResultsPanel(QWidget):
         for tile in (self._packed_tile, self._pending_tile, self._utilization_tile):
             self._clear_tile_accent(tile)
         self.set_stale(False)
+        self.pending_summary_model.clear()
+
+    def set_result(
+        self,
+        placements: Sequence[Placement],
+        unpacked_units: Sequence[UnpackedUnit],
+        load_units_by_id: Mapping[UUID, LoadUnit],
+    ) -> None:
+        """Actualiza la tabla PENDIENTE POR SKU con el último resultado."""
+        self.pending_summary_model.set_result(placements, unpacked_units, load_units_by_id)
 
     def _set_tile_accent(self, tile: QFrame, hex_color: str) -> None:
         if self._dark:

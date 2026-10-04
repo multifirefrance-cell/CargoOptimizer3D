@@ -136,7 +136,6 @@ from cargo_optimizer.presentation.desktop.panels.results_panel import ResultsPan
 from cargo_optimizer.presentation.desktop.panels.selection_details_panel import (
     SelectionDetailsPanel,
 )
-from cargo_optimizer.presentation.desktop.panels.unpacked_table_panel import UnpackedTablePanel
 from cargo_optimizer.presentation.desktop.panels.viewer_stats_header import ViewerStatsHeader
 from cargo_optimizer.presentation.desktop.panels.warnings_panel import WarningsPanel
 from cargo_optimizer.presentation.desktop.settings import AppSettings
@@ -295,7 +294,6 @@ class MainWindow(QMainWindow):
         catalog_repository = self._catalog_service.products if self._catalog_service else None
         self.product_table_panel = ProductTablePanel(self, repository=catalog_repository)
         self.results_panel = ResultsPanel(self)
-        self.unpacked_table_panel = UnpackedTablePanel(self)
         self.warnings_panel = WarningsPanel(self)
         self.log_panel = LogPanel(self)
         self.multi_space_results_panel = MultiSpaceResultsPanel(self)
@@ -378,7 +376,6 @@ class MainWindow(QMainWindow):
         self.results_tabs = QTabWidget(self)
         self.results_tabs.setObjectName("resultsTabs")
         self.results_tabs.addTab(self.results_panel, "Resumen")
-        self.results_tabs.addTab(self.unpacked_table_panel, _UNPACKED_TAB_BASE_LABEL)
         self.results_tabs.addTab(self.warnings_panel, "Avisos")
         self.results_tabs.addTab(self.log_panel, "Registro")
         self.results_tabs.addTab(self.multi_space_results_panel, "Multi-espacio")
@@ -866,8 +863,6 @@ class MainWindow(QMainWindow):
             model.remove_rows_at(list(range(model.rowCount())))
             self.results_panel.clear()
             self.viewer_stats_header.clear_result_stats()
-            self.unpacked_table_panel.clear()
-            self._update_pending_tab_label(0)
             self.warnings_panel.clear()
             self._update_warnings_tab_label(0)
             self.multi_space_results_panel.clear()
@@ -935,8 +930,6 @@ class MainWindow(QMainWindow):
             else:
                 self.results_panel.clear()
                 self.viewer_stats_header.clear_result_stats()
-                self.unpacked_table_panel.clear()
-                self._update_pending_tab_label(0)
                 self.warnings_panel.clear()
                 self._update_warnings_tab_label(0)
                 self._show_empty_space_preview(loaded.project.loading_space)
@@ -1912,30 +1905,11 @@ class MainWindow(QMainWindow):
         self.results_panel.setFocus()
 
     def _on_pending_tile_clicked(self) -> None:
-        """Clic en la tarjeta "Cantidad pendiente": salta directo al desglose por SKU."""
-        self._show_pending_tab()
+        """Clic en la tarjeta "Cantidad pendiente": muestra la pestaña Resumen con la tabla SKU."""
+        self._on_show_results()
 
-    def _show_pending_tab(self) -> None:
-        self.results_tabs.setCurrentWidget(self.unpacked_table_panel)
-        self.unpacked_table_panel.setFocus()
-
-    def _update_pending_tab_label(self, pending_count: int) -> None:
-        """Añade "(N)" a la pestaña "No cargados" cuando hay pendientes, la limpia si no.
-
-        Es la única señal permanente (no depende de que el usuario haya
-        visto el cambio de pestaña en el momento exacto en que ocurrió)
-        de que hay algo que revisar en esa pestaña -- se actualiza tanto
-        al poblar un resultado real como al limpiar el panel.
-        """
-        index = self.results_tabs.indexOf(self.unpacked_table_panel)
-        if index < 0:
-            return
-        label = (
-            _UNPACKED_TAB_BASE_LABEL
-            if pending_count <= 0
-            else f"{_UNPACKED_TAB_BASE_LABEL} ({pending_count})"
-        )
-        self.results_tabs.setTabText(index, label)
+    def _update_pending_tab_label(self, _pending_count: int) -> None:
+        pass  # tab eliminado; sin acción
 
     def _update_warnings_tab_label(self, warnings_count: int) -> None:
         """Muestra "(N)" en la pestaña "Avisos" cuando hay avisos, la limpia si no."""
@@ -2088,8 +2062,6 @@ class MainWindow(QMainWindow):
         self._set_running_controls_enabled(False)
         self.results_panel.clear()
         self.viewer_stats_header.clear_result_stats()
-        self.unpacked_table_panel.clear()
-        self._update_pending_tab_label(0)
         self.warnings_panel.clear()
         self._update_warnings_tab_label(0)
         # Un resultado multi-espacio de una ejecución anterior queda
@@ -2173,10 +2145,7 @@ class MainWindow(QMainWindow):
         # incondicional, así que un desglose por SKU correcto quedaba sin
         # ninguna vía visible para descubrirlo (bug real reportado sobre
         # el ejecutable: el dato existía pero nunca se mostraba solo).
-        if result.unpacked_count > 0 and not self._cancel_requested:
-            self._show_pending_tab()
-        else:
-            self._on_show_results()
+        self._on_show_results()
 
     def _on_optimization_failed(self, message: str) -> None:
         self._set_state(STATE_ERROR)
@@ -2339,10 +2308,9 @@ class MainWindow(QMainWindow):
             weight_kg=result.used_weight_kg,
             utilization_percent=result.volume_utilization_percent,
         )
-        self.unpacked_table_panel.set_result(
+        self.results_panel.set_result(
             result.placements, result.unpacked_units, self._last_load_units_by_id
         )
-        self._update_pending_tab_label(result.unpacked_count)
         self.warnings_panel.set_warnings(result.warnings)
         self._update_warnings_tab_label(len(result.warnings))
         self.results_panel.set_stale(self._result_stale)
