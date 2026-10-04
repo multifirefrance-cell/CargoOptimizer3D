@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QHBoxLayout,
     QLabel,
     QProgressBar,
@@ -40,6 +41,7 @@ class ViewerStatsHeader(QWidget):
     view_front_requested = Signal()
     view_top_requested = Signal()
     view_side_requested = Signal()
+    sku_visibility_changed = Signal(str, bool)  # (sku, visible)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -183,7 +185,7 @@ class ViewerStatsHeader(QWidget):
         self._clear_legend()
 
     def set_sku_legend(self, color_by_sku: dict[str, str]) -> None:
-        """Muestra una fila de swatches de color + nombre SKU debajo de la barra principal."""
+        """Muestra checkboxes de filtro por SKU con swatch de color debajo de la barra principal."""
         self._clear_legend()
         if not color_by_sku:
             return
@@ -193,10 +195,20 @@ class ViewerStatsHeader(QWidget):
             swatch.setStyleSheet(
                 f"background: {color_hex}; border-radius: 2px; border: 1px solid rgba(0,0,0,0.15);"
             )
-            name_lbl = QLabel(sku, self._legend_row)
-            name_lbl.setStyleSheet("font-size: 8pt;")
-            self._legend_row_layout.addWidget(swatch)
-            self._legend_row_layout.addWidget(name_lbl)
+            cb = QCheckBox(sku, self._legend_row)
+            cb.setChecked(True)
+            cb.setStyleSheet("font-size: 8pt;")
+            cb.checkStateChanged.connect(
+                lambda state, s=sku: self.sku_visibility_changed.emit(
+                    s, state == Qt.CheckState.Checked
+                )
+            )
+            item = QHBoxLayout()
+            item.setSpacing(4)
+            item.setContentsMargins(0, 0, 0, 0)
+            item.addWidget(swatch)
+            item.addWidget(cb)
+            self._legend_row_layout.addLayout(item)
         self._legend_row_layout.addStretch(1)
         self._legend_row.setVisible(True)
 

@@ -316,6 +316,8 @@ class MainWindow(QMainWindow):
         self.viewer_stats_header.view_side_requested.connect(self._on_view_side)
         # Leyenda de colores SKU: cuando el visor carga una escena, propaga el color_mapping
         self.viewer_widget.scene_color_mapping_ready.connect(self.viewer_stats_header.set_sku_legend)
+        # Filtro SKU: checkbox en la leyenda → mostrar/ocultar actores en el visor
+        self.viewer_stats_header.sku_visibility_changed.connect(self.viewer_widget.set_sku_visible)
 
         self.loading_space_summary_panel.profile_selected.connect(
             self.loading_space_form_panel.set_current_profile_name

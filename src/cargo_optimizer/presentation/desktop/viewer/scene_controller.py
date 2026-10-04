@@ -156,6 +156,7 @@ class SceneController:
         self._actor_group_by_id: dict[int, _GroupKey] = {}  # id(actor) -> clave de grupo
         self._box_records: dict[int, _BoxRecord] = {}  # sequence_number -> centro/longitudes
         self._group_members: dict[_GroupKey, list[int]] = {}  # clave de grupo -> sequence_number
+        self._sku_groups: dict[str, list[_GroupKey]] = {}  # sku -> claves de grupo que le pertenecen
         self._selection_actor: Any | None = None  # contorno de resalte, independiente del grupo
         self._container_actors: list[Any] = []
         self._axes_actors: list[Any] = []
@@ -207,6 +208,7 @@ class SceneController:
         self._actor_group_by_id.clear()
         self._box_records.clear()
         self._group_members.clear()
+        self._sku_groups.clear()
         self._container_actors.clear()
         self._axes_actors.clear()
         self._label_actors.clear()
@@ -343,6 +345,10 @@ class SceneController:
                 group_key=key, center=center, lengths=lengths
             )
             self._group_members.setdefault(key, []).append(visual.sequence_number)
+            if key not in self._sku_groups.get(visual.sku, []):
+                self._sku_groups.setdefault(visual.sku, [])
+                if key not in self._sku_groups[visual.sku]:
+                    self._sku_groups[visual.sku].append(key)
 
         label_points: list[tuple[float, float, float]] = []
         label_texts: list[str] = []
@@ -452,6 +458,14 @@ class SceneController:
     def set_labels_visible(self, visible: bool) -> None:
         for actor in self._label_actors:
             actor.SetVisibility(1 if visible else 0)
+        self._plotter.render()
+
+    def set_sku_visible(self, sku: str, visible: bool) -> None:
+        """Muestra u oculta todos los actores que pertenecen a un SKU concreto."""
+        for key in self._sku_groups.get(sku, []):
+            actor = self._group_actors.get(key)
+            if actor is not None:
+                actor.visibility = visible
         self._plotter.render()
 
     # ------------------------------------------------------------------

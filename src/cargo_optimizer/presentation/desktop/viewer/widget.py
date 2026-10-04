@@ -249,6 +249,10 @@ class Packing3DViewer(QWidget):
         if self._controller is not None:
             self._controller.set_axes_visible(visible)
 
+    def set_sku_visible(self, sku: str, visible: bool) -> None:
+        if self._controller is not None:
+            self._controller.set_sku_visible(sku, visible)
+
     def set_labels_visible(self, visible: bool) -> None:
         if self._controller is not None:
             self._controller.set_labels_visible(visible)
