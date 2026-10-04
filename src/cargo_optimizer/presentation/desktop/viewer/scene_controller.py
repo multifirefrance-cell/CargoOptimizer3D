@@ -157,7 +157,7 @@ class SceneController:
         self._box_records: dict[int, _BoxRecord] = {}  # sequence_number -> centro/longitudes
         self._group_members: dict[_GroupKey, list[int]] = {}  # clave de grupo -> sequence_number
         self._sku_groups: dict[str, list[_GroupKey]] = {}  # sku -> claves de grupo que le pertenecen
-        self._sku_label_actors: dict[str, Any] = {}  # sku -> vtkBillboardTextActor3D
+        self._sku_label_actors: dict[str, list[Any]] = {}  # sku -> lista de actores de texto
         self._selection_actor: Any | None = None  # contorno de resalte, independiente del grupo
         self._container_actors: list[Any] = []
         self._axes_actors: list[Any] = []
@@ -338,9 +338,6 @@ class SceneController:
         """
         import numpy as np  # noqa: PLC0415 - numpy garantizado por dependencia de pyvista
 
-        _label_points: list[tuple[float, float, float]] = []
-        _label_texts: list[str] = []
-
         groups: dict[_GroupKey, list[PlacementVisualModel]] = {}
         for visual in scene.placement_visuals:
             key: _GroupKey = (visual.oriented_dimensions, visual.color_hex)
@@ -383,41 +380,87 @@ class SceneController:
             self._group_actors[key] = actor
             self._actor_group_by_id[id(actor)] = key
 
-            # Acumular centros por caja para el label colectivo
-            sku = visuals[0].sku
-            for visual in visuals:
-                rec = self._box_records[visual.sequence_number]
-                _label_points.append(rec.center)
-                _label_texts.append(sku)
+            pass  # labels se crean en el bloque vtkTextActor3D más abajo
 
         dark = self._theme != THEME_LIGHT
-        # Un único add_point_labels con tolerance=0 (sin deduplicación) para
-        # todas las cajas: un actor/mapper compartido es mucho más liviano que
-        # N vtkBillboardTextActor3D individuales.  always_visible=True evita
-        # que cajas tapadas pierdan su etiqueta al girar la escena.
-        if _label_points:
-            text_color = "#E0E0E0" if dark else "#111111"
-            shape_color = "#1e2229" if dark else "#FFFFFF"
-            try:
-                label_actor = self._plotter.add_point_labels(
-                    np.array(_label_points, dtype=float),
-                    _label_texts,
-                    show_points=False,
-                    always_visible=True,
-                    bold=True,
-                    font_size=9,
-                    text_color=text_color,
-                    fill_shape=True,
-                    shape_color=shape_color,
-                    shape_opacity=0.75,
-                    margin=2,
-                    tolerance=0,
-                    reset_camera=False,
-                    name="viewer-sku-labels",
-                )
-                self._label_actors.append(label_actor)
-            except Exception:  # noqa: BLE001
-                pass
+
+        # vtkTextActor3D: quad real en 3D con orientación fija (no billboard).
+        # El texto aparece "impreso" en la cara frontal de cada caja — visible
+        # al mirar desde la puerta del contenedor, invisible desde atrás (como
+        # un sticker real).  Un actor compartido por SKU sería más ligero pero
+        # no permite escalar por tamaño de caja; con cientos de cajas el coste
+        # sigue siendo aceptable porque VTK reutiliza la textura del texto.
+        try:
+            import vtk as _vtk  # noqa: PLC0415
+        except ImportError:
+            _vtk = None  # type: ignore[assignment]
+
+        if _vtk is not None:
+            seq_to_sku = {v.sequence_number: v.sku for v in scene.placement_visuals}
+            # Tamaño de fuente alto → textura de alta resolución; la escala del
+            # actor la reduce a las dimensiones reales de la cara en cm.
+            _FONT = 48
+
+            for seq_num, rec in self._box_records.items():
+                sku = seq_to_sku.get(seq_num, "")
+                if not sku:
+                    continue
+                cx, cy, cz = rec.center
+                dx, dy, dz = rec.lengths
+
+                # Cara frontal: la que mira hacia el frente del contenedor (+X).
+                # El texto queda en el plano YZ (normal +X) gracias a RotateY(90°).
+                face_x = cx + dx / 2.0 + 0.15   # ligeramente por delante
+                face_h = dz   # alto de la cara
+                face_w = dy   # ancho de la cara
+
+                # ¿El texto va horizontal (ancho >= alto) o vertical (alto > ancho)?
+                # vtkTextActor3D por defecto: texto horizontal en plano XY.
+                # Tras RotateY(90°), el eje horizontal del texto queda en Z del mundo.
+                # Si face_h > face_w, girar el texto 90° adicionales para que quede
+                # horizontal en el mundo Y (vertical en el plano de la cara).
+                rotate_text_vertical = face_h > face_w * 1.5
+
+                # Dimensiones útiles de la cara para la escala
+                target_dim = face_h if rotate_text_vertical else face_w
+                # Estimación de ancho natural del texto a _FONT px:
+                # cada carácter ≈ _FONT * 0.55 px de ancho
+                natural_w_px = _FONT * 0.55 * len(sku)
+                scale = target_dim * 0.72 / max(natural_w_px, 1.0)
+
+                try:
+                    ta = _vtk.vtkTextActor3D()
+                    ta.SetInput(sku)
+                    ta.SetPosition(face_x, cy, cz)
+
+                    # Girar actor: texto en plano YZ, mirando hacia +X
+                    if rotate_text_vertical:
+                        # Horizontal en mundo → texto vertical en cara: Ry(90) + Rz(90)
+                        ta.SetOrientation(0.0, 90.0, 90.0)
+                    else:
+                        # Texto horizontal en cara: solo Ry(90)
+                        ta.SetOrientation(0.0, 90.0, 0.0)
+
+                    ta.SetScale(scale, scale, 1.0)
+
+                    tp = ta.GetTextProperty()
+                    tp.SetFontSize(_FONT)
+                    tp.SetBold(True)
+                    tp.SetJustificationToCentered()
+                    tp.SetVerticalJustificationToCentered()
+                    if dark:
+                        tp.SetColor(0.94, 0.94, 0.94)
+                        tp.SetBackgroundColor(0.10, 0.11, 0.15)
+                    else:
+                        tp.SetColor(0.04, 0.04, 0.04)
+                        tp.SetBackgroundColor(0.98, 0.98, 0.98)
+                    tp.SetBackgroundOpacity(0.82)
+
+                    self._plotter.add_actor(ta, reset_camera=False)
+                    self._sku_label_actors.setdefault(sku, []).append(ta)
+                    self._label_actors.append(ta)
+                except Exception:  # noqa: BLE001
+                    pass
 
     def _build_axes(self, scene: SceneModel) -> None:
         colors = theme_colors(self._theme)
@@ -470,8 +513,7 @@ class SceneController:
             actor = self._group_actors.get(key)
             if actor is not None:
                 actor.visibility = visible
-        label_actor = self._sku_label_actors.get(sku)
-        if label_actor is not None:
+        for label_actor in self._sku_label_actors.get(sku, []):
             label_actor.SetVisibility(1 if visible else 0)
         self._plotter.render()
 
