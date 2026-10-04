@@ -157,7 +157,7 @@ class SceneController:
         self._box_records: dict[int, _BoxRecord] = {}  # sequence_number -> centro/longitudes
         self._group_members: dict[_GroupKey, list[int]] = {}  # clave de grupo -> sequence_number
         self._sku_groups: dict[str, list[_GroupKey]] = {}  # sku -> claves de grupo que le pertenecen
-        self._sku_label_actors: dict[str, Any] = {}  # sku -> actor de labels por caja
+        self._sku_label_actors: dict[str, Any] = {}  # sku -> vtkBillboardTextActor3D
         self._selection_actor: Any | None = None  # contorno de resalte, independiente del grupo
         self._container_actors: list[Any] = []
         self._axes_actors: list[Any] = []
@@ -352,9 +352,13 @@ class SceneController:
                 if key not in self._sku_groups[visual.sku]:
                     self._sku_groups[visual.sku].append(key)
 
-        # labels por SKU: un punto por caja, un actor por SKU
-        # always_visible=True para que los labels atraviesen la geometría y sean siempre legibles
-        sku_centers: dict[str, list[tuple[float, float, float]]] = {}
+        # Un label por SKU: centroide XY, posicionado sobre la caja más alta del grupo.
+        # VTK deduplica labels que se proyectan al mismo píxel, por lo que 1500 labels
+        # superpuestos quedan reducidos a cero visibles. Un solo punto por SKU evita eso.
+        sku_sum_x: dict[str, float] = {}
+        sku_sum_y: dict[str, float] = {}
+        sku_max_top_z: dict[str, float] = {}
+        sku_count: dict[str, int] = {}
 
         for group_index, (key, visuals) in enumerate(groups.items()):
             _dimensions, color_hex = key
@@ -386,33 +390,48 @@ class SceneController:
 
             sku = visuals[0].sku
             for visual in visuals:
-                sku_centers.setdefault(sku, []).append(
-                    self._box_records[visual.sequence_number].center
-                )
+                rec = self._box_records[visual.sequence_number]
+                cx, cy, cz = rec.center
+                top_z = cz + rec.lengths[2] / 2
+                sku_sum_x[sku] = sku_sum_x.get(sku, 0.0) + cx
+                sku_sum_y[sku] = sku_sum_y.get(sku, 0.0) + cy
+                sku_max_top_z[sku] = max(sku_max_top_z.get(sku, top_z), top_z)
+                sku_count[sku] = sku_count.get(sku, 0) + 1
 
         dark = self._theme != THEME_LIGHT
-        shape_color = "#1E2028" if dark else "#FFFFFF"
-        text_color = "#E0E0E0" if dark else "#202020"
-        for sku_idx, (sku, centers) in enumerate(sku_centers.items()):
-            try:
-                label_actor = self._plotter.add_point_labels(
-                    np.array(centers, dtype=float),
-                    [sku] * len(centers),
-                    font_size=7,
-                    bold=False,
-                    always_visible=True,
-                    show_points=False,
-                    shape="rounded_box",
-                    shape_color=shape_color,
-                    shape_opacity=0.65,
-                    text_color=text_color,
-                    name=f"viewer-box-label-{sku_idx}",
-                )
-                if label_actor is not None:
-                    self._sku_label_actors[sku] = label_actor
-                    self._label_actors.append(label_actor)
-            except Exception:  # noqa: BLE001 - las etiquetas son decorativas; nunca bloquean la carga
-                pass
+        # vtkBillboardTextActor3D: siempre mira a la cámara, no sufre oclusión
+        # ni deduplicación de VTK (problemas que afectaban a add_point_labels).
+        try:
+            import vtk as _vtk  # noqa: PLC0415
+        except ImportError:
+            _vtk = None  # type: ignore[assignment]
+
+        if _vtk is not None:
+            for sku in sku_count:
+                n = sku_count[sku]
+                cx = sku_sum_x[sku] / n
+                cy = sku_sum_y[sku] / n
+                cz = sku_max_top_z[sku]
+                try:
+                    text_actor = _vtk.vtkBillboardTextActor3D()
+                    text_actor.SetInput(sku)
+                    text_actor.SetPosition(cx, cy, cz)
+                    tp = text_actor.GetTextProperty()
+                    tp.SetFontSize(13)
+                    tp.SetBold(True)
+                    tp.SetJustificationToCentered()
+                    if dark:
+                        tp.SetColor(0.88, 0.88, 0.88)
+                        tp.SetBackgroundColor(0.12, 0.13, 0.16)
+                    else:
+                        tp.SetColor(0.08, 0.08, 0.08)
+                        tp.SetBackgroundColor(1.0, 1.0, 1.0)
+                    tp.SetBackgroundOpacity(0.80)
+                    self._plotter.add_actor(text_actor, reset_camera=False)
+                    self._sku_label_actors[sku] = text_actor
+                    self._label_actors.append(text_actor)
+                except Exception:  # noqa: BLE001
+                    pass
 
     def _build_axes(self, scene: SceneModel) -> None:
         colors = theme_colors(self._theme)

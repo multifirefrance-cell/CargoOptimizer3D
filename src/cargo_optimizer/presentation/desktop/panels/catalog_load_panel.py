@@ -40,6 +40,9 @@ from cargo_optimizer.domain.enums import PackageType
 from cargo_optimizer.domain.load_unit import DEFAULT_MAX_STACK_COUNT, LoadUnit
 from cargo_optimizer.infrastructure.database.exceptions import RepositoryError
 from cargo_optimizer.infrastructure.database.repositories import ProductCatalogRepository
+from cargo_optimizer.presentation.desktop.dialogs.catalog_product_editor_dialog import (
+    CatalogProductEditorDialog,
+)
 from cargo_optimizer.presentation.desktop.dialogs.induprox_sku_picker_dialog import (
     _SKUS as _INDUPROX_SKUS,
     _SkuDef,
@@ -237,6 +240,7 @@ class CatalogLoadPanel(QWidget):
         self._table.setColumnWidth(3, 105)
         self._table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._table.setMinimumHeight(80)  # permite que el splitter encoja el panel si falta espacio
+        self._table.cellDoubleClicked.connect(self._on_row_double_clicked)
 
         # ── Layout ───────────────────────────────────────────────────────
         top_row = QHBoxLayout()
@@ -370,6 +374,27 @@ class CatalogLoadPanel(QWidget):
                     self._repository.add(replace(updated, id=uuid4()))
             except RepositoryError as exc:
                 QMessageBox.warning(self, "Error al guardar color", str(exc))
+
+    def _on_row_double_clicked(self, row: int, _col: int) -> None:
+        if row >= len(self._units) or self._repository is None:
+            return
+        unit = self._units[row]
+        existing_colors = tuple(u.color_hex for i, u in enumerate(self._units) if i != row)
+        dialog = CatalogProductEditorDialog(
+            self, load_unit=unit, existing_colors=existing_colors,
+            image_folder=self._repository.image_dir,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        updated = dialog.result_load_unit()
+        if updated is None:
+            return
+        try:
+            self._repository.update(updated)
+        except RepositoryError as exc:
+            QMessageBox.warning(self, "Error al guardar", str(exc))
+            return
+        self._reload()
 
     def _on_add_clicked(self) -> None:
         for unit, spin in zip(self._units, self._qty_spins):

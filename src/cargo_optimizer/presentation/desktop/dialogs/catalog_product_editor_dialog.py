@@ -12,10 +12,13 @@ título parametrizable con `title`/`title_when_editing`.
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Sequence
+from pathlib import Path
 from uuid import UUID, uuid4
 
-from PySide6.QtGui import QColor
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QColor, QFileDialog, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -45,6 +48,53 @@ from cargo_optimizer.domain.load_unit import (
     DEFAULT_ORIENTATION_CODES,
     LoadUnit,
 )
+
+_IMAGE_EXTS = ("*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp")
+_IMAGE_SIZE = 140
+
+
+class _ImageLabel(QLabel):
+    """QLabel cuadrado clicable para mostrar/seleccionar la imagen del producto."""
+
+    clicked = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(_IMAGE_SIZE, _IMAGE_SIZE)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip("Click para seleccionar imagen del producto")
+        self._show_placeholder()
+
+    def _show_placeholder(self) -> None:
+        self.setPixmap(QPixmap())
+        self.setText("📷\nAgregar\nimagen")
+        self.setStyleSheet(
+            "QLabel { border: 2px dashed #B0B5BC; border-radius: 8px; "
+            "color: #999; font-size: 9pt; background: #F5F7FA; }"
+        )
+
+    def load_image(self, path: Path) -> bool:
+        px = QPixmap(str(path))
+        if px.isNull():
+            return False
+        self.setText("")
+        self.setStyleSheet(
+            "QLabel { border: 2px solid #B0B5BC; border-radius: 8px; background: #F5F7FA; }"
+        )
+        self.setPixmap(
+            px.scaled(_IMAGE_SIZE, _IMAGE_SIZE, Qt.AspectRatioMode.KeepAspectRatio,
+                      Qt.TransformationMode.SmoothTransformation)
+        )
+        return True
+
+    def clear_image(self) -> None:
+        self._show_placeholder()
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
 
 _PACKAGE_TYPE_LABELS: dict[PackageType, str] = {
     PackageType.INDIVIDUAL: "Individual",
@@ -164,12 +214,19 @@ class CatalogProductEditorDialog(QDialog):
         title: str = "Nuevo producto de catálogo",
         title_when_editing: str = "Editar producto de catálogo",
         existing_colors: Sequence[str] = (),
+        image_folder: Path | None = None,
     ) -> None:
         super().__init__(parent)
         self._editing_id: UUID | None = load_unit.id if load_unit is not None else None
         self._result_load_unit: LoadUnit | None = None
+        self._image_folder = image_folder
+        self._image_src_path: Path | None = None  # ruta del archivo seleccionado por el usuario
         self.setWindowTitle(title_when_editing if load_unit is not None else title)
-        self.resize(520, 700)
+        self.resize(520, 720)
+
+        # ── Widget de imagen (arriba del formulario) ─────────────────────
+        self._image_label = _ImageLabel(self)
+        self._image_label.clicked.connect(self._on_image_clicked)
 
         self._sku_edit = QLineEdit(self)
         self._name_edit = QLineEdit(self)
@@ -267,9 +324,19 @@ class CatalogProductEditorDialog(QDialog):
         return spin
 
     def _build_layout(self) -> None:
+        # ── Header: imagen a la izquierda, SKU+Nombre a la derecha ────────
+        sku_name_form = QFormLayout()
+        sku_name_form.setSpacing(8)
+        sku_name_form.addRow("SKU", self._sku_edit)
+        sku_name_form.addRow("Nombre", self._name_edit)
+
+        header = QHBoxLayout()
+        header.setSpacing(14)
+        header.addWidget(self._image_label)
+        header.addLayout(sku_name_form, 1)
+
+        # ── Formulario principal (sin SKU/Nombre, ya están arriba) ────────
         form = QFormLayout()
-        form.addRow("SKU", self._sku_edit)
-        form.addRow("Nombre", self._name_edit)
         form.addRow("Largo", self._length_spin)
         form.addRow("Ancho", self._width_spin)
         form.addRow("Alto", self._height_spin)
@@ -313,12 +380,48 @@ class CatalogProductEditorDialog(QDialog):
         scroll.setFrameShape(QScrollArea.Shape.NoFrame)
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 8)
+        layout.setSpacing(10)
+        layout.addLayout(header)
         layout.addWidget(scroll, 1)
         layout.addWidget(self._button_box)
 
     def _on_is_extinguisher_toggled(self, checked: bool) -> None:
         self._extinguisher_agent_combo.setEnabled(checked)
         self._extinguisher_nominal_spin.setEnabled(checked)
+
+    # ── Imagen del producto ───────────────────────────────────────────────
+
+    @staticmethod
+    def _find_existing_image(image_folder: Path, sku: str) -> Path | None:
+        for ext in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
+            p = image_folder / f"{sku}{ext}"
+            if p.exists():
+                return p
+        return None
+
+    def _on_image_clicked(self) -> None:
+        filter_str = "Imágenes (" + " ".join(_IMAGE_EXTS) + ")"
+        path_str, _ = QFileDialog.getOpenFileName(self, "Seleccionar imagen del producto", "", filter_str)
+        if not path_str:
+            return
+        path = Path(path_str)
+        if self._image_label.load_image(path):
+            self._image_src_path = path
+        else:
+            QMessageBox.warning(self, "Imagen inválida", "No se pudo cargar el archivo seleccionado.")
+
+    def _save_image(self, sku: str) -> None:
+        if self._image_src_path is None or self._image_folder is None:
+            return
+        self._image_folder.mkdir(parents=True, exist_ok=True)
+        dest = self._image_folder / f"{sku}{self._image_src_path.suffix.lower()}"
+        # Eliminar imágenes previas de ese SKU con otras extensiones
+        for ext in (".png", ".jpg", ".jpeg", ".webp", ".bmp"):
+            old = self._image_folder / f"{sku}{ext}"
+            if old.exists() and old != dest:
+                old.unlink(missing_ok=True)
+        shutil.copy2(self._image_src_path, dest)
 
     def _populate_from(self, load_unit: LoadUnit) -> None:
         self._sku_edit.setText(load_unit.sku)
@@ -348,6 +451,10 @@ class CatalogProductEditorDialog(QDialog):
             )
         self._palette_widget.select(load_unit.color_hex)
         self._notes_edit.setPlainText(load_unit.notes)
+        if self._image_folder is not None:
+            existing = self._find_existing_image(self._image_folder, load_unit.sku)
+            if existing is not None:
+                self._image_label.load_image(existing)
 
     def _build_load_unit(self) -> LoadUnit:
         allowed_codes = tuple(
@@ -404,6 +511,7 @@ class CatalogProductEditorDialog(QDialog):
         except DomainValidationError as exc:
             QMessageBox.warning(self, "Datos inválidos", str(exc))
             return
+        self._save_image(unit.sku)
         self._result_load_unit = unit
         self.accept()
 

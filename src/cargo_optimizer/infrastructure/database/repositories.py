@@ -151,6 +151,10 @@ class ProductCatalogRepository:
     def __init__(self, db_manager: DatabaseManager) -> None:
         self._db = db_manager
 
+    @property
+    def image_dir(self) -> Path:
+        return self._db.db_path.parent / "product_images"
+
     def add(self, load_unit: LoadUnit) -> LoadUnit:
         now = datetime.now(UTC)
         with self._db.session_scope() as session:

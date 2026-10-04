@@ -22,7 +22,6 @@ from collections import defaultdict
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QComboBox,
-    QFormLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -84,10 +83,17 @@ class LoadingSpaceSummaryPanel(QWidget):
         self._profile_combo.currentTextChanged.connect(self._on_profile_changed)
         self._change_button.clicked.connect(self.change_requested)
 
-        form = QFormLayout()
-        form.setSpacing(6)
-        form.addRow("Tipo", self._type_combo)
-        form.addRow("Perfil", self._profile_combo)
+        type_label = QLabel("Tipo", self)
+        type_label.setStyleSheet("font-weight: 600;")
+        profile_label = QLabel("Perfil", self)
+        profile_label.setStyleSheet("font-weight: 600;")
+
+        form = QHBoxLayout()
+        form.setSpacing(8)
+        form.addWidget(type_label)
+        form.addWidget(self._type_combo, 1)
+        form.addWidget(profile_label)
+        form.addWidget(self._profile_combo, 2)
 
         dims_sub = QVBoxLayout()
         dims_sub.setSpacing(1)
