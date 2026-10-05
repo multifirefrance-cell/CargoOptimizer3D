@@ -415,29 +415,24 @@ class SceneController:
             face_w = dx  # ancho de la cara frontal (eje X)
 
             try:
-                # Text3D crea geometría en plano XY; depth mínimo = plano
+                # pv.Text3D ya entrega el texto centrado en el origen (XY).
+                # Cadena verificada con test script:
+                #   scale → rotate_x(90) → translate(cx, face_y, cz)
+                # Resultado: texto plano en XZ, normal=-Y, centrado en la cara.
                 text_poly = _pv.Text3D(sku, depth=0.001)
-                b = text_poly.bounds          # (xmin,xmax, ymin,ymax, zmin,zmax)
-                tw = b[1] - b[0]             # ancho del texto (eje X)
-                th = b[3] - b[2]             # alto del texto (eje Y, antes de rotar)
+                b = text_poly.bounds
+                tw = b[1] - b[0]
                 if tw < 1e-6:
                     continue
 
-                # Escalar para ocupar ~70 % del ancho de la cara
                 scale = (face_w * 0.70) / tw
+                # scale preserva el centrado en origen
                 text_poly = text_poly.scale(scale, inplace=False)
-
-                # Rotar 90° en X: plano XY → plano XZ, normal apunta −Y (frente)
+                # rotate_x(90): (x,y,0)→(x,0,y); normal(0,0,1)→(0,-1,0)=-Y
                 text_poly = text_poly.rotate_x(90, inplace=False)
-
-                # Centrar en la cara frontal de la caja
-                # Tras rotate_x(90): ancho→X, alto→Z, profundidad→−Y
+                # texto centrado en origen → mover al centro de la cara frontal
                 text_poly = text_poly.translate(
-                    [
-                        cx - (tw * scale) / 2.0,
-                        cy - dy / 2.0 - 0.001,
-                        cz - (th * scale) / 2.0,
-                    ],
+                    [cx, cy - dy / 2.0 - 0.001, cz],
                     inplace=False,
                 )
 
