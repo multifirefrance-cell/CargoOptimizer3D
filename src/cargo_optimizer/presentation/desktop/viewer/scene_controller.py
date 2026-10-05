@@ -384,11 +384,15 @@ class SceneController:
 
         dark = self._theme != THEME_LIGHT
 
-        # Un label por SKU usando add_point_labels de PyVista (overlay 2D que
-        # siempre mira hacia la cámara — "de cara al usuario" en cualquier vista).
+        # Un label por SKU: geometría 3D plana (pv.Text3D) en la cara frontal
+        # de la caja más visible — aspecto "impreso" como en EasyCargo.
+        import logging as _logging  # noqa: PLC0415
+        import pyvista as _pv       # noqa: PLC0415
+
+        _log = _logging.getLogger(__name__)
         seq_to_sku = {v.sequence_number: v.sku for v in scene.placement_visuals}
 
-        # Elegir la caja más al frente (-Y mínima) y más arriba por SKU
+        # Elegir la caja más al frente (-Y mínima), desempate por Z y X
         sku_best: dict[str, _BoxRecord] = {}
         for seq_num, rec in self._box_records.items():
             sku = seq_to_sku.get(seq_num, "")
@@ -403,34 +407,50 @@ class SceneController:
                 if score > -bc[1] * 1000.0 + bc[2] * 0.5 + bc[0] * 0.3:
                     sku_best[sku] = rec
 
-        if sku_best:
-            import numpy as _np  # noqa: PLC0415
+        text_color = (0.94, 0.94, 0.94) if dark else (0.05, 0.05, 0.05)
 
-            pts: list[list[float]] = []
-            lbls: list[str] = []
-            for sku, rec in sorted(sku_best.items()):
-                cx, cy, cz = rec.center
-                _, dy, _ = rec.lengths
-                # Punto en el centro de la cara frontal, ligeramente exterior
-                pts.append([cx, cy - dy / 2.0 - 0.02, cz])
-                lbls.append(sku)
+        for sku, rec in sku_best.items():
+            cx, cy, cz = rec.center
+            dx, dy, dz = rec.lengths
+            face_w = dx  # ancho de la cara frontal (eje X)
 
-            text_color = (0.94, 0.94, 0.94) if dark else (0.04, 0.04, 0.04)
-            bg_color = (0.10, 0.11, 0.15) if dark else (0.97, 0.97, 0.97)
-            actor = self._plotter.add_point_labels(
-                _np.array(pts, dtype=float),
-                lbls,
-                font_size=16,
-                bold=True,
-                text_color=text_color,
-                background_color=bg_color,
-                shape_opacity=0.85,
-                always_visible=True,
-                reset_camera=False,
-            )
-            self._label_actors.append(actor)
-            for sku in sku_best:
+            try:
+                # Text3D crea geometría en plano XY; depth mínimo = plano
+                text_poly = _pv.Text3D(sku, depth=0.001)
+                b = text_poly.bounds          # (xmin,xmax, ymin,ymax, zmin,zmax)
+                tw = b[1] - b[0]             # ancho del texto (eje X)
+                th = b[3] - b[2]             # alto del texto (eje Y, antes de rotar)
+                if tw < 1e-6:
+                    continue
+
+                # Escalar para ocupar ~70 % del ancho de la cara
+                scale = (face_w * 0.70) / tw
+                text_poly = text_poly.scale(scale, inplace=False)
+
+                # Rotar 90° en X: plano XY → plano XZ, normal apunta −Y (frente)
+                text_poly = text_poly.rotate_x(90, inplace=False)
+
+                # Centrar en la cara frontal de la caja
+                # Tras rotate_x(90): ancho→X, alto→Z, profundidad→−Y
+                text_poly = text_poly.translate(
+                    [
+                        cx - (tw * scale) / 2.0,
+                        cy - dy / 2.0 - 0.001,
+                        cz - (th * scale) / 2.0,
+                    ],
+                    inplace=False,
+                )
+
+                actor = self._plotter.add_mesh(
+                    text_poly,
+                    color=text_color,
+                    reset_camera=False,
+                    render=False,
+                )
                 self._sku_label_actors.setdefault(sku, []).append(actor)
+                self._label_actors.append(actor)
+            except Exception:  # noqa: BLE001
+                _log.exception("SKU label failed for %s", sku)
 
     def _build_axes(self, scene: SceneModel) -> None:
         colors = theme_colors(self._theme)
